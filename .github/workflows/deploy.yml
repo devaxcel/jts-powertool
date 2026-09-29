@@ -31,7 +31,7 @@ jobs:
             cd ~/jts-powertool || exit 1
 
             echo "📥 Pulling latest changes from main branch..."
-            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/AbdulAleemDev/jts-powertool.git
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/devaxcel/jts-powertool.git
             git pull origin main
 
             echo "📦 Installing updated dependencies..."
