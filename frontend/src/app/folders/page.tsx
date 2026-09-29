@@ -26,6 +26,7 @@ import {
   getAuthoritativeWorkspace,
   AUTHORITATIVE_CHANNEL_NAMES,
 } from "@/lib/api";
+import { DataTable } from "@/components/DataTable";
 import { ChannelFolder, ChannelProject } from "@/lib/types";
 import { PageHeader, Alert, EmptyState, LoadingState, SectionTitle, btn } from "@/components/ui";
 
@@ -342,69 +343,80 @@ export default function FoldersPage() {
                   }
                 />
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm border-b border-gray-300">
-                      <tr>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Client folder</th>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Description</th>
-                        <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Channels</th>
-                        <th className="p-3 font-semibold text-right bg-[#088ADA] text-white">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {displayedFolders.map((folder, idx) => (
-                        <tr
-                          key={folder.id}
-                          onClick={() => router.push(`/folders/${folder.id}`)}
-                          className={`cursor-pointer transition hover:bg-gray-200 ${idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"}`}
-                        >
-                          <td className="p-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="h-8 w-8 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] shrink-0">
-                                <Folder className="h-4 w-4" />
-                              </div>
-                              <span className="text-sm font-semibold text-gray-800">{folder.name}</span>
+                <div className="rounded-xl border border-gray-200 shadow-sm overflow-hidden bg-white">
+                  <DataTable
+                    rows={displayedFolders}
+                    rowKey={(folder) => folder.id}
+                    itemLabel="clients"
+                    searchPlaceholder="Search client"
+                    initialSort={{ key: "name", dir: "asc" }}
+                    onRowClick={(folder) => router.push(`/folders/${folder.id}`)}
+                    columns={[
+                      {
+                        key: "name",
+                        header: "Client folder",
+                        sortValue: (folder) => (folder.name || "").toLowerCase(),
+                        render: (folder) => (
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-8 w-8 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] shrink-0">
+                              <Folder className="h-4 w-4" />
                             </div>
-                          </td>
-                          <td className="p-3 text-xs text-gray-600 max-w-xs truncate">
-                            {folder.description || <span className="italic text-gray-400">No description</span>}
-                          </td>
-                          <td className="p-3 text-center">
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-[#0778bd] bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-full">
-                              <Hash className="h-3 w-3" />
-                              {folder.channel_count}
-                            </span>
-                          </td>
-                          <td className="p-3 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {isMasterAdmin && (
-                                <>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); openEditFolderModal(folder); }}
-                                    className="p-1.5 text-gray-500 hover:text-[#0778bd] hover:bg-gray-300 rounded-lg transition"
-                                    title="Rename or edit this folder"
-                                    aria-label="Edit folder"
-                                  >
-                                    <Edit3 className="h-3.5 w-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder); }}
-                                    className="p-1.5 text-gray-500 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition"
-                                    title="Delete this folder (its channels are kept, just unassigned)"
-                                    aria-label="Delete folder"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </>
-                              )}
-                              <ChevronRight className="h-4 w-4 text-gray-400 ml-1" />
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            <span className="text-sm font-semibold text-gray-800">{folder.name}</span>
+                          </div>
+                        ),
+                      },
+                      {
+                        key: "description",
+                        header: "Description",
+                        className: "text-xs text-gray-600 max-w-xs truncate",
+                        render: (folder) => folder.description || <span className="italic text-gray-400">No description</span>,
+                      },
+                      {
+                        key: "channel_count",
+                        header: "Channels",
+                        align: "center",
+                        searchValue: () => "",
+                        render: (folder) => (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-[#0778bd] bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-full">
+                            <Hash className="h-3 w-3" />
+                            {folder.channel_count}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: "actions",
+                        header: "Actions",
+                        sortable: false,
+                        searchValue: () => "",
+                        align: "right",
+                        render: (folder) => (
+                          <div className="flex items-center justify-end gap-1">
+                            {isMasterAdmin && (
+                              <>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openEditFolderModal(folder); }}
+                                  className="p-1.5 text-gray-500 hover:text-[#0778bd] hover:bg-gray-200 rounded-lg transition"
+                                  title="Rename or edit this folder"
+                                  aria-label="Edit folder"
+                                >
+                                  <Edit3 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder); }}
+                                  className="p-1.5 text-gray-500 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition"
+                                  title="Delete this folder (its channels are kept, just unassigned)"
+                                  aria-label="Delete folder"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            )}
+                            <ChevronRight className="h-4 w-4 text-gray-400 ml-1" />
+                          </div>
+                        ),
+                      },
+                    ]}
+                  />
                 </div>
               )}
             </div>
@@ -429,67 +441,97 @@ export default function FoldersPage() {
                   </button>
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm border-b border-gray-300">
-                      <tr>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Workspace ID</th>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Slack workspace</th>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Channel or DM</th>
-                        <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Type</th>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Assign to client</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {dedupedUnassignedChannels.map((channel, idx) => {
-                        const isDm = isDmChannel(channel.channel_name, channel.channel_id);
-                        const isAssigning = assigningChannelId === channel.channel_id;
-                        return (
-                          <tr key={`${channel.workspace_id || ''}-${channel.channel_id}-${idx}`} className={`transition hover:bg-gray-200 ${idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"}`}>
-                            <td className="p-3 font-mono text-xs">
-                              <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-mono font-bold text-[10px] border border-blue-200">
-                                {channel.workspace_id || "T5ZMF56H5"}
-                              </span>
-                            </td>
-                            <td className="p-3 text-xs font-bold text-gray-900">{channel.workspace_name || "Axcel World"}</td>
-                            <td className="p-3">
-                              <div className="flex items-center gap-2.5">
-                                <div className="h-7 w-7 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] shrink-0">
-                                  {isDm ? <AtSign className="h-3.5 w-3.5" /> : <Hash className="h-3.5 w-3.5" />}
-                                </div>
-                                <div>
-                                  <div className="text-sm font-semibold text-gray-800">{channel.channel_name}</div>
-                                  <div className="font-mono text-[10px] text-gray-400">{channel.channel_id}</div>
-                                </div>
+                <div className="rounded-xl border border-gray-200 shadow-sm overflow-hidden bg-white">
+                  <DataTable
+                    rows={dedupedUnassignedChannels}
+                    rowKey={(channel, idx) => `${channel.workspace_id || ""}-${channel.channel_id}-${idx}`}
+                    itemLabel="channels"
+                    initialPageSize={10}
+                    searchPlaceholder="Search channel or workspace"
+                    initialSort={{ key: "channel_name", dir: "asc" }}
+                    columns={[
+                      {
+                        key: "workspace_id",
+                        header: "Workspace ID",
+                        render: (channel) => (
+                          <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 font-mono font-bold text-[10px] border border-blue-200">
+                            {channel.workspace_id || "—"}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: "workspace_name",
+                        header: "Slack workspace",
+                        className: "text-xs font-semibold text-gray-900",
+                        render: (channel) => channel.workspace_name || "—",
+                      },
+                      {
+                        key: "channel_name",
+                        header: "Channel or DM",
+                        sortValue: (channel) => (channel.channel_name || "").toLowerCase(),
+                        searchValue: (channel) => `${channel.channel_name || ""} ${channel.channel_id}`,
+                        render: (channel) => {
+                          const isDm = isDmChannel(channel.channel_name, channel.channel_id);
+                          return (
+                            <div className="flex items-center gap-2.5">
+                              <div className="h-7 w-7 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] shrink-0">
+                                {isDm ? <AtSign className="h-3.5 w-3.5" /> : <Hash className="h-3.5 w-3.5" />}
                               </div>
-                            </td>
-                            <td className="p-3 text-center">
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${isDm ? "bg-gray-100 text-[#088ADA]" : "bg-emerald-50 text-emerald-600 border border-emerald-200"}`}>
-                                {isDm ? "DM" : "Channel"}
-                              </span>
-                            </td>
-                            <td className="p-3">
-                              <select
-                                defaultValue=""
-                                disabled={isAssigning || folders.length === 0}
-                                onChange={(e) => {
-                                  if (e.target.value) {
-                                    handleAssignChannelToFolder(channel.channel_id, Number(e.target.value));
-                                  }
-                                }}
-                                className="px-2.5 py-1 bg-white border border-gray-300 rounded-lg text-gray-800 text-xs focus:outline-none focus:border-[#088ADA] transition cursor-pointer w-full max-w-[180px]"
-                              >
-                                <option value="" disabled>{folders.length === 0 ? "Create a folder first" : "Choose a client..."}</option>
-                                {folders.map((f) => (
-                                  <option key={f.id} value={f.id}>{f.name}</option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                              <div>
+                                <div className="text-sm font-semibold text-gray-800">{channel.channel_name}</div>
+                                <div className="font-mono text-[10px] text-gray-400">{channel.channel_id}</div>
+                              </div>
+                            </div>
+                          );
+                        },
+                      },
+                      {
+                        key: "type",
+                        header: "Type",
+                        align: "center",
+                        sortValue: (channel) => (isDmChannel(channel.channel_name, channel.channel_id) ? "DM" : "Channel"),
+                        render: (channel) => {
+                          const isDm = isDmChannel(channel.channel_name, channel.channel_id);
+                          return (
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                isDm ? "bg-gray-100 text-[#088ADA]" : "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                              }`}
+                            >
+                              {isDm ? "DM" : "Channel"}
+                            </span>
+                          );
+                        },
+                      },
+                      {
+                        key: "assign",
+                        header: "Assign to client",
+                        sortable: false,
+                        searchValue: () => "",
+                        render: (channel) => (
+                          <select
+                            defaultValue=""
+                            disabled={assigningChannelId === channel.channel_id || folders.length === 0}
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                handleAssignChannelToFolder(channel.channel_id, Number(e.target.value));
+                              }
+                            }}
+                            className="px-2.5 py-1 bg-white border border-gray-300 rounded-lg text-gray-800 text-xs focus:outline-none focus:border-[#088ADA] transition cursor-pointer w-full max-w-[180px]"
+                          >
+                            <option value="" disabled>
+                              {folders.length === 0 ? "Create a folder first" : "Choose a client..."}
+                            </option>
+                            {folders.map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.name}
+                              </option>
+                            ))}
+                          </select>
+                        ),
+                      },
+                    ]}
+                  />
                 </div>
               )}
             </div>

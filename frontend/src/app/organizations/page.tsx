@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   Building2,
   Plus,
   RefreshCw,
-  Search,
   Mail,
   Phone,
   User,
@@ -21,6 +20,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { fetchOrganizations, updateOrganization, deleteOrganization } from "@/lib/api";
+import { DataTable } from "@/components/DataTable";
 import { Organization, formatLocalDateTime } from "@/lib/types";
 import { AddOrganizationModal } from "@/components/AddOrganizationModal";
 import { PageHeader, Alert, EmptyState, LoadingState, btn } from "@/components/ui";
@@ -31,7 +31,6 @@ export default function OrganizationsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   // Edit Organization State
@@ -83,20 +82,6 @@ export default function OrganizationsPage() {
     }
     loadData();
   }, [loadData, router]);
-
-  const filteredOrgs = useMemo(() => {
-    if (!searchQuery.trim()) return organizations;
-    const q = searchQuery.toLowerCase().trim();
-    return organizations.filter((org) => {
-      const matchId = String(org.id).includes(q);
-      const matchName = (org.name || "").toLowerCase().includes(q);
-      const matchPoc = (org.poc || "").toLowerCase().includes(q);
-      const matchEmail = (org.email || "").toLowerCase().includes(q);
-      const matchBilling = (org.billing_email || "").toLowerCase().includes(q);
-      const matchPhone = (org.phone || "").toLowerCase().includes(q);
-      return matchId || matchName || matchPoc || matchEmail || matchBilling || matchPhone;
-    });
-  }, [organizations, searchQuery]);
 
   // Open Edit Modal
   const handleOpenEdit = (org: Organization) => {
@@ -204,185 +189,169 @@ export default function OrganizationsPage() {
         </Alert>
       )}
 
-      {/* Search & Filter Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by name, contact person, email or phone"
-            className="w-full pl-9 pr-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#088ADA] focus:bg-white transition"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
-          <span className="px-2.5 py-1 rounded-lg bg-gray-100 border border-gray-200">
-            {filteredOrgs.length} {filteredOrgs.length === 1 ? "Organization" : "Organizations"}
-          </span>
-        </div>
-      </div>
-
-      {/* Organizations Table Container */}
+      {/* Organizations Table */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex-1 flex flex-col">
         {loading ? (
           <LoadingState label="Loading organizations..." />
-        ) : filteredOrgs.length === 0 ? (
+        ) : organizations.length === 0 ? (
           <EmptyState
             icon={Building}
-            title={searchQuery ? "No organizations match your search" : "No organizations yet"}
-            description={
-              searchQuery
-                ? "Check the spelling or search by name, contact person, email or phone."
-                : "Add your first client organization to start linking users and Slack channels to it."
-            }
+            title="No organizations yet"
+            description="Add your first client organization to start linking users and Slack channels to it."
             action={
-              !searchQuery && (
-                <button onClick={() => setShowAddModal(true)} className={btn.primary}>
-                  <Plus className="h-4 w-4" />
-                  <span>Add organization</span>
-                </button>
-              )
+              <button onClick={() => setShowAddModal(true)} className={btn.primary}>
+                <Plus className="h-4 w-4" />
+                <span>Add organization</span>
+              </button>
             }
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-gray-50 text-gray-500 text-[11px] uppercase tracking-wider sticky top-0 z-10 shadow-xs border-b border-gray-300">
-                <tr>
-                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500 w-20">ID</th>
-                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Organization</th>
-                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Contact person</th>
-                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Invoice email</th>
-                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Phone</th>
-                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Address</th>
-                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Added on</th>
-                  <th className="p-3.5 font-semibold text-right bg-gray-50 text-gray-500 w-28">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 text-xs text-gray-700">
-                {filteredOrgs.map((org, idx) => (
-                  <tr
-                    key={org.id}
-                    className={`transition hover:bg-gray-100 ${
-                      idx % 2 === 0 ? "bg-white" : "bg-[#f9fafb]"
-                    }`}
-                  >
-                    {/* Org ID */}
-                    <td className="p-3.5 font-mono font-bold text-gray-900">
-                      <span className="px-2.5 py-1 rounded-lg bg-gray-100 text-gray-800 border border-gray-200 font-mono text-xs">
-                        {org.id}
-                      </span>
-                    </td>
-
-                    {/* Organization Name */}
-                    <td className="p-3.5 font-semibold text-gray-900">
-                      <div className="flex items-center gap-2">
-                        <div className="h-7 w-7 rounded-lg bg-blue-50 text-[#088ADA] flex items-center justify-center font-bold border border-blue-100 shrink-0">
-                          <Building2 className="h-3.5 w-3.5" />
-                        </div>
-                        <span className="text-sm font-bold text-gray-900">{org.name}</span>
+          <DataTable
+            rows={organizations}
+            rowKey={(org) => org.id}
+            itemLabel="organizations"
+            searchPlaceholder="Search name, contact, email or phone"
+            initialSort={{ key: "name", dir: "asc" }}
+            columns={[
+              {
+                key: "id",
+                header: "ID",
+                headerClassName: "w-20",
+                render: (org) => (
+                  <span className="px-2.5 py-1 rounded-lg bg-gray-100 text-gray-800 border border-gray-200 font-mono text-xs font-bold">
+                    {org.id}
+                  </span>
+                ),
+              },
+              {
+                key: "name",
+                header: "Organization",
+                sortValue: (org) => (org.name || "").toLowerCase(),
+                render: (org) => (
+                  <div className="flex items-center gap-2">
+                    <div className="h-7 w-7 rounded-lg bg-blue-50 text-[#088ADA] flex items-center justify-center border border-blue-100 shrink-0">
+                      <Building2 className="h-3.5 w-3.5" />
+                    </div>
+                    <span className="text-sm font-bold text-gray-900">{org.name}</span>
+                  </div>
+                ),
+              },
+              {
+                key: "poc",
+                header: "Contact person",
+                sortValue: (org) => (org.poc || "").toLowerCase(),
+                searchValue: (org) => `${org.poc || ""} ${org.email || ""}`,
+                render: (org) => (
+                  <div className="space-y-0.5">
+                    {org.poc ? (
+                      <div className="flex items-center gap-1.5 font-medium text-gray-800">
+                        <User className="h-3 w-3 text-gray-400 shrink-0" />
+                        <span>{org.poc}</span>
                       </div>
-                    </td>
-
-                    {/* POC & Primary Email */}
-                    <td className="p-3.5">
-                      <div className="space-y-0.5">
-                        {org.poc ? (
-                          <div className="flex items-center gap-1.5 font-medium text-gray-800">
-                            <User className="h-3 w-3 text-gray-400 shrink-0" />
-                            <span>{org.poc}</span>
-                          </div>
-                        ) : (
-                          <span className="text-gray-400 italic">No POC</span>
-                        )}
-                        {org.email && (
-                          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 font-mono">
-                            <Mail className="h-3 w-3 text-gray-400 shrink-0" />
-                            <span>{org.email}</span>
-                          </div>
-                        )}
+                    ) : (
+                      <span className="text-gray-400 italic">Not set</span>
+                    )}
+                    {org.email && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-gray-500 font-mono">
+                        <Mail className="h-3 w-3 text-gray-400 shrink-0" />
+                        <span>{org.email}</span>
                       </div>
-                    </td>
-
-                    {/* Billing Email */}
-                    <td className="p-3.5 font-mono text-[11px] text-gray-600">
-                      {org.billing_email ? (
-                        <div className="flex items-center gap-1.5">
-                          <Mail className="h-3 w-3 text-emerald-500 shrink-0" />
-                          <span>{org.billing_email}</span>
-                        </div>
+                    )}
+                  </div>
+                ),
+              },
+              {
+                key: "billing_email",
+                header: "Invoice email",
+                className: "font-mono text-[11px] text-gray-600",
+                render: (org) =>
+                  org.billing_email ? (
+                    <div className="flex items-center gap-1.5">
+                      <Mail className="h-3 w-3 text-emerald-500 shrink-0" />
+                      <span>{org.billing_email}</span>
+                    </div>
+                  ) : (
+                    <span className="text-gray-400 italic font-sans">Same as contact email</span>
+                  ),
+              },
+              {
+                key: "phone",
+                header: "Phone",
+                className: "font-mono text-[11px] text-gray-600",
+                render: (org) =>
+                  org.phone ? (
+                    <div className="flex items-center gap-1.5">
+                      <Phone className="h-3 w-3 text-gray-400 shrink-0" />
+                      <span>{org.phone}</span>
+                    </div>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  ),
+              },
+              {
+                key: "address",
+                header: "Address",
+                searchValue: () => "",
+                className: "text-gray-600 max-w-xs",
+                render: (org) =>
+                  org.address ? (
+                    <div className="flex items-center gap-1.5" title={org.address}>
+                      <MapPin className="h-3 w-3 text-gray-400 shrink-0" />
+                      <span className="truncate">{org.address}</span>
+                    </div>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  ),
+              },
+              {
+                key: "created_at",
+                header: "Added on",
+                sortValue: (org) => (org.created_at ? new Date(org.created_at).getTime() : null),
+                searchValue: () => "",
+                className: "font-mono text-[11px] text-gray-500 whitespace-nowrap",
+                render: (org) =>
+                  org.created_at ? (
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="h-3 w-3 text-gray-400 shrink-0" />
+                      <span>{formatLocalDateTime(org.created_at)}</span>
+                    </div>
+                  ) : (
+                    "—"
+                  ),
+              },
+              {
+                key: "actions",
+                header: "Actions",
+                sortable: false,
+                searchValue: () => "",
+                align: "right",
+                headerClassName: "w-28",
+                render: (org) => (
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button
+                      onClick={() => handleOpenEdit(org)}
+                      className="p-1.5 rounded-lg text-gray-500 hover:text-[#088ADA] hover:bg-blue-50 transition"
+                      title="Edit organization"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteOrg(org)}
+                      disabled={deletingId === org.id}
+                      className="p-1.5 rounded-lg text-gray-500 hover:text-rose-600 hover:bg-rose-50 transition disabled:opacity-50"
+                      title="Delete organization"
+                    >
+                      {deletingId === org.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-rose-500" />
                       ) : (
-                        <span className="text-gray-400 italic">Same as primary</span>
+                        <Trash2 className="h-4 w-4" />
                       )}
-                    </td>
-
-                    {/* Phone */}
-                    <td className="p-3.5 font-mono text-[11px] text-gray-600">
-                      {org.phone ? (
-                        <div className="flex items-center gap-1.5">
-                          <Phone className="h-3 w-3 text-gray-400 shrink-0" />
-                          <span>{org.phone}</span>
-                        </div>
-                      ) : (
-                        <span className="text-gray-400 italic">—</span>
-                      )}
-                    </td>
-
-                    {/* Address */}
-                    <td className="p-3.5 text-gray-600 max-w-xs truncate" title={org.address || ""}>
-                      {org.address ? (
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="h-3 w-3 text-gray-400 shrink-0" />
-                          <span className="truncate">{org.address}</span>
-                        </div>
-                      ) : (
-                        <span className="text-gray-400 italic">—</span>
-                      )}
-                    </td>
-
-                    {/* Created Date */}
-                    <td className="p-3.5 font-mono text-[11px] text-gray-500 whitespace-nowrap">
-                      {org.created_at ? (
-                        <div className="flex items-center gap-1.5">
-                          <Calendar className="h-3 w-3 text-gray-400 shrink-0" />
-                          <span>{formatLocalDateTime(org.created_at)}</span>
-                        </div>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-
-                    {/* Actions (Edit / Delete) */}
-                    <td className="p-3.5 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => handleOpenEdit(org)}
-                          className="p-1.5 rounded-lg text-gray-500 hover:text-[#088ADA] hover:bg-blue-50 transition cursor-pointer"
-                          title="Edit Organization"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteOrg(org)}
-                          disabled={deletingId === org.id}
-                          className="p-1.5 rounded-lg text-gray-500 hover:text-rose-600 hover:bg-rose-50 transition disabled:opacity-50 cursor-pointer"
-                          title="Delete Organization"
-                        >
-                          {deletingId === org.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-rose-500" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </button>
+                  </div>
+                ),
+              },
+            ]}
+          />
         )}
       </div>
 

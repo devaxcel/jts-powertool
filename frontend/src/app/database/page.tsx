@@ -9,6 +9,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { fetchTables, fetchTableData, clearTableData, clearFullDatabase, deleteTableRow } from "@/lib/api";
+import { DataTable, Column } from "@/components/DataTable";
 import { TableInfo, TableColumn, formatLocalDateTime } from "@/lib/types";
 import { PageHeader, Alert, btn } from "@/components/ui";
 
@@ -320,82 +321,90 @@ export default function DatabasePage() {
                 <span className="font-sans">Choose a table on the left to see its rows.</span>
               </div>
             ) : (
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-[#088ADA] text-white text-[11px] uppercase tracking-wider sticky top-0 border-b border-gray-300 z-20 shadow-sm">
-                  <tr className="bg-[#088ADA]">
-                    {columns.map((col) => (
-                      <th key={col.name} className="p-3 font-bold whitespace-nowrap bg-[#088ADA] text-white">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-white">
-                            {col.name.toLowerCase() === "workspace_name" ? "Slack Workspace" : col.name}
+              <div className="bg-white">
+                <DataTable
+                  key={selectedTable}
+                  rows={filteredRows}
+                  rowKey={(_row, rIdx) => rIdx}
+                  searchable={false}
+                  itemLabel="rows"
+                  emptyMessage={<span className="font-sans">This table is empty.</span>}
+                  columns={[
+                    ...columns.map((col, cIdx): Column<any> => {
+                      const getVal = (row: any) => (Array.isArray(row) ? row[cIdx] : row ? row[col.name] : undefined);
+                      const isWsId = col.name.toLowerCase() === "workspace_id";
+                      const isWsName = col.name.toLowerCase() === "workspace_name";
+                      return {
+                        key: `${col.name}-${cIdx}`,
+                        header: (
+                          <span className="flex items-center gap-1.5">
+                            <span>{isWsName ? "Slack Workspace" : col.name}</span>
+                            <span className="text-[10px] text-gray-400 font-normal lowercase">({col.type})</span>
                           </span>
-                          <span className="text-[10px] text-gray-200 font-normal lowercase">({col.type})</span>
-                        </div>
-                      </th>
-                    ))}
-                    {hasIdColumn && (
-                      <th className="p-3 font-bold whitespace-nowrap bg-[#088ADA] text-white text-right">
-                        Actions
-                      </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {filteredRows.map((row, rIdx) => {
-                    const rowId = Array.isArray(row) ? row[0] : (row ? row.id : undefined);
-                    return (
-                      <tr key={rIdx} className={`transition hover:bg-gray-200 ${rIdx % 2 === 0 ? "bg-white" : "bg-[#ededed]"}`}>
-                        {columns.map((col, cIdx) => {
-                          const rawVal = Array.isArray(row) ? row[cIdx] : (row ? row[col.name] : undefined);
+                        ),
+                        sortValue: (row) => {
+                          const v = getVal(row);
+                          if (v === null || v === undefined) return null;
+                          if (typeof v === "number") return v;
+                          return typeof v === "object" ? JSON.stringify(v) : String(v);
+                        },
+                        className: `max-w-xs truncate text-[11px] font-mono ${
+                          isWsId || isWsName ? "bg-blue-50/50 font-semibold text-gray-900" : "text-gray-700"
+                        }`,
+                        render: (row) => {
+                          const rawVal = getVal(row);
                           const { isObj, text, full } = formatCellValue(rawVal, col.name);
-                          const isWsId = col.name.toLowerCase() === "workspace_id";
-                          const isWsName = col.name.toLowerCase() === "workspace_name";
                           return (
-                            <td
-                              key={`${col.name}-${cIdx}`}
-                              className={`p-3 max-w-xs truncate text-[11px] ${
-                                isWsId || isWsName ? "bg-blue-50/50 font-semibold text-gray-900" : "text-gray-700"
-                              }`}
-                              title={full}
-                            >
+                            <span title={full}>
                               {isObj ? (
                                 <span className="px-1.5 py-0.5 rounded bg-gray-100 text-[#0778bd] border border-gray-300 text-[10px]">
                                   {text}
                                 </span>
                               ) : isWsId ? (
                                 <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-mono font-bold text-[10px] border border-blue-200">
-                                  {rawVal || "T01..."}
+                                  {rawVal || "—"}
                                 </span>
                               ) : isWsName ? (
-                                <span className="font-bold text-gray-900 text-[11px]">
-                                  {rawVal || "Axcel World"}
-                                </span>
+                                <span className="font-bold text-gray-900 text-[11px]">{rawVal || "—"}</span>
                               ) : rawVal === null || rawVal === undefined ? (
                                 <span className="text-gray-400 font-normal">-</span>
                               ) : (
-                                <span>{text}</span>
+                                text
                               )}
-                            </td>
+                            </span>
                           );
-                        })}
-                        {hasIdColumn && (
-                          <td className="p-3 text-right whitespace-nowrap">
-                            <button
-                              onClick={() => handleDeleteRow(rowId)}
-                              disabled={deletingRowId === String(rowId)}
-                              className="px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded text-[11px] font-semibold transition border border-rose-200 inline-flex items-center gap-1 disabled:opacity-50"
-                              title={`Delete row #${rowId}`}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                              <span>Delete</span>
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        },
+                      };
+                    }),
+                    ...(hasIdColumn
+                      ? [
+                          {
+                            key: "__actions",
+                            header: "Actions",
+                            sortable: false,
+                            align: "right" as const,
+                            searchValue: () => "",
+                            className: "whitespace-nowrap",
+                            render: (row: any) => {
+                              const rowId = Array.isArray(row) ? row[0] : row ? row.id : undefined;
+                              return (
+                                <button
+                                  onClick={() => handleDeleteRow(rowId)}
+                                  disabled={deletingRowId === String(rowId)}
+                                  className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[11px] font-semibold font-sans transition border border-rose-200 inline-flex items-center gap-1 disabled:opacity-50"
+                                  title={`Delete row #${rowId}`}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  <span>Delete</span>
+                                </button>
+                              );
+                            },
+                          } as Column<any>,
+                        ]
+                      : []),
+                  ]}
+                />
+              </div>
             )}
           </div>
         </div>

@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { fetchApprovals } from "@/lib/api";
+import { DataTable } from "@/components/DataTable";
 import { Approval, formatLocalDateTime } from "@/lib/types";
 import { PageHeader, StatCard, EmptyState, LoadingState, Card, StatusBadge, btn } from "@/components/ui";
 
@@ -74,37 +75,49 @@ export default function MyTasksPage() {
         />
       ) : (
         <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 text-xs">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Request</th>
-                  <th className="px-4 py-3 font-medium">Channel</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Date</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {approvals.map((a) => (
-                  <tr key={a.id} className="hover:bg-gray-50 transition">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-gray-800 capitalize">{a.tool_name.replace(/_/g, " ")}</div>
-                      <div className="text-xs text-gray-500 truncate max-w-xs" title={JSON.stringify(a.tool_arguments)}>
-                        {describeTarget(a)}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {a.channel_name ? a.channel_name : <span className="font-mono text-xs">{a.channel_id}</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={a.status} />
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{formatLocalDateTime(a.created_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={approvals}
+            rowKey={(a) => a.id}
+            itemLabel="requests"
+            searchPlaceholder="Search request, channel or status"
+            initialSort={{ key: "created_at", dir: "desc" }}
+            columns={[
+              {
+                key: "request",
+                header: "Request",
+                sortValue: (a) => a.tool_name,
+                searchValue: (a) => `${a.tool_name.replace(/_/g, " ")} ${describeTarget(a)}`,
+                render: (a) => (
+                  <>
+                    <div className="font-medium text-sm text-gray-800 capitalize">{a.tool_name.replace(/_/g, " ")}</div>
+                    <div className="text-xs text-gray-500 truncate max-w-xs" title={JSON.stringify(a.tool_arguments)}>
+                      {describeTarget(a)}
+                    </div>
+                  </>
+                ),
+              },
+              {
+                key: "channel",
+                header: "Channel",
+                sortValue: (a) => a.channel_name || a.channel_id || "",
+                className: "text-sm text-gray-700",
+                render: (a) => (a.channel_name ? a.channel_name : <span className="font-mono text-xs">{a.channel_id}</span>),
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (a) => <StatusBadge status={a.status} />,
+              },
+              {
+                key: "created_at",
+                header: "Date",
+                sortValue: (a) => (a.created_at ? new Date(a.created_at).getTime() : null),
+                searchValue: () => "",
+                className: "text-xs text-gray-500 whitespace-nowrap",
+                render: (a) => formatLocalDateTime(a.created_at),
+              },
+            ]}
+          />
         </Card>
       )}
     </div>

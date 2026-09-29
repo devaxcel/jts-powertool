@@ -26,8 +26,15 @@ import {
   sendUserSetupEmail,
   extractErrorMessage,
 } from "@/lib/api";
+import { DataTable } from "@/components/DataTable";
 import { DashboardUser, ChannelFolder, Organization, formatLocalDateTime } from "@/lib/types";
 import { PageHeader, Alert, ComingSoonBadge, btn } from "@/components/ui";
+
+const ROLE_LABELS: Record<string, string> = {
+  jts_admin: "JTS Admin",
+  client_admin: "Client Admin",
+  client_standard: "Team Member",
+};
 
 export default function UsersPage() {
   const router = useRouter();
@@ -337,111 +344,114 @@ export default function UsersPage() {
 
       {/* Users Table */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider">All users ({users.length})</h2>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-gray-100/70 border-b border-gray-200 text-gray-500 uppercase font-semibold text-[10px]">
-              <tr>
-                <th className="p-3">User &amp; Name</th>
-                <th className="p-3">Role</th>
-                <th className="p-3">Assigned Client Folder</th>
-                <th className="p-3">Created Date</th>
-                <th className="p-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 font-mono">
-              {users.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="p-8 text-center text-gray-400 font-sans">
-                    No users registered in database yet.
-                  </td>
-                </tr>
-              ) : (
-                users.map((u) => {
-                  const isJtsAdmin = u.role === "jts_admin";
-                  const isClientAdmin = u.role === "client_admin";
-
-                  return (
-                    <tr key={u.id} className="hover:bg-gray-50/60 transition">
-                      <td className="p-3">
-                        <div className="font-bold text-gray-800 flex items-center gap-1.5 font-sans">
-                          <span>{u.name || u.username}</span>
-                          {u.name && <span className="text-[11px] text-gray-400 font-mono">(@{u.username})</span>}
-                        </div>
-                        {u.email && <div className="text-[10px] text-gray-400 font-sans">{u.email}</div>}
-                      </td>
-                      <td className="p-3 font-sans">
-                        {isJtsAdmin ? (
-                          <span className="px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-800 border border-gray-200 font-semibold text-[10px]">
-                            JTS Admin
-                          </span>
-                        ) : isClientAdmin ? (
-                          <span className="px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200 font-semibold text-[10px]">
-                            Client Admin
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[10px]">
-                            Team Member
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3 text-gray-600 font-sans">
-                        {u.client_folder_name ? (
-                          <div className="space-y-0.5">
-                            <span className="font-semibold text-gray-800 flex items-center gap-1">
-                              <Building className="h-3.5 w-3.5 text-[#088ADA]" />
-                              {u.client_folder_name}
-                            </span>
-                            {u.organization_name && (
-                              <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
-                                <Building2 className="h-3 w-3 text-emerald-600" />
-                                {u.organization_name}
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-gray-400 italic">All Clients (Global)</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-gray-400 text-[10px]">
-                        {formatLocalDateTime(u.created_at)}
-                      </td>
-                      <td className="p-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => handleSendSetupEmail(u)}
-                            disabled={sendingEmailId === u.id}
-                            className="p-1.5 rounded text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 transition"
-                            title={u.email ? `Send Password Setup Email to ${u.email}` : "No email configured"}
-                          >
-                            <Mail className={`h-4 w-4 ${sendingEmailId === u.id ? "animate-pulse text-indigo-400" : ""}`} />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEditModal(u)}
-                            className="p-1.5 rounded text-[#088ADA] hover:bg-blue-50 transition"
-                            title="Edit User"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteUser(u.id, u.name || u.username)}
-                            className="p-1.5 rounded text-rose-500 hover:bg-rose-50 transition"
-                            title="Delete User"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={users}
+          rowKey={(u) => u.id}
+          itemLabel="users"
+          searchPlaceholder="Search name, username, email or client"
+          emptyMessage="No users yet. Click “Add user” to create the first one."
+          initialSort={{ key: "user", dir: "asc" }}
+          columns={[
+            {
+              key: "user",
+              header: "User",
+              sortValue: (u) => (u.name || u.username || "").toLowerCase(),
+              searchValue: (u) => `${u.name || ""} ${u.username || ""} ${u.email || ""}`,
+              render: (u) => (
+                <>
+                  <div className="font-semibold text-gray-800 flex items-center gap-1.5">
+                    <span>{u.name || u.username}</span>
+                    {u.name && <span className="text-[11px] text-gray-400 font-mono">@{u.username}</span>}
+                  </div>
+                  {u.email && <div className="text-[11px] text-gray-400">{u.email}</div>}
+                </>
+              ),
+            },
+            {
+              key: "role",
+              header: "Role",
+              sortValue: (u) => ROLE_LABELS[u.role] || u.role,
+              render: (u) =>
+                u.role === "jts_admin" ? (
+                  <span className="px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-800 border border-gray-200 font-semibold text-[10px]">
+                    JTS Admin
+                  </span>
+                ) : u.role === "client_admin" ? (
+                  <span className="px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200 font-semibold text-[10px]">
+                    Client Admin
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[10px]">
+                    Team Member
+                  </span>
+                ),
+            },
+            {
+              key: "client",
+              header: "Client",
+              sortValue: (u) => u.client_folder_name || "",
+              searchValue: (u) => `${u.client_folder_name || ""} ${u.organization_name || ""}`,
+              render: (u) =>
+                u.client_folder_name ? (
+                  <div className="space-y-0.5">
+                    <span className="font-semibold text-gray-800 flex items-center gap-1">
+                      <Building className="h-3.5 w-3.5 text-[#088ADA]" />
+                      {u.client_folder_name}
+                    </span>
+                    {u.organization_name && (
+                      <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
+                        <Building2 className="h-3 w-3 text-emerald-600" />
+                        {u.organization_name}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-gray-400 italic">All clients</span>
+                ),
+            },
+            {
+              key: "created_at",
+              header: "Added on",
+              sortValue: (u) => (u.created_at ? new Date(u.created_at).getTime() : null),
+              searchValue: () => "",
+              className: "text-gray-400 text-[11px] whitespace-nowrap",
+              render: (u) => formatLocalDateTime(u.created_at),
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              sortable: false,
+              searchValue: () => "",
+              align: "right",
+              render: (u) => (
+                <div className="flex items-center justify-end gap-1">
+                  <button
+                    onClick={() => handleSendSetupEmail(u)}
+                    disabled={sendingEmailId === u.id}
+                    className="p-1.5 rounded text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 transition"
+                    title={u.email ? `Send password setup email to ${u.email}` : "No email on file"}
+                  >
+                    <Mail className={`h-4 w-4 ${sendingEmailId === u.id ? "animate-pulse text-indigo-400" : ""}`} />
+                  </button>
+                  <button
+                    onClick={() => handleOpenEditModal(u)}
+                    className="p-1.5 rounded text-[#088ADA] hover:bg-blue-50 transition"
+                    title="Edit user"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteUser(u.id, u.name || u.username)}
+                    className="p-1.5 rounded text-rose-500 hover:bg-rose-50 transition"
+                    title="Delete user"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ),
+            },
+          ]}
+        />
       </div>
 
       {/* Create User Modal */}

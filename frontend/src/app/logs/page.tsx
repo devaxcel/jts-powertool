@@ -14,6 +14,7 @@ import {
   FileText,
 } from "lucide-react";
 import { LogEvent, UsageSummary, ApiUsageLog, formatLocalDateTime, isClientKeyMessage } from "@/lib/types";
+import { DataTable } from "@/components/DataTable";
 import { fetchUsageSummary, fetchUsageLogs, fetchFolder, fetchFolders, fetchChannelMessages } from "@/lib/api";
 import { PageHeader } from "@/components/ui";
 
@@ -379,126 +380,142 @@ export default function LogsPage() {
 
           {/* Breakdown Per Channel Table */}
           <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+            <div className="p-4 border-b border-gray-200 bg-gray-50">
               <h2 className="text-sm font-bold text-gray-700 flex items-center gap-2">
                 <FileText className="h-4 w-4 text-[#088ADA]" />
                 <span>Cost by Slack channel</span>
               </h2>
-              <span className="text-xs text-gray-500 font-mono">
-                {usageSummary?.by_channel?.length || 0} active channels
-              </span>
             </div>
-
-            <div className="overflow-x-auto max-h-72 custom-scroll">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel Name</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel ID</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">API Calls</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Input Tokens</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Output Tokens</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Total Tokens</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
-                  </tr>
-                </thead>
-                <tbody className="text-xs divide-y divide-gray-200">
-                  {!usageSummary || usageSummary.by_channel.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center text-gray-500 italic bg-white">
-                        No usage yet. Costs appear here after the bot answers a message in Slack.
-                      </td>
-                    </tr>
-                  ) : (
-                    usageSummary.by_channel.map((item, idx) => (
-                      <tr
-                        key={item.channel_id}
-                        className={`${
-                          idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"
-                        } hover:bg-gray-200 transition text-gray-800`}
-                      >
-                        <td className="py-3 px-4 font-semibold text-[#088ADA]">
-                          {item.channel_name?.startsWith("#") || item.channel_name?.startsWith("@")
-                            ? item.channel_name
-                            : `#${item.channel_name}`}
-                        </td>
-                        <td className="py-3 px-4 font-mono text-gray-600">{item.channel_id}</td>
-                        <td className="py-3 px-4 font-mono font-bold text-gray-700">{item.calls}</td>
-                        <td className="py-3 px-4 font-mono text-gray-600">{item.input_tokens.toLocaleString()}</td>
-                        <td className="py-3 px-4 font-mono text-gray-600">{item.output_tokens.toLocaleString()}</td>
-                        <td className="py-3 px-4 font-mono font-bold text-gray-800">{item.total_tokens.toLocaleString()}</td>
-                        <td className="py-3 px-4 font-mono font-bold text-emerald-600">
-                          ${item.total_cost_usd.toFixed(6)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              rows={usageSummary?.by_channel || []}
+              rowKey={(item) => item.channel_id}
+              itemLabel="channels"
+              initialPageSize={10}
+              searchPlaceholder="Search channel"
+              initialSort={{ key: "total_cost_usd", dir: "desc" }}
+              emptyMessage="No usage yet. Costs appear here after the bot answers a message in Slack."
+              columns={[
+                {
+                  key: "channel_name",
+                  header: "Channel",
+                  className: "font-semibold text-[#088ADA]",
+                  render: (item) =>
+                    item.channel_name?.startsWith("#") || item.channel_name?.startsWith("@")
+                      ? item.channel_name
+                      : `#${item.channel_name}`,
+                },
+                { key: "channel_id", header: "Channel ID", className: "font-mono text-gray-600" },
+                { key: "calls", header: "AI replies", align: "right", className: "font-mono font-bold text-gray-700" },
+                {
+                  key: "input_tokens",
+                  header: "Tokens read",
+                  align: "right",
+                  className: "font-mono text-gray-600",
+                  searchValue: () => "",
+                  render: (item) => item.input_tokens.toLocaleString(),
+                },
+                {
+                  key: "output_tokens",
+                  header: "Tokens written",
+                  align: "right",
+                  className: "font-mono text-gray-600",
+                  searchValue: () => "",
+                  render: (item) => item.output_tokens.toLocaleString(),
+                },
+                {
+                  key: "total_tokens",
+                  header: "Total tokens",
+                  align: "right",
+                  className: "font-mono font-bold text-gray-800",
+                  searchValue: () => "",
+                  render: (item) => item.total_tokens.toLocaleString(),
+                },
+                {
+                  key: "total_cost_usd",
+                  header: "Cost (USD)",
+                  align: "right",
+                  className: "font-mono font-bold text-emerald-600",
+                  searchValue: () => "",
+                  render: (item) => `$${item.total_cost_usd.toFixed(6)}`,
+                },
+              ]}
+            />
           </div>
 
           {/* Detailed API Usage Logs Table */}
           <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+            <div className="p-4 border-b border-gray-200 bg-gray-50">
               <h2 className="text-sm font-bold text-gray-700 flex items-center gap-2">
                 <Activity className="h-4 w-4 text-[#088ADA]" />
                 <span>Recent AI replies</span>
               </h2>
-              <span className="text-xs text-gray-500 font-mono">
-                Last {usageLogs.length} replies
-              </span>
             </div>
-
-            <div className="overflow-x-auto max-h-96 custom-scroll">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">#</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Timestamp</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Model</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Input Tokens</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Output Tokens</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Total Tokens</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
-                  </tr>
-                </thead>
-                <tbody className="text-xs divide-y divide-gray-200">
-                  {usageLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="py-8 text-center text-gray-500 italic bg-white">
-                        No AI replies recorded yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    usageLogs.map((log, idx) => (
-                      <tr
-                        key={log.id}
-                        className={`${
-                          idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"
-                        } hover:bg-gray-200 transition text-gray-800`}
-                      >
-                        <td className="py-3 px-4 font-mono text-gray-500">#{log.id}</td>
-                        <td className="py-3 px-4 text-gray-600 font-mono whitespace-nowrap">
-                          {formatLocalDateTime(log.created_at)}
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-[#088ADA]">#{log.channel_name}</td>
-                        <td className="py-3 px-4 font-mono text-xs text-gray-700 bg-gray-100/80 px-2 py-0.5 rounded border border-gray-200 inline-block my-2">
-                          {log.model}
-                        </td>
-                        <td className="py-3 px-4 font-mono text-gray-600">{log.input_tokens.toLocaleString()}</td>
-                        <td className="py-3 px-4 font-mono text-gray-600">{log.output_tokens.toLocaleString()}</td>
-                        <td className="py-3 px-4 font-mono font-bold text-gray-800">{log.total_tokens.toLocaleString()}</td>
-                        <td className="py-3 px-4 font-mono font-bold text-emerald-600">
-                          ${log.cost_usd.toFixed(6)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              rows={usageLogs}
+              rowKey={(log) => log.id}
+              itemLabel="replies"
+              searchPlaceholder="Search channel or model"
+              initialSort={{ key: "created_at", dir: "desc" }}
+              emptyMessage="No AI replies recorded yet."
+              columns={[
+                { key: "id", header: "#", className: "font-mono text-gray-500", render: (log) => `#${log.id}` },
+                {
+                  key: "created_at",
+                  header: "Time",
+                  className: "text-gray-600 font-mono whitespace-nowrap",
+                  sortValue: (log) => (log.created_at ? new Date(log.created_at).getTime() : null),
+                  searchValue: () => "",
+                  render: (log) => formatLocalDateTime(log.created_at),
+                },
+                {
+                  key: "channel_name",
+                  header: "Channel",
+                  className: "font-semibold text-[#088ADA]",
+                  render: (log) => `#${log.channel_name}`,
+                },
+                {
+                  key: "model",
+                  header: "Model",
+                  render: (log) => (
+                    <span className="font-mono text-[11px] text-gray-700 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
+                      {log.model}
+                    </span>
+                  ),
+                },
+                {
+                  key: "input_tokens",
+                  header: "Tokens read",
+                  align: "right",
+                  className: "font-mono text-gray-600",
+                  searchValue: () => "",
+                  render: (log) => log.input_tokens.toLocaleString(),
+                },
+                {
+                  key: "output_tokens",
+                  header: "Tokens written",
+                  align: "right",
+                  className: "font-mono text-gray-600",
+                  searchValue: () => "",
+                  render: (log) => log.output_tokens.toLocaleString(),
+                },
+                {
+                  key: "total_tokens",
+                  header: "Total tokens",
+                  align: "right",
+                  className: "font-mono font-bold text-gray-800",
+                  searchValue: () => "",
+                  render: (log) => log.total_tokens.toLocaleString(),
+                },
+                {
+                  key: "cost_usd",
+                  header: "Cost (USD)",
+                  align: "right",
+                  className: "font-mono font-bold text-emerald-600",
+                  searchValue: () => "",
+                  render: (log) => `$${log.cost_usd.toFixed(6)}`,
+                },
+              ]}
+            />
           </div>
         </div>
       )}

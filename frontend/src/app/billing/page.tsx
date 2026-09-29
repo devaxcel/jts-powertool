@@ -18,6 +18,7 @@ import {
 import { UsageSummary, ApiUsageLog, formatLocalDateTime, isClientKeyMessage } from "@/lib/types";
 import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import { PageHeader, btn } from "@/components/ui";
+import { DataTable, Column } from "@/components/DataTable";
 import {
   fetchBillingSummary,
   fetchUsageLogs,
@@ -32,6 +33,76 @@ import {
   getAuthoritativeWorkspace,
   AUTHORITATIVE_CHANNEL_NAMES,
 } from "@/lib/api";
+
+type WorkspaceRow = { workspace_id?: string | null; workspace_name?: string | null };
+type TokenRow = { input_tokens: number; output_tokens: number; total_tokens: number };
+
+function workspaceColumns<T extends WorkspaceRow>(show: boolean): Column<T>[] {
+  if (!show) return [];
+  return [
+    {
+      key: "workspace_id",
+      header: "Workspace ID",
+      render: (r) => (
+        <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 font-mono font-bold text-[10px] border border-blue-200">
+          {r.workspace_id || "—"}
+        </span>
+      ),
+    },
+    {
+      key: "workspace_name",
+      header: "Slack workspace",
+      className: "font-semibold text-gray-900",
+      render: (r) => r.workspace_name || "—",
+    },
+  ];
+}
+
+function tokenColumns<T extends TokenRow>(cost: (r: T) => number): Column<T>[] {
+  return [
+    {
+      key: "input_tokens",
+      header: "Tokens read",
+      align: "right",
+      className: "font-mono text-gray-600",
+      searchValue: () => "",
+      render: (r) => r.input_tokens.toLocaleString(),
+    },
+    {
+      key: "output_tokens",
+      header: "Tokens written",
+      align: "right",
+      className: "font-mono text-gray-600",
+      searchValue: () => "",
+      render: (r) => r.output_tokens.toLocaleString(),
+    },
+    {
+      key: "total_tokens",
+      header: "Total tokens",
+      align: "right",
+      className: "font-mono font-bold text-gray-800",
+      searchValue: () => "",
+      render: (r) => r.total_tokens.toLocaleString(),
+    },
+    {
+      key: "cost",
+      header: "Cost (USD)",
+      align: "right",
+      className: "font-mono font-bold text-emerald-600",
+      sortValue: cost,
+      searchValue: () => "",
+      render: (r) => `$${cost(r).toFixed(6)}`,
+    },
+  ];
+}
+
+function deleteColumn<T>(show: boolean, render: (r: T) => React.ReactNode): Column<T>[] {
+  if (!show) return [];
+  return [{ key: "actions", header: "Actions", sortable: false, searchValue: () => "", align: "right", render }];
+}
+
+const deleteBtnClass =
+  "px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-xs font-semibold transition border border-red-200 inline-flex items-center gap-1 disabled:opacity-50";
 
 export default function BillingPage() {
   const [billingData, setBillingData] = useState<UsageSummary | null>(null);
@@ -852,358 +923,212 @@ export default function BillingPage() {
       {/* 1. BILLING BY CHANNEL TABLE */}
       {activeTab === "channel" && (
         <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <div className="p-4 border-b border-gray-200 bg-gray-50">
             <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <FileText className="h-4 w-4 text-[#088ADA]" />
               <span>Cost by channel</span>
             </h2>
-            <span className="text-xs font-mono text-gray-500">
-              {filteredChannels.length} channels displayed
-            </span>
           </div>
-
-          <div className="overflow-x-auto max-h-[500px] custom-scroll">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Workspace ID</th>}
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack workspace</th>}
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel ID</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">AI replies</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens read</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens written</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA] text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="text-xs divide-y divide-gray-200">
-                {filteredChannels.length === 0 ? (
-                  <tr>
-                    <td colSpan={isMasterAdmin ? 10 : 7} className="py-8 text-center text-gray-500 italic bg-white">
-                      No usage found. Try another search or workspace.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredChannels.map((item, idx) => (
-                    <tr
-                      key={`${item.workspace_id}-${item.channel_id}-${idx}`}
-                      className={`${
-                        idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"
-                      } hover:bg-gray-200 transition text-gray-800`}
-                    >
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 font-mono">
-                          <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-mono font-bold text-[10px] border border-blue-200">
-                            {item.workspace_id || "T01..."}
-                          </span>
-                        </td>
-                      )}
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 font-bold text-gray-900">{item.workspace_name || "Axcel World"}</td>
-                      )}
-                      <td className="py-3.5 px-4 font-semibold text-[#088ADA]">{formatChannelName(item.channel_name)}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{item.channel_id}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-gray-700">{item.calls}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{item.input_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{item.output_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-gray-800">{item.total_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-emerald-600">
-                        ${item.total_cost_usd.toFixed(6)}
-                      </td>
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 text-right">
-                          <button
-                            onClick={() => handleDeleteChannel(item.channel_id, item.channel_name)}
-                            disabled={deletingId === `chan-${item.channel_id}`}
-                            className="px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-semibold transition border border-red-200 inline-flex items-center gap-1 disabled:opacity-50"
-                            title="Delete all billing records for this channel"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            <span>Delete</span>
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={filteredChannels}
+            rowKey={(item, idx) => `${item.workspace_id}-${item.channel_id}-${idx}`}
+            searchable={false}
+            itemLabel="channels"
+            initialSort={{ key: "cost", dir: "desc" }}
+            emptyMessage="No usage found. Try another search or workspace."
+            columns={[
+              ...workspaceColumns<(typeof filteredChannels)[number]>(isMasterAdmin),
+              {
+                key: "channel_name",
+                header: "Channel",
+                className: "font-semibold text-[#088ADA]",
+                render: (item) => formatChannelName(item.channel_name),
+              },
+              { key: "channel_id", header: "Channel ID", className: "font-mono text-gray-600" },
+              { key: "calls", header: "AI replies", align: "right", className: "font-mono font-bold text-gray-700" },
+              ...tokenColumns<(typeof filteredChannels)[number]>((item) => item.total_cost_usd),
+              ...deleteColumn<(typeof filteredChannels)[number]>(isMasterAdmin, (item) => (
+                <button
+                  onClick={() => handleDeleteChannel(item.channel_id, item.channel_name)}
+                  disabled={deletingId === `chan-${item.channel_id}`}
+                  className={deleteBtnClass}
+                  title="Delete all billing records for this channel"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  <span>Delete</span>
+                </button>
+              )),
+            ]}
+          />
         </div>
       )}
 
       {/* 2. BILLING BY USER TABLE */}
       {activeTab === "user" && (
         <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <div className="p-4 border-b border-gray-200 bg-gray-50">
             <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <User className="h-4 w-4 text-[#088ADA]" />
               <span>Cost by person</span>
             </h2>
-            <span className="text-xs font-mono text-gray-500">
-              {filteredUsers.length} users displayed
-            </span>
           </div>
-
-          <div className="overflow-x-auto max-h-[500px] custom-scroll">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Workspace ID</th>}
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack workspace</th>}
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Person</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack user ID</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">AI replies</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens read</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens written</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA] text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="text-xs divide-y divide-gray-200">
-                {filteredUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan={isMasterAdmin ? 10 : 7} className="py-8 text-center text-gray-500 italic bg-white">
-                      No usage found. Try another search or workspace.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredUsers.map((item, idx) => (
-                    <tr
-                      key={`${item.workspace_id}-${item.user_id}-${idx}`}
-                      className={`${
-                        idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"
-                      } hover:bg-gray-200 transition text-gray-800`}
-                    >
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 font-mono">
-                          <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-mono font-bold text-[10px] border border-blue-200">
-                            {item.workspace_id || "T01..."}
-                          </span>
-                        </td>
-                      )}
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 font-bold text-gray-900">{item.workspace_name || "Axcel World"}</td>
-                      )}
-                      <td className="py-3.5 px-4 font-semibold text-gray-800">
-                        {item.user_name || item.user_id}
-                      </td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">
-                        {item.user_id}
-                      </td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-gray-700">{item.calls}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{item.input_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{item.output_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-gray-800">{item.total_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-emerald-600">
-                        ${item.total_cost_usd.toFixed(6)}
-                      </td>
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 text-right">
-                          <button
-                            onClick={() => handleDeleteUser(item.user_id, item.user_name || item.user_id)}
-                            disabled={deletingId === `user-${item.user_id}`}
-                            className="px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-semibold transition border border-red-200 inline-flex items-center gap-1 disabled:opacity-50"
-                            title="Delete all billing records for this user"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            <span>Delete</span>
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={filteredUsers}
+            rowKey={(item, idx) => `${item.workspace_id}-${item.user_id}-${idx}`}
+            searchable={false}
+            itemLabel="people"
+            initialSort={{ key: "cost", dir: "desc" }}
+            emptyMessage="No usage found. Try another search or workspace."
+            columns={[
+              ...workspaceColumns<(typeof filteredUsers)[number]>(isMasterAdmin),
+              {
+                key: "user_name",
+                header: "Person",
+                className: "font-semibold text-gray-800",
+                sortValue: (item) => (item.user_name || item.user_id || "").toLowerCase(),
+                render: (item) => item.user_name || item.user_id,
+              },
+              { key: "user_id", header: "Slack user ID", className: "font-mono text-gray-600" },
+              { key: "calls", header: "AI replies", align: "right", className: "font-mono font-bold text-gray-700" },
+              ...tokenColumns<(typeof filteredUsers)[number]>((item) => item.total_cost_usd),
+              ...deleteColumn<(typeof filteredUsers)[number]>(isMasterAdmin, (item) => (
+                <button
+                  onClick={() => handleDeleteUser(item.user_id, item.user_name || item.user_id)}
+                  disabled={deletingId === `user-${item.user_id}`}
+                  className={deleteBtnClass}
+                  title="Delete all billing records for this person"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  <span>Delete</span>
+                </button>
+              )),
+            ]}
+          />
         </div>
       )}
 
       {/* 3. USER BREAKDOWN PER CHANNEL TABLE */}
       {activeTab === "channel_user" && (
         <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <div className="p-4 border-b border-gray-200 bg-gray-50">
             <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <Users className="h-4 w-4 text-[#088ADA]" />
               <span>Cost per person in each channel</span>
             </h2>
-            <span className="text-xs font-mono text-gray-500">
-              {filteredChannelUsers.length} user-in-channel entries
-            </span>
           </div>
-
-          <div className="overflow-x-auto max-h-[500px] custom-scroll">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Workspace ID</th>}
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack workspace</th>}
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel ID</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Person</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack user ID</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">AI replies</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens read</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens written</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA] text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="text-xs divide-y divide-gray-200">
-                {filteredChannelUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan={isMasterAdmin ? 12 : 9} className="py-8 text-center text-gray-500 italic bg-white">
-                      No usage found. Try another search or workspace.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredChannelUsers.map((item, idx) => (
-                    <tr
-                      key={`${item.workspace_id}-${item.channel_id}-${item.user_id}-${idx}`}
-                      className={`${
-                        idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"
-                      } hover:bg-gray-200 transition text-gray-800`}
-                    >
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 font-mono">
-                          <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-mono font-bold text-[10px] border border-blue-200">
-                            {item.workspace_id || "T01..."}
-                          </span>
-                        </td>
-                      )}
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 font-bold text-gray-900">{item.workspace_name || "Axcel World"}</td>
-                      )}
-                      <td className="py-3.5 px-4 font-semibold text-[#088ADA]">{formatChannelName(item.channel_name)}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{item.channel_id}</td>
-                      <td className="py-3.5 px-4 font-semibold text-gray-800">{item.user_name || item.user_id}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{item.user_id}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-gray-700">{item.calls}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{item.input_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{item.output_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-gray-800">{item.total_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-emerald-600">
-                        ${item.total_cost_usd.toFixed(6)}
-                      </td>
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 text-right">
-                          <button
-                            onClick={() => handleDeleteChannelUser(item.channel_id, item.channel_name, item.user_id, item.user_name || item.user_id)}
-                            disabled={deletingId === `chanuser-${item.channel_id}-${item.user_id}`}
-                            className="px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-semibold transition border border-red-200 inline-flex items-center gap-1 disabled:opacity-50"
-                            title="Delete records for this user in this channel"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            <span>Delete Entry</span>
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={filteredChannelUsers}
+            rowKey={(item, idx) => `${item.workspace_id}-${item.channel_id}-${item.user_id}-${idx}`}
+            searchable={false}
+            itemLabel="rows"
+            initialSort={{ key: "cost", dir: "desc" }}
+            emptyMessage="No usage found. Try another search or workspace."
+            columns={[
+              ...workspaceColumns<(typeof filteredChannelUsers)[number]>(isMasterAdmin),
+              {
+                key: "channel_name",
+                header: "Channel",
+                className: "font-semibold text-[#088ADA]",
+                render: (item) => formatChannelName(item.channel_name),
+              },
+              { key: "channel_id", header: "Channel ID", className: "font-mono text-gray-600" },
+              {
+                key: "user_name",
+                header: "Person",
+                className: "font-semibold text-gray-800",
+                sortValue: (item) => (item.user_name || item.user_id || "").toLowerCase(),
+                render: (item) => item.user_name || item.user_id,
+              },
+              { key: "user_id", header: "Slack user ID", className: "font-mono text-gray-600" },
+              { key: "calls", header: "AI replies", align: "right", className: "font-mono font-bold text-gray-700" },
+              ...tokenColumns<(typeof filteredChannelUsers)[number]>((item) => item.total_cost_usd),
+              ...deleteColumn<(typeof filteredChannelUsers)[number]>(isMasterAdmin, (item) => (
+                <button
+                  onClick={() =>
+                    handleDeleteChannelUser(item.channel_id, item.channel_name, item.user_id, item.user_name || item.user_id)
+                  }
+                  disabled={deletingId === `chanuser-${item.channel_id}-${item.user_id}`}
+                  className={deleteBtnClass}
+                  title="Delete records for this person in this channel"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  <span>Delete</span>
+                </button>
+              )),
+            ]}
+          />
         </div>
       )}
 
       {/* 4. CALL HISTORY LOGS TABLE */}
       {activeTab === "logs" && (
         <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <div className="p-4 border-b border-gray-200 bg-gray-50">
             <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <Zap className="h-4 w-4 text-[#088ADA]" />
               <span>Every billed AI reply</span>
             </h2>
-            <span className="text-xs font-mono text-gray-500">
-              Showing last {filteredLogs.length} call logs
-            </span>
           </div>
-
-          <div className="overflow-x-auto max-h-[500px] custom-scroll">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Workspace ID</th>}
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack workspace</th>}
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">#</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Timestamp</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Person</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack user ID</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Model</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens read</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens written</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA] text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="text-xs divide-y divide-gray-200">
-                {filteredLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan={isMasterAdmin ? 13 : 10} className="py-8 text-center text-gray-500 italic bg-white">
-                      No billed replies yet.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredLogs.map((log, idx) => (
-                    <tr
-                      key={log.id}
-                      className={`${
-                        idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"
-                      } hover:bg-gray-200 transition text-gray-800`}
-                    >
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 font-mono">
-                          <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-mono font-bold text-[10px] border border-blue-200">
-                            {log.workspace_id || "T01..."}
-                          </span>
-                        </td>
-                      )}
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 font-bold text-gray-900">{log.workspace_name || "Axcel World"}</td>
-                      )}
-                      <td className="py-3.5 px-4 font-mono text-gray-500">#{log.id}</td>
-                      <td className="py-3.5 px-4 text-gray-600 font-mono whitespace-nowrap">
-                        {formatLocalDateTime(log.created_at)}
-                      </td>
-                      <td className="py-3.5 px-4 font-semibold text-[#088ADA]">{formatChannelName(log.channel_name)}</td>
-                      <td className="py-3.5 px-4 font-semibold text-gray-800">{log.user_name || log.user_id || "unknown"}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{log.user_id || "-"}</td>
-                      <td className="py-3.5 px-4 font-mono text-xs text-gray-700 bg-gray-100 px-2 py-0.5 rounded border border-gray-200 inline-block my-1">
-                        {log.model}
-                      </td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{log.input_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono text-gray-600">{log.output_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-gray-800">{log.total_tokens.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-mono font-bold text-emerald-600">
-                        ${log.cost_usd.toFixed(6)}
-                      </td>
-                      {isMasterAdmin && (
-                        <td className="py-3.5 px-4 text-right">
-                          <button
-                            onClick={() => handleDeleteLog(log.id)}
-                            disabled={deletingId === `log-${log.id}`}
-                            className="px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-semibold transition border border-red-200 inline-flex items-center gap-1 disabled:opacity-50"
-                            title="Delete this call log entry from database"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            <span>Delete</span>
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={filteredLogs}
+            rowKey={(log) => log.id}
+            searchable={false}
+            itemLabel="replies"
+            initialSort={{ key: "created_at", dir: "desc" }}
+            emptyMessage="No billed replies yet."
+            columns={[
+              ...workspaceColumns<ApiUsageLog>(isMasterAdmin),
+              { key: "id", header: "#", className: "font-mono text-gray-500", render: (log) => `#${log.id}` },
+              {
+                key: "created_at",
+                header: "Time",
+                className: "text-gray-600 font-mono whitespace-nowrap",
+                sortValue: (log) => (log.created_at ? new Date(log.created_at).getTime() : null),
+                searchValue: () => "",
+                render: (log) => formatLocalDateTime(log.created_at),
+              },
+              {
+                key: "channel_name",
+                header: "Channel",
+                className: "font-semibold text-[#088ADA]",
+                render: (log) => formatChannelName(log.channel_name),
+              },
+              {
+                key: "user_name",
+                header: "Person",
+                className: "font-semibold text-gray-800",
+                sortValue: (log) => (log.user_name || log.user_id || "").toLowerCase(),
+                render: (log) => log.user_name || log.user_id || "unknown",
+              },
+              {
+                key: "user_id",
+                header: "Slack user ID",
+                className: "font-mono text-gray-600",
+                render: (log) => log.user_id || "-",
+              },
+              {
+                key: "model",
+                header: "Model",
+                render: (log) => (
+                  <span className="font-mono text-[11px] text-gray-700 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
+                    {log.model}
+                  </span>
+                ),
+              },
+              ...tokenColumns<ApiUsageLog>((log) => log.cost_usd),
+              ...deleteColumn<ApiUsageLog>(isMasterAdmin, (log) => (
+                <button
+                  onClick={() => handleDeleteLog(log.id)}
+                  disabled={deletingId === `log-${log.id}`}
+                  className={deleteBtnClass}
+                  title="Delete this entry"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  <span>Delete</span>
+                </button>
+              )),
+            ]}
+          />
         </div>
       )}
     </div>
