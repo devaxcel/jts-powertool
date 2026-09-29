@@ -1792,6 +1792,304 @@ def delete_vault_secret(vault_id: int) -> bool:
     return True
 
 
+# --- Client (Folder) Own API Keys ---
+# A client folder can bring its own provider key. When set, Claude calls for every
+# channel in that folder use the client's key and are NOT billed by JTS.
+# When not set, the JTS key is used and usage is billed to the client.
+
+_FOLDER_KEY_CACHE: Dict[tuple, tuple] = {}
+FOLDER_KEY_CACHE_TTL_SECONDS = 60
+_folder_keys_table_ready = False
+
+
+def _ensure_folder_keys_table(cur):
+    global _folder_keys_table_ready
+    if _folder_keys_table_ready:
+        return
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS folder_api_keys (
+            folder_id INTEGER NOT NULL REFERENCES channel_folders(id) ON DELETE CASCADE,
+            provider VARCHAR(50) NOT NULL,
+            aws_secret_name VARCHAR(512) NOT NULL,
+            key_hint VARCHAR(32),
+            updated_by VARCHAR(255),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (folder_id, provider)
+        );
+    """)
+    _folder_keys_table_ready = True
+
+
+def _mask_key(api_key: str) -> str:
+    clean = (api_key or "").strip()
+    return f"...{clean[-4:]}" if len(clean) >= 8 else "****"
+
+
+def _is_missing_aws_credentials(err: Exception) -> bool:
+    msg = str(err)
+    return "NoCredentials" in type(err).__name__ or "Unable to locate credentials" in msg
+
+
+def validate_anthropic_key(api_key: str) -> tuple[bool, str]:
+    """Checks the key against Anthropic. Only a definite rejection (401/403) counts as invalid."""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(
+                "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+            )
+        if resp.status_code in (401, 403):
+            return False, "Anthropic rejected this API key. Please check the key and try again."
+        return True, ""
+    except Exception as e:
+        logger.warning(f"[FOLDER_KEYS] Could not verify Anthropic key (network): {e}")
+        return True, ""
+
+
+def store_folder_api_key(*, folder_id: int, api_key: str, provider: str = "anthropic", updated_by: str = "admin") -> Dict[str, Any]:
+    """Stores a client folder's own provider key in AWS Secrets Manager and records safe metadata only."""
+    provider = provider.strip().lower()
+    api_key = (api_key or "").strip()
+    if not api_key:
+        raise ValueError("API key cannot be empty.")
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM channel_folders WHERE id = %s;", (folder_id,))
+            if not cur.fetchone():
+                raise LookupError(f"Folder with id {folder_id} not found.")
+            _ensure_folder_keys_table(cur)
+            conn.commit()
+    finally:
+        conn.close()
+
+    prefix = os.getenv("AWS_SECRET_PREFIX", "jts-powertool").strip().strip("/")
+    secret_name = f"{prefix}/folders/{folder_id}/{provider}"
+    secret_payload = json.dumps({
+        "api_key": api_key,
+        "provider": provider,
+        "folder_id": folder_id,
+        "updated_at": time.time(),
+        "updated_by": updated_by,
+    })
+
+    client = _get_secretsmanager_client()
+    stored = False
+    if client:
+        try:
+            try:
+                client.create_secret(
+                    Name=secret_name,
+                    Description=f"JTS-PowerTool client-owned {provider} key for folder {folder_id}",
+                    SecretString=secret_payload,
+                    Tags=[
+                        {"Key": "Application", "Value": "JTS-PowerTool"},
+                        {"Key": "FolderId", "Value": str(folder_id)},
+                        {"Key": "Provider", "Value": provider},
+                    ],
+                )
+            except Exception as ce:
+                if "ResourceExists" in str(ce) or "already exists" in str(ce):
+                    client.put_secret_value(SecretId=secret_name, SecretString=secret_payload)
+                else:
+                    raise
+            stored = True
+        except Exception as e:
+            if not _is_missing_aws_credentials(e):
+                logger.error(f"[FOLDER_KEYS] Failed to save secret to AWS Secrets Manager: {e}")
+                raise RuntimeError(f"AWS Secrets Manager error: {e}")
+    if not stored:
+        _MOCK_AWS_SECRETS[secret_name] = secret_payload
+        logger.info(f"[FOLDER_KEYS] Saved to in-memory mock AWS Secrets: {secret_name}")
+
+    _FOLDER_KEY_CACHE.pop((folder_id, provider), None)
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO folder_api_keys (folder_id, provider, aws_secret_name, key_hint, updated_by, updated_at)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (folder_id, provider) DO UPDATE SET
+                    aws_secret_name = EXCLUDED.aws_secret_name,
+                    key_hint = EXCLUDED.key_hint,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = CURRENT_TIMESTAMP;
+            """, (folder_id, provider, secret_name, _mask_key(api_key), updated_by))
+            conn.commit()
+    finally:
+        conn.close()
+
+    return get_folder_api_key_status(folder_id, provider)
+
+
+def get_folder_api_key_status(folder_id: int, provider: str = "anthropic") -> Dict[str, Any]:
+    """Safe metadata only: whether a client key is configured, and a masked hint. Never the key itself."""
+    provider = provider.strip().lower()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            _ensure_folder_keys_table(cur)
+            conn.commit()
+            cur.execute("""
+                SELECT key_hint, updated_by, updated_at
+                FROM folder_api_keys
+                WHERE folder_id = %s AND provider = %s;
+            """, (folder_id, provider))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return {
+            "folder_id": folder_id,
+            "provider": provider,
+            "configured": False,
+            "billing_mode": "jts_billed",
+            "key_hint": None,
+            "updated_by": None,
+            "updated_at": None,
+        }
+    upd = row.get("updated_at")
+    return {
+        "folder_id": folder_id,
+        "provider": provider,
+        "configured": True,
+        "billing_mode": "client_key",
+        "key_hint": row.get("key_hint"),
+        "updated_by": row.get("updated_by"),
+        "updated_at": upd.isoformat() if hasattr(upd, "isoformat") else upd,
+    }
+
+
+def delete_folder_api_key(folder_id: int, provider: str = "anthropic") -> bool:
+    """Removes a client's own key; the folder falls back to the (billed) JTS key."""
+    provider = provider.strip().lower()
+    secret_name = None
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            _ensure_folder_keys_table(cur)
+            cur.execute(
+                "DELETE FROM folder_api_keys WHERE folder_id = %s AND provider = %s RETURNING aws_secret_name;",
+                (folder_id, provider),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                secret_name = row.get("aws_secret_name")
+    finally:
+        conn.close()
+
+    _FOLDER_KEY_CACHE.pop((folder_id, provider), None)
+
+    if secret_name:
+        client = _get_secretsmanager_client()
+        if client:
+            try:
+                client.delete_secret(SecretId=secret_name, ForceDeleteWithoutRecovery=True)
+            except Exception as e:
+                logger.warning(f"[FOLDER_KEYS] Could not delete secret '{secret_name}' from AWS: {e}")
+        _MOCK_AWS_SECRETS.pop(secret_name, None)
+    return bool(secret_name)
+
+
+def get_folder_api_key_value(folder_id: int, provider: str = "anthropic") -> Optional[str]:
+    """Returns the client's own key for runtime use (worker only). Never expose via API."""
+    provider = provider.strip().lower()
+    cached = _FOLDER_KEY_CACHE.get((folder_id, provider))
+    if cached and time.time() < cached[1]:
+        return cached[0]
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            _ensure_folder_keys_table(cur)
+            conn.commit()
+            cur.execute(
+                "SELECT aws_secret_name FROM folder_api_keys WHERE folder_id = %s AND provider = %s;",
+                (folder_id, provider),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+
+    secret_name = row.get("aws_secret_name")
+    raw_secret = None
+    client = _get_secretsmanager_client()
+    if client:
+        try:
+            resp = client.get_secret_value(SecretId=secret_name)
+            raw_secret = resp.get("SecretString")
+        except Exception as e:
+            if not _is_missing_aws_credentials(e):
+                logger.warning(f"[FOLDER_KEYS] Could not fetch secret '{secret_name}' from AWS: {e}")
+    if not raw_secret:
+        raw_secret = _MOCK_AWS_SECRETS.get(secret_name)
+    if not raw_secret:
+        return None
+
+    try:
+        key_val = json.loads(raw_secret).get("api_key")
+    except Exception:
+        key_val = raw_secret
+    if key_val:
+        _FOLDER_KEY_CACHE[(folder_id, provider)] = (key_val, time.time() + FOLDER_KEY_CACHE_TTL_SECONDS)
+    return key_val
+
+
+def get_folder_id_for_channel(channel_id: str) -> Optional[int]:
+    if not channel_id:
+        return None
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT folder_id FROM channel_metadata WHERE UPPER(channel_id) = UPPER(%s) AND folder_id IS NOT NULL LIMIT 1;",
+                (channel_id.strip(),),
+            )
+            row = cur.fetchone()
+            return int(row["folder_id"]) if row else None
+    except Exception as e:
+        logger.debug(f"[FOLDER_KEYS] Could not resolve folder for channel {channel_id}: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def resolve_anthropic_key(
+    channel_id: str,
+    workspace_id: Optional[str] = None,
+    workspace_name: Optional[str] = None,
+    channel_name: Optional[str] = None,
+) -> tuple[Optional[str], str]:
+    """
+    Picks the Anthropic key for a channel and says who pays:
+      1. channel-specific key  -> ("...", "client")
+      2. client folder's key   -> ("...", "client")
+      3. none                  -> (None, "jts")  caller uses the JTS key and usage is billed
+    """
+    try:
+        key = get_channel_secret_value(
+            channel_id, "anthropic",
+            workspace_id=workspace_id, workspace_name=workspace_name, channel_name=channel_name,
+        )
+        if key:
+            return key, "client"
+        folder_id = get_folder_id_for_channel(canonical_channel_id(channel_id))
+        if folder_id:
+            key = get_folder_api_key_value(folder_id, "anthropic")
+            if key:
+                return key, "client"
+    except Exception as e:
+        logger.warning(f"[FOLDER_KEYS] Key resolution failed for channel {channel_id}, using JTS key: {e}")
+    return None, "jts"
+
+
 
 
 

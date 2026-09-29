@@ -92,6 +92,7 @@ async def fetch_usage_summary(request: Request):
                         COUNT(*) as cnt
                     FROM conversation_messages
                     WHERE (role = 'assistant' OR user_id = 'bot' OR user_name ILIKE '%Assistant%' OR user_name ILIKE '%Agent%')
+                      AND COALESCE(cost_usd, 0) > 0
                       AND (
                           channel_id = ANY(%s) OR LOWER(channel_id) = ANY(%s)
                           OR LOWER(channel_id) IN (SELECT LOWER(channel_id) FROM channel_metadata WHERE folder_id = %s OR folder_id::text = %s)

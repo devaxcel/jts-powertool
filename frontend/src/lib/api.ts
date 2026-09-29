@@ -20,6 +20,7 @@ import {
   VerifyTokenResponse,
   GlobalSettingsData,
   UpdateGlobalSettingsPayload,
+  FolderApiKeyStatus,
 } from "./types";
 
 const API_BASE = ""; // Relative path works automatically via Next.js rewrites
@@ -505,6 +506,48 @@ export async function assignChannelFolder(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Failed to assign folder" }));
     throw new Error(err.detail || "Failed to assign folder");
+  }
+  return res.json();
+}
+
+export async function fetchFolderApiKey(folderId: number | string): Promise<FolderApiKeyStatus> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/anthropic-key`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(err, "Failed to load API key status"));
+  }
+  return res.json();
+}
+
+export async function saveFolderApiKey(
+  folderId: number | string,
+  apiKey: string
+): Promise<FolderApiKeyStatus & { status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/anthropic-key`, {
+    method: "PUT",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(err, "Failed to save API key"));
+  }
+  return res.json();
+}
+
+export async function deleteFolderApiKey(
+  folderId: number | string
+): Promise<FolderApiKeyStatus & { status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/anthropic-key`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(err, "Failed to remove API key"));
   }
   return res.json();
 }

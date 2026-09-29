@@ -198,6 +198,7 @@ async def stream(
     user_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
     workspace_name: Optional[str] = None,
+    key_source: str = "jts",
 ) -> AsyncIterator[Message]:
     from app.services.channel_secrets_service import canonical_channel_id
     if channel_id:
@@ -338,6 +339,7 @@ async def stream(
                             model=model,
                             input_tokens=in_toks,
                             output_tokens=out_toks,
+                            key_source=key_source,
                         )
                         if isinstance(u_res, dict) and u_res.get("status") != "error":
                             yield Message(role="system", content={"data": {"usage": u_res}})
@@ -553,6 +555,7 @@ async def stream(
                 model=model,
                 input_tokens=in_toks,
                 output_tokens=out_toks,
+                key_source=key_source,
             )
             if isinstance(u_res, dict) and u_res.get("status") != "error":
                 yield Message(role="system", content={"data": {"usage": u_res}})

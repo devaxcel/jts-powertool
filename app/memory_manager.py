@@ -859,9 +859,11 @@ def save_conversation_message(
     output_tokens: int = 0,
     total_tokens: int = 0,
     cost_usd: float = 0.0,
+    billable: bool = True,
 ):
     """
     Persist every conversation message into PostgreSQL, including token counts and API cost USD for bot replies.
+    billable=False (client's own API key) stores zero cost so it never appears in client billing.
     """
     if not content or not content.strip():
         return
@@ -907,7 +909,7 @@ def save_conversation_message(
             tot_toks = int(total_tokens or (in_toks + out_toks))
             c_usd = float(cost_usd or 0.0)
 
-            if tot_toks == 0 or c_usd == 0.0:
+            if tot_toks == 0 or (billable and c_usd == 0.0):
                 if clean_role == "assistant":
                     out_toks = max(25, c_len // 4)
                     in_toks = max(350, int((c_len // 4) * 2.8) + 150)
@@ -918,6 +920,8 @@ def save_conversation_message(
                     out_toks = 0
                     tot_toks = in_toks
                     c_usd = round(in_toks * 3.0 / 1_000_000.0, 6)
+            if not billable:
+                c_usd = 0.0
 
             from app.services.channel_secrets_service import canonical_channel_id
             channel_id = canonical_channel_id(channel_id, workspace_id=clean_ws_id, workspace_name=clean_ws_name)

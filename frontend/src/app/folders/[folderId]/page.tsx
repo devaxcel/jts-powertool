@@ -37,6 +37,7 @@ import {
   AUTHORITATIVE_CHANNEL_NAMES,
 } from "@/lib/api";
 import { FolderDetails, ChannelProject } from "@/lib/types";
+import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 
 interface ToolDefinition {
   id: string;
@@ -400,6 +401,11 @@ export default function FolderDetailPage() {
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
+      )}
+
+      {/* Client's own Anthropic key vs. billed JTS key */}
+      {folderId && (
+        <ClientApiKeyCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
       )}
 
       {/* Content Area */}

@@ -505,5 +505,20 @@ export interface UpdateGlobalSettingsPayload {
   sync_alerts?: boolean;
 }
 
+// A bot reply with real tokens but zero cost was made with the client's own API key: not billed.
+export function isClientKeyMessage(m: { cost_usd?: number; total_tokens?: number }): boolean {
+  return Number(m.cost_usd || 0) === 0 && Number(m.total_tokens || 0) > 0;
+}
+
+export interface FolderApiKeyStatus {
+  folder_id: number;
+  provider: string;
+  configured: boolean;
+  billing_mode: "client_key" | "jts_billed";
+  key_hint: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
+}
+
 
 

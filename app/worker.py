@@ -45,7 +45,7 @@ from app.file_generator import (
 from app.tools.tool_adapter import ControlledToolAdapter
 from app.tools.mcp_client import GitHubMCPClient
 from app.tools.secrets_manager import get_secret, get_slack_bot_token
-from app.services.channel_secrets_service import get_channel_secret_value
+from app.services.channel_secrets_service import get_channel_secret_value, resolve_anthropic_key
 
 load_dotenv()
 logger = logging.getLogger("jts_worker")
@@ -472,10 +472,12 @@ async def process_job(job: dict):
 
         # 4. Stream / call Claude with Agentic Tool Adapter
         # Resolve channel-scoped API keys (treat 1 Slack channel = 1 project)
-        channel_anthropic_key = get_channel_secret_value(
-            channel_id, "anthropic",
+        # Client's own key (channel or client folder) -> not billed; otherwise JTS key -> billed to client
+        channel_anthropic_key, key_source = resolve_anthropic_key(
+            channel_id,
             workspace_id=team_id, workspace_name=workspace_name, channel_name=channel_name,
         )
+        is_billable = key_source == "jts"
         channel_github_token = get_channel_secret_value(
             channel_id, "github",
             workspace_id=team_id, workspace_name=workspace_name, channel_name=channel_name,
@@ -523,6 +525,7 @@ async def process_job(job: dict):
             tool_adapter=tool_adapter,
             tool_callback=on_tool_event,
             api_key=channel_anthropic_key,
+            key_source=key_source,
             channel_id=channel_id,
             channel_name=channel_name,
             user_id=user_id,
@@ -835,7 +838,9 @@ async def process_job(job: dict):
                 accumulated_usage["input_tokens"] = in_toks
                 accumulated_usage["output_tokens"] = out_toks
                 accumulated_usage["total_tokens"] = in_toks + out_toks
-                accumulated_usage["cost_usd"] = round((in_toks * 3.0 / 1_000_000.0) + (out_toks * 15.0 / 1_000_000.0), 6)
+                accumulated_usage["cost_usd"] = (
+                    round((in_toks * 3.0 / 1_000_000.0) + (out_toks * 15.0 / 1_000_000.0), 6) if is_billable else 0.0
+                )
 
             save_conversation_message(
                 team_id=team_id,
@@ -852,6 +857,7 @@ async def process_job(job: dict):
                 output_tokens=accumulated_usage.get("output_tokens", 0),
                 total_tokens=accumulated_usage.get("total_tokens", 0),
                 cost_usd=accumulated_usage.get("cost_usd", 0.0),
+                billable=is_billable,
             )
 
         # 8. Mark Job Completed

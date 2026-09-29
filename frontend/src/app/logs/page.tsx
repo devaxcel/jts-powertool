@@ -13,7 +13,7 @@ import {
   Layers,
   FileText,
 } from "lucide-react";
-import { LogEvent, UsageSummary, ApiUsageLog, formatLocalDateTime } from "@/lib/types";
+import { LogEvent, UsageSummary, ApiUsageLog, formatLocalDateTime, isClientKeyMessage } from "@/lib/types";
 import { fetchUsageSummary, fetchUsageLogs, fetchFolder, fetchFolders, fetchChannelMessages } from "@/lib/api";
 
 export default function LogsPage() {
@@ -113,7 +113,7 @@ export default function LogsPage() {
                   m.user_id === "bot" ||
                   (m.user_name && (m.user_name.includes("Assistant") || m.user_name.includes("bot") || m.user_name.includes("Agent")));
 
-                if (isBot) {
+                if (isBot && !isClientKeyMessage(m)) {
                   chCalls += 1;
                   let inTok = m.input_tokens || 0;
                   let outTok = m.output_tokens || 0;

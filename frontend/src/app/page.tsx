@@ -25,7 +25,7 @@ import {
   fetchFolders,
   fetchChannelMessages,
 } from "@/lib/api";
-import { SystemStats, Approval, UsageSummary } from "@/lib/types";
+import { SystemStats, Approval, UsageSummary, isClientKeyMessage } from "@/lib/types";
 
 export default function OverviewPage() {
   const [stats, setStats] = useState<SystemStats | null>(null);
@@ -111,7 +111,7 @@ export default function OverviewPage() {
                   m.user_id === "bot" ||
                   (m.user_name && (m.user_name.includes("Assistant") || m.user_name.includes("bot") || m.user_name.includes("Agent")));
 
-                if (isBot) {
+                if (isBot && !isClientKeyMessage(m)) {
                   folderBotCalls += 1;
                   let t = m.total_tokens || 0;
                   let c = m.cost_usd || 0;

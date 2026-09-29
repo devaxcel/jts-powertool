@@ -226,6 +226,18 @@ def normalize_workspace_info(
 
 
 
+_key_source_column_ready = False
+
+
+def _ensure_key_source_column(cur) -> None:
+    """key_source: 'jts' = JTS key, billed to client; 'client' = client's own key, not billed."""
+    global _key_source_column_ready
+    if _key_source_column_ready:
+        return
+    cur.execute("ALTER TABLE api_usage_logs ADD COLUMN IF NOT EXISTS key_source VARCHAR(20) DEFAULT 'jts';")
+    _key_source_column_ready = True
+
+
 def record_api_usage(
     *,
     workspace_id: Optional[str] = None,
@@ -236,9 +248,11 @@ def record_api_usage(
     model: str = "claude-3-5-sonnet",
     input_tokens: int = 0,
     output_tokens: int = 0,
+    key_source: str = "jts",
 ) -> Dict[str, Any]:
     """
     Logs an API call with token counts and calculated cost USD into PostgreSQL api_usage_logs table.
+    Calls made with a client's own key (key_source='client') are logged with zero cost and excluded from billing.
     """
     channel_id = (channel_id or "unknown").strip()
     user_id = (user_id or "unknown").strip()
@@ -246,10 +260,14 @@ def record_api_usage(
     input_tokens = max(0, int(input_tokens))
     output_tokens = max(0, int(output_tokens))
     total_tokens = input_tokens + output_tokens
-    cost_usd = calculate_token_cost(model, input_tokens, output_tokens)
+    key_source = "client" if key_source == "client" else "jts"
+    cost_usd = 0.0 if key_source == "client" else calculate_token_cost(model, input_tokens, output_tokens)
 
     conn = get_db_connection()
     try:
+        with conn.cursor() as cur:
+            _ensure_key_source_column(cur)
+        conn.commit()
         workspace_id, workspace_name = normalize_workspace_info(
             workspace_id, workspace_name, channel_id=channel_id, conn=conn
         )
@@ -277,10 +295,10 @@ def record_api_usage(
 
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO api_usage_logs (workspace_id, workspace_name, channel_id, user_id, model, input_tokens, output_tokens, total_tokens, cost_usd, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                INSERT INTO api_usage_logs (workspace_id, workspace_name, channel_id, user_id, model, input_tokens, output_tokens, total_tokens, cost_usd, key_source, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 RETURNING id, created_at;
-            """, (workspace_id, workspace_name, channel_id, user_id, model, input_tokens, output_tokens, total_tokens, cost_usd))
+            """, (workspace_id, workspace_name, channel_id, user_id, model, input_tokens, output_tokens, total_tokens, cost_usd, key_source))
             row = cur.fetchone()
             conn.commit()
             logger.info(
@@ -298,6 +316,7 @@ def record_api_usage(
                 "output_tokens": output_tokens,
                 "total_tokens": total_tokens,
                 "cost_usd": cost_usd,
+                "key_source": key_source,
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
             }
     except Exception as e:
@@ -315,7 +334,9 @@ def get_usage_summary() -> Dict[str, Any]:
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            # Aggregate totals overall
+            _ensure_key_source_column(cur)
+            conn.commit()
+            # Aggregate totals overall (billable JTS-key calls only)
             cur.execute("""
                 SELECT 
                     COUNT(*) as total_calls,
@@ -325,7 +346,8 @@ def get_usage_summary() -> Dict[str, Any]:
                     COALESCE(SUM(cost_usd), 0.0) as total_cost_usd,
                     COUNT(DISTINCT channel_id) as active_channels_count,
                     COUNT(DISTINCT user_id) as active_users_count
-                FROM api_usage_logs;
+                FROM api_usage_logs
+                WHERE COALESCE(key_source, 'jts') = 'jts';
             """)
             overall = cur.fetchone() or {}
 
@@ -344,7 +366,8 @@ def get_usage_summary() -> Dict[str, Any]:
                 FROM api_usage_logs l
                 LEFT JOIN channel_metadata cm ON l.channel_id = cm.channel_id
                 LEFT JOIN slack_workspaces sw ON COALESCE(l.workspace_id, cm.workspace_id) = sw.team_id
-                GROUP BY 
+                WHERE COALESCE(l.key_source, 'jts') = 'jts'
+                GROUP BY
                     COALESCE(sw.team_id, cm.workspace_id, l.workspace_id, 'T5ZMF56H5'),
                     COALESCE(sw.team_name, cm.workspace_name, l.workspace_name, 'Axcel World'),
                     l.channel_id,
@@ -410,7 +433,8 @@ def get_usage_summary() -> Dict[str, Any]:
                     COALESCE(SUM(l.cost_usd), 0.0) as total_cost_usd
                 FROM api_usage_logs l
                 LEFT JOIN slack_workspaces sw ON l.workspace_id = sw.team_id
-                GROUP BY 
+                WHERE COALESCE(l.key_source, 'jts') = 'jts'
+                GROUP BY
                     COALESCE(sw.team_id, l.workspace_id, 'T5ZMF56H5'),
                     COALESCE(sw.team_name, l.workspace_name, 'Axcel World'),
                     l.user_id
@@ -470,7 +494,8 @@ def get_usage_summary() -> Dict[str, Any]:
                 FROM api_usage_logs l
                 LEFT JOIN channel_metadata cm ON l.channel_id = cm.channel_id
                 LEFT JOIN slack_workspaces sw ON COALESCE(l.workspace_id, cm.workspace_id) = sw.team_id
-                GROUP BY 
+                WHERE COALESCE(l.key_source, 'jts') = 'jts'
+                GROUP BY
                     COALESCE(sw.team_id, cm.workspace_id, l.workspace_id, 'T5ZMF56H5'),
                     COALESCE(sw.team_name, cm.workspace_name, l.workspace_name, 'Axcel World'),
                     l.channel_id,
@@ -570,8 +595,10 @@ def get_usage_logs(limit: int = 100) -> List[Dict[str, Any]]:
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
+            _ensure_key_source_column(cur)
+            conn.commit()
             cur.execute("""
-                SELECT 
+                SELECT
                     l.id,
                     l.workspace_id,
                     l.workspace_name,
@@ -588,6 +615,7 @@ def get_usage_logs(limit: int = 100) -> List[Dict[str, Any]]:
                 FROM api_usage_logs l
                 LEFT JOIN channel_metadata cm ON l.channel_id = cm.channel_id
                 LEFT JOIN slack_workspaces sw ON l.workspace_id = sw.team_id
+                WHERE COALESCE(l.key_source, 'jts') = 'jts'
                 ORDER BY l.created_at DESC
                 LIMIT %s;
             """, (limit,))
@@ -731,7 +759,9 @@ def recalculate_all_usage_costs() -> Dict[str, Any]:
     updated_count = 0
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, model, input_tokens, output_tokens, cost_usd FROM api_usage_logs;")
+            _ensure_key_source_column(cur)
+            # Client-own-key calls stay at zero cost
+            cur.execute("SELECT id, model, input_tokens, output_tokens, cost_usd FROM api_usage_logs WHERE COALESCE(key_source, 'jts') = 'jts';")
             rows = cur.fetchall() or []
             for r in rows:
                 row_id = r["id"]

@@ -15,7 +15,8 @@ import {
   Trash2,
   Building2,
 } from "lucide-react";
-import { UsageSummary, ApiUsageLog, formatLocalDateTime } from "@/lib/types";
+import { UsageSummary, ApiUsageLog, formatLocalDateTime, isClientKeyMessage } from "@/lib/types";
+import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import {
   fetchBillingSummary,
   fetchUsageLogs,
@@ -43,6 +44,7 @@ export default function BillingPage() {
 
   // RBAC state
   const [userRole, setUserRole] = useState<string>("jts_admin");
+  const [myFolderId, setMyFolderId] = useState<number | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -52,6 +54,7 @@ export default function BillingPage() {
         const savedSim = sessionStorage.getItem("jts_simulated_role");
         const r = savedSim || u.role || "jts_admin";
         setUserRole(r);
+        if (u.client_folder_id) setMyFolderId(Number(u.client_folder_id));
       } catch {}
     }
   }, []);
@@ -178,7 +181,7 @@ export default function BillingPage() {
                   m.user_id === "bot" ||
                   (m.user_name && (m.user_name.includes("Assistant") || m.user_name.includes("bot") || m.user_name.includes("Agent")));
 
-                if (isBot) {
+                if (isBot && !isClientKeyMessage(m)) {
                   chCalls += 1;
                   let inTok = m.input_tokens || 0;
                   let outTok = m.output_tokens || 0;
@@ -706,6 +709,11 @@ export default function BillingPage() {
           )}
         </div>
       </div>
+
+      {/* Client: own Anthropic key (not billed) vs. JTS key (billed) */}
+      {!isMasterAdmin && myFolderId && (
+        <ClientApiKeyCard folderId={myFolderId} canEdit={userRole === "client_admin"} />
+      )}
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

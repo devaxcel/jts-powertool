@@ -11,9 +11,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 from pydantic import BaseModel, Field
 
-from app.auth_router import get_user_context, get_folder_channel_ids
+from app.auth_router import get_user_context, get_folder_channel_ids, get_user_from_db
 
 from app.services.channel_secrets_service import (
+    store_folder_api_key,
+    get_folder_api_key_status,
+    delete_folder_api_key,
+    validate_anthropic_key,
     store_channel_secret,
     delete_channel_secret,
     list_channel_secrets,
@@ -187,6 +191,71 @@ def delete_folder_endpoint(
     except Exception as e:
         logger.error(f"[CHANNEL_SECRETS_ROUTER] Error deleting folder: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Client's own Anthropic key (per client folder) ---
+class SaveFolderKeyRequest(BaseModel):
+    api_key: str = Field(..., min_length=1, description="Client's own Anthropic API key (stored in AWS Secrets Manager)")
+
+
+def _authorize_folder_key(request: Request, folder_id: int, write: bool) -> str:
+    """
+    JTS Admin: any folder. Client Admin: own folder, read & write. Client Standard: own folder, read only.
+    Returns the acting username.
+    """
+    user_ctx = get_user_context(request, ignore_simulation=True)
+    role = user_ctx.get("actual_role") or user_ctx.get("role")
+    username = user_ctx.get("username") or "admin"
+
+    if role in ("jts_admin", "admin"):
+        return username
+    if role in ("client_admin", "client_standard"):
+        db_user = get_user_from_db(username) if username else None
+        assigned_folder = db_user.get("client_folder_id") if db_user else None
+        if not assigned_folder or int(assigned_folder) != int(folder_id):
+            raise HTTPException(status_code=403, detail="Access denied: You can only manage the API key of your own organization.")
+        if write and role != "client_admin":
+            raise HTTPException(status_code=403, detail="Access denied: Only a Client Admin can add or remove the API key.")
+        return username
+    raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+@channel_secrets_router.get("/folders/{folder_id}/anthropic-key", summary="Billing mode & client API key status (never returns the key)")
+def get_folder_key_endpoint(folder_id: int, request: Request):
+    _authorize_folder_key(request, folder_id, write=False)
+    return get_folder_api_key_status(folder_id, "anthropic")
+
+
+@channel_secrets_router.put("/folders/{folder_id}/anthropic-key", summary="Add or replace the client's own Anthropic key")
+def save_folder_key_endpoint(folder_id: int, payload: SaveFolderKeyRequest, request: Request):
+    actor = _authorize_folder_key(request, folder_id, write=True)
+    api_key = payload.api_key.strip()
+    if not api_key.startswith("sk-ant-"):
+        raise HTTPException(status_code=400, detail="This doesn't look like an Anthropic API key (it should start with 'sk-ant-').")
+    ok, msg = validate_anthropic_key(api_key)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    try:
+        result = store_folder_api_key(folder_id=folder_id, api_key=api_key, provider="anthropic", updated_by=actor)
+    except LookupError as le:
+        raise HTTPException(status_code=404, detail=str(le))
+    except Exception as e:
+        logger.error(f"[FOLDER_KEYS] Error saving client key for folder {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to store API key: {e}")
+    logger.info(f"[FOLDER_KEYS] Client Anthropic key set for folder {folder_id} by '{actor}' ({result.get('key_hint')})")
+    return {"status": "success", "message": "Your own Anthropic key is active. Usage will no longer be billed by JTS.", **result}
+
+
+@channel_secrets_router.delete("/folders/{folder_id}/anthropic-key", summary="Remove the client's own key (falls back to billed JTS key)")
+def delete_folder_key_endpoint(folder_id: int, request: Request):
+    actor = _authorize_folder_key(request, folder_id, write=True)
+    removed = delete_folder_api_key(folder_id, "anthropic")
+    logger.info(f"[FOLDER_KEYS] Client Anthropic key removed for folder {folder_id} by '{actor}' (existed={removed})")
+    return {
+        "status": "success",
+        "message": "Your key was removed. The JTS key is now used and usage is billed to your organization.",
+        **get_folder_api_key_status(folder_id, "anthropic"),
+    }
 
 
 @channel_secrets_router.get("/folders/{folder_id}", summary="Get folder details and its channels")
@@ -569,7 +638,8 @@ def get_channel_messages_endpoint(channel_id: str, request: Request, limit: int 
                     else:
                         msg_toks = msg.get("total_tokens") or 0
                         msg_cost = float(msg.get("cost_usd") or 0.0)
-                        if not msg_toks or not msg_cost:
+                        # Only estimate when tokens are missing; zero cost with real tokens = client's own key (not billed)
+                        if not msg_toks:
                             content_text = msg.get("content") or ""
                             out_toks = max(20, int(len(content_text) / 3.8))
                             in_toks = max(250, int(out_toks * 2.5))
