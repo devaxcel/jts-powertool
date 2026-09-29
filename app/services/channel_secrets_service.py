@@ -1817,6 +1817,8 @@ def _ensure_folder_keys_table(cur):
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (folder_id, provider)
         );
+        ALTER TABLE folder_api_keys ADD COLUMN IF NOT EXISTS last_error TEXT;
+        ALTER TABLE folder_api_keys ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMP WITH TIME ZONE;
     """)
     _folder_keys_table_ready = True
 
@@ -1916,6 +1918,8 @@ def store_folder_api_key(*, folder_id: int, api_key: str, provider: str = "anthr
                     aws_secret_name = EXCLUDED.aws_secret_name,
                     key_hint = EXCLUDED.key_hint,
                     updated_by = EXCLUDED.updated_by,
+                    last_error = NULL,
+                    last_error_at = NULL,
                     updated_at = CURRENT_TIMESTAMP;
             """, (folder_id, provider, secret_name, _mask_key(api_key), updated_by))
             conn.commit()
@@ -1934,7 +1938,7 @@ def get_folder_api_key_status(folder_id: int, provider: str = "anthropic") -> Di
             _ensure_folder_keys_table(cur)
             conn.commit()
             cur.execute("""
-                SELECT key_hint, updated_by, updated_at
+                SELECT key_hint, updated_by, updated_at, last_error, last_error_at
                 FROM folder_api_keys
                 WHERE folder_id = %s AND provider = %s;
             """, (folder_id, provider))
@@ -1951,8 +1955,12 @@ def get_folder_api_key_status(folder_id: int, provider: str = "anthropic") -> Di
             "key_hint": None,
             "updated_by": None,
             "updated_at": None,
+            "key_status": "none",
+            "last_error": None,
+            "last_error_at": None,
         }
     upd = row.get("updated_at")
+    err_at = row.get("last_error_at")
     return {
         "folder_id": folder_id,
         "provider": provider,
@@ -1961,7 +1969,34 @@ def get_folder_api_key_status(folder_id: int, provider: str = "anthropic") -> Di
         "key_hint": row.get("key_hint"),
         "updated_by": row.get("updated_by"),
         "updated_at": upd.isoformat() if hasattr(upd, "isoformat") else upd,
+        # "failing": the client's key was rejected; messages are answered with the JTS key and billed
+        "key_status": "failing" if row.get("last_error") else "ok",
+        "last_error": row.get("last_error"),
+        "last_error_at": err_at.isoformat() if hasattr(err_at, "isoformat") else err_at,
     }
+
+
+def set_folder_key_health(folder_id: int, error: Optional[str], provider: str = "anthropic") -> None:
+    """error=str marks the client's key as failing; error=None clears it after a successful call."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            _ensure_folder_keys_table(cur)
+            if error:
+                cur.execute("""
+                    UPDATE folder_api_keys SET last_error = %s, last_error_at = CURRENT_TIMESTAMP
+                    WHERE folder_id = %s AND provider = %s;
+                """, (error[:500], folder_id, provider))
+            else:
+                cur.execute("""
+                    UPDATE folder_api_keys SET last_error = NULL, last_error_at = NULL
+                    WHERE folder_id = %s AND provider = %s AND last_error IS NOT NULL;
+                """, (folder_id, provider))
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"[FOLDER_KEYS] Could not update key health for folder {folder_id}: {e}")
+    finally:
+        conn.close()
 
 
 def delete_folder_api_key(folder_id: int, provider: str = "anthropic") -> bool:
@@ -2066,12 +2101,12 @@ def resolve_anthropic_key(
     workspace_id: Optional[str] = None,
     workspace_name: Optional[str] = None,
     channel_name: Optional[str] = None,
-) -> tuple[Optional[str], str]:
+) -> tuple[Optional[str], str, Optional[int]]:
     """
-    Picks the Anthropic key for a channel and says who pays:
-      1. channel-specific key  -> ("...", "client")
-      2. client folder's key   -> ("...", "client")
-      3. none                  -> (None, "jts")  caller uses the JTS key and usage is billed
+    Picks the Anthropic key for a channel and says who pays: (key, source, folder_id_if_folder_key)
+      1. channel-specific key  -> ("...", "client", None)
+      2. client folder's key   -> ("...", "client", folder_id)
+      3. none                  -> (None, "jts", None)  caller uses the JTS key and usage is billed
     """
     try:
         key = get_channel_secret_value(
@@ -2079,15 +2114,15 @@ def resolve_anthropic_key(
             workspace_id=workspace_id, workspace_name=workspace_name, channel_name=channel_name,
         )
         if key:
-            return key, "client"
+            return key, "client", None
         folder_id = get_folder_id_for_channel(canonical_channel_id(channel_id))
         if folder_id:
             key = get_folder_api_key_value(folder_id, "anthropic")
             if key:
-                return key, "client"
+                return key, "client", folder_id
     except Exception as e:
         logger.warning(f"[FOLDER_KEYS] Key resolution failed for channel {channel_id}, using JTS key: {e}")
-    return None, "jts"
+    return None, "jts", None
 
 
 

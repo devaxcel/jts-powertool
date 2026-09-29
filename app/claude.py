@@ -159,6 +159,21 @@ def build_claude_messages_payload(
     return turns
 
 
+def _anthropic_error_message(resp: httpx.Response) -> str:
+    try:
+        return resp.json().get("error", {}).get("message", resp.text)
+    except Exception:
+        return resp.text
+
+
+def _is_client_key_failure(status_code: int, err_msg: str) -> bool:
+    """Key problems the client must fix (invalid, revoked, no permission, out of credit)."""
+    if status_code in (401, 402, 403):
+        return True
+    msg = (err_msg or "").lower()
+    return status_code == 400 and ("credit balance" in msg or "billing" in msg)
+
+
 def should_force_tool_calling(user_message: Union[str, List[Dict[str, Any]]]) -> bool:
     """Detects if user intent is explicitly a tool operation (GitHub or Web)."""
     text = ""
@@ -246,8 +261,9 @@ async def stream(
         "content-type": "application/json",
     }
     
+    # JTS's Anthropic workspace only applies to the JTS key, never to a client's own key
     anthropic_ws_id = get_secret("ANTHROPIC_WORKSPACE_ID", "").strip().strip('"').strip("'")
-    if anthropic_ws_id and anthropic_ws_id not in _INVALID_ANTHROPIC_WORKSPACE_IDS:
+    if key_source != "client" and anthropic_ws_id and anthropic_ws_id not in _INVALID_ANTHROPIC_WORKSPACE_IDS:
         headers["anthropic-workspace-id"] = anthropic_ws_id
 
     try:
@@ -310,10 +326,41 @@ async def stream(
                                 headers=headers,
                                 json=payload
                             )
+                            err_msg = _anthropic_error_message(resp)
+
+                        # Client's own key is invalid/revoked/out of credit: answer with the JTS key and bill it
+                        if (
+                            resp.status_code != 200
+                            and key_source == "client"
+                            and _is_client_key_failure(resp.status_code, err_msg)
+                        ):
+                            jts_key = get_secret("ANTHROPIC_API_KEY", "").strip().strip('"').strip("'")
+                            if jts_key and jts_key != headers.get("x-api-key"):
+                                logger.warning(
+                                    f"[DEBUG_CLAUDE] Client key failed ({resp.status_code}: {err_msg}). "
+                                    f"Falling back to JTS key (billed) for channel={channel_id}."
+                                )
+                                headers["x-api-key"] = jts_key
+                                key_source = "jts"
+                                if anthropic_ws_id and anthropic_ws_id not in _INVALID_ANTHROPIC_WORKSPACE_IDS:
+                                    headers["anthropic-workspace-id"] = anthropic_ws_id
+                                yield Message(
+                                    role="system",
+                                    content={"data": {"key_fallback": {"status": resp.status_code, "reason": str(err_msg)[:300]}}},
+                                )
+                                resp = await client.post(
+                                    "https://api.anthropic.com/v1/messages",
+                                    headers=headers,
+                                    json=payload
+                                )
+                                err_msg = _anthropic_error_message(resp)
 
                         if resp.status_code != 200:
                             logger.error(f"[DEBUG_CLAUDE] Anthropic API Error ({resp.status_code}): {err_msg}")
-                            yield Message(role="assistant", content=f"API Error ({resp.status_code}): {err_msg}")
+                            yield Message(
+                                role="assistant",
+                                content="Sorry, I couldn't process that request right now. Please try again in a moment.",
+                            )
                             return
 
                     resp_data = resp.json()
@@ -456,7 +503,10 @@ async def stream(
 
         except Exception as e:
             logger.error(f"[DEBUG_CLAUDE] Claude agent loop error: {e}", exc_info=True)
-            yield Message(role="assistant", content=f"Error communicating with Claude agent: {str(e)}")
+            yield Message(
+                role="assistant",
+                content="Sorry, I couldn't process that request right now. Please try again in a moment.",
+            )
 
         return
 

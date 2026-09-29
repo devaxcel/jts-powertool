@@ -518,6 +518,9 @@ export interface FolderApiKeyStatus {
   key_hint: string | null;
   updated_by: string | null;
   updated_at: string | null;
+  key_status?: "none" | "ok" | "failing";
+  last_error?: string | null;
+  last_error_at?: string | null;
 }
 
 

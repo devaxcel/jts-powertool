@@ -69,6 +69,7 @@ export function ClientApiKeyCard({ folderId, canEdit }: ClientApiKeyCardProps) {
   }
 
   const usingOwnKey = !!status?.configured;
+  const keyFailing = usingOwnKey && status?.key_status === "failing";
 
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm space-y-4">
@@ -88,13 +89,21 @@ export function ClientApiKeyCard({ folderId, canEdit }: ClientApiKeyCardProps) {
         {!loading && status && (
           <span
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border self-start sm:self-auto ${
-              usingOwnKey
+              keyFailing
+                ? "bg-rose-50 text-rose-700 border-rose-200"
+                : usingOwnKey
                 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                 : "bg-amber-50 text-amber-700 border-amber-200"
             }`}
           >
-            {usingOwnKey ? <ShieldCheck className="h-3.5 w-3.5" /> : <Receipt className="h-3.5 w-3.5" />}
-            {usingOwnKey ? "Own key · Not billed" : "JTS key · Billed"}
+            {keyFailing ? (
+              <AlertCircle className="h-3.5 w-3.5" />
+            ) : usingOwnKey ? (
+              <ShieldCheck className="h-3.5 w-3.5" />
+            ) : (
+              <Receipt className="h-3.5 w-3.5" />
+            )}
+            {keyFailing ? "Own key failing · Billed" : usingOwnKey ? "Own key · Not billed" : "JTS key · Billed"}
           </span>
         )}
       </div>
@@ -141,6 +150,24 @@ export function ClientApiKeyCard({ folderId, canEdit }: ClientApiKeyCardProps) {
             </div>
           </div>
         )
+      )}
+
+      {keyFailing && (
+        <div className="flex items-start gap-2 p-3 rounded-xl border text-xs bg-rose-50 border-rose-200 text-rose-800">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-rose-600" />
+          <div>
+            <p className="font-semibold">Your API key is not working (invalid, revoked, or out of credit).</p>
+            <p className="mt-0.5">
+              To keep your team's Slack replies working, messages are being answered with the JTS key and{" "}
+              <strong>billed to your organization</strong>. Top up credits in your Anthropic account, or replace
+              the key below.
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-rose-700">
+              {status?.last_error}
+              {status?.last_error_at ? ` · ${formatLocalDateTime(status.last_error_at)}` : ""}
+            </p>
+          </div>
+        </div>
       )}
 
       {feedback && (
