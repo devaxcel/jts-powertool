@@ -1,0 +1,15 @@
+[Unit]
+Description=JTS PowerTool FastAPI Web Application
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=aleem
+WorkingDirectory=/home/aleem/jts-powertool
+EnvironmentFile=/home/aleem/jts-powertool/.env
+ExecStart=/home/aleem/jts-powertool/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

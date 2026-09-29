@@ -1,0 +1,928 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import {
+  Users,
+  UserPlus,
+  Trash2,
+  RefreshCw,
+  Shield,
+  Building,
+  Building2,
+  Check,
+  X,
+  Pencil,
+  Mail,
+  GitBranch,
+  CheckSquare,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  fetchUsers,
+  createDashboardUser,
+  updateDashboardUser,
+  deleteDashboardUser,
+  fetchFolders,
+  fetchOrganizations,
+  sendUserSetupEmail,
+  extractErrorMessage,
+} from "@/lib/api";
+import { DashboardUser, ChannelFolder, Organization, formatLocalDateTime } from "@/lib/types";
+
+export default function UsersPage() {
+  const router = useRouter();
+  const [users, setUsers] = useState<DashboardUser[]>([]);
+  const [folders, setFolders] = useState<ChannelFolder[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<DashboardUser | null>(null);
+  const [sendingEmailId, setSendingEmailId] = useState<number | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
+
+  // Create User Form State
+  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"jts_admin" | "client_admin">("client_admin");
+  const [clientFolderId, setClientFolderId] = useState<string>("");
+  const [organizationId, setOrganizationId] = useState<string>("");
+  const [githubRead, setGithubRead] = useState(true);
+  const [githubPush, setGithubPush] = useState(true);
+  const [jiraCreate, setJiraCreate] = useState(true);
+  const [jiraClose, setJiraClose] = useState(false);
+
+  // Edit User Form State
+  const [editName, setEditName] = useState("");
+  const [editUsername, setEditUsername] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [editRole, setEditRole] = useState<"jts_admin" | "client_admin">("client_admin");
+  const [editClientFolderId, setEditClientFolderId] = useState<string>("");
+  const [editOrganizationId, setEditOrganizationId] = useState<string>("");
+  const [editGithubRead, setEditGithubRead] = useState(true);
+  const [editGithubPush, setEditGithubPush] = useState(true);
+  const [editJiraCreate, setEditJiraCreate] = useState(true);
+  const [editJiraClose, setEditJiraClose] = useState(false);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [uList, fList, orgsRes] = await Promise.all([
+        fetchUsers(),
+        fetchFolders(),
+        fetchOrganizations().catch(() => ({ organizations: [], total: 0 })),
+      ]);
+      setUsers(uList);
+      setFolders(fList);
+      setOrganizations(orgsRes.organizations || []);
+    } catch (e) {
+      console.error("Failed to load user management data:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const rawUser = sessionStorage.getItem("jts_user");
+        const u = JSON.parse(rawUser || "{}");
+        const userRole = u.role || "jts_admin";
+        if (userRole === "client_admin" || userRole === "client_standard") {
+          router.replace("/");
+          return;
+        }
+      } catch {}
+    }
+    loadData();
+  }, [loadData, router]);
+
+  const resetForm = () => {
+    setName("");
+    setUsername("");
+    setEmail("");
+    setRole("client_admin");
+    setClientFolderId("");
+    setOrganizationId("");
+    setGithubRead(true);
+    setGithubPush(true);
+    setJiraCreate(true);
+    setJiraClose(false);
+    setErrorMsg("");
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg("");
+    setSuccessMsg("");
+
+    const cleanName = name.trim();
+    const cleanUsername = username.trim();
+    const cleanEmail = email.trim();
+
+    if (!cleanName) {
+      setErrorMsg("Full Name is required.");
+      return;
+    }
+    if (!cleanUsername) {
+      setErrorMsg("Username / User ID is required.");
+      return;
+    }
+    if (!cleanEmail) {
+      setErrorMsg("Email Address is required.");
+      return;
+    }
+    if (!cleanEmail.includes("@") || !cleanEmail.includes(".")) {
+      setErrorMsg("Please enter a valid email address.");
+      return;
+    }
+    if (role !== "jts_admin" && !clientFolderId) {
+      setErrorMsg("Please select a Client Folder to assign to this user.");
+      return;
+    }
+    if (role === "client_admin" && !organizationId) {
+      setErrorMsg("Please select an Organization to assign to this Client Admin.");
+      return;
+    }
+
+    try {
+      const defaultTz =
+        typeof window !== "undefined"
+          ? localStorage.getItem("jts_global_timezone") ||
+            sessionStorage.getItem("jts_global_timezone") ||
+            "UTC"
+          : "UTC";
+
+      const res = await createDashboardUser({
+        name: cleanName,
+        username: cleanUsername,
+        email: cleanEmail,
+        role,
+        timezone: defaultTz,
+        client_folder_id: clientFolderId ? parseInt(clientFolderId, 10) : null,
+        organization_id: organizationId ? parseInt(organizationId, 10) : null,
+      });
+      setSuccessMsg(
+        res.message ||
+          `User '${cleanName}' (@${cleanUsername}) created successfully! Password setup invitation email sent to ${cleanEmail}.`
+      );
+      resetForm();
+      setShowModal(false);
+      loadData();
+    } catch (err: any) {
+      setErrorMsg(extractErrorMessage(err, "Failed to create user"));
+    }
+  };
+
+  const handleSendSetupEmail = async (u: DashboardUser) => {
+    if (!u.email) {
+      alert(`User '${u.name || u.username}' does not have an email address configured.`);
+      return;
+    }
+    if (!confirm(`Send password setup invitation email to ${u.email}?`)) return;
+
+    setSendingEmailId(u.id);
+    setErrorMsg("");
+    setSuccessMsg("");
+    try {
+      const res = await sendUserSetupEmail(u.id);
+      setSuccessMsg(res.message || `Password setup email sent to ${u.email}!`);
+    } catch (err: any) {
+      setErrorMsg(extractErrorMessage(err, "Failed to send password setup email"));
+    } finally {
+      setSendingEmailId(null);
+    }
+  };
+
+  const handleOpenEditModal = (u: DashboardUser) => {
+    setErrorMsg("");
+    setSuccessMsg("");
+    setEditingUser(u);
+    setEditName(u.name || u.username);
+    setEditUsername(u.username);
+    setEditEmail(u.email || "");
+    setEditPassword("");
+    setEditRole(u.role === "jts_admin" ? "jts_admin" : "client_admin");
+    setEditClientFolderId(u.client_folder_id ? String(u.client_folder_id) : "");
+    setEditOrganizationId(u.organization_id ? String(u.organization_id) : "");
+    setEditGithubRead(true);
+    setEditGithubPush(u.role === "jts_admin" ? true : false);
+    setEditJiraCreate(true);
+    setEditJiraClose(false);
+    setShowEditModal(true);
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setErrorMsg("");
+    setSuccessMsg("");
+
+    const cleanName = editName.trim();
+    const cleanEmail = editEmail.trim();
+    const cleanPassword = editPassword.trim();
+
+    if (!cleanName) {
+      setErrorMsg("Full Name is required.");
+      return;
+    }
+    if (!cleanEmail) {
+      setErrorMsg("Email Address is required.");
+      return;
+    }
+    if (!cleanEmail.includes("@") || !cleanEmail.includes(".")) {
+      setErrorMsg("Please enter a valid email address.");
+      return;
+    }
+    if (editRole !== "jts_admin" && !editClientFolderId) {
+      setErrorMsg("Please select a Client Folder to assign to this user.");
+      return;
+    }
+    if (editRole === "client_admin" && !editOrganizationId) {
+      setErrorMsg("Please select an Organization to assign to this Client Admin.");
+      return;
+    }
+
+    try {
+      await updateDashboardUser(editingUser.id, {
+        name: cleanName,
+        email: cleanEmail,
+        password: cleanPassword || undefined,
+        role: editRole,
+        client_folder_id: editClientFolderId ? parseInt(editClientFolderId, 10) : null,
+        organization_id: editOrganizationId ? parseInt(editOrganizationId, 10) : null,
+      });
+      setSuccessMsg(`User '${cleanName}' updated successfully!`);
+      setShowEditModal(false);
+      setEditingUser(null);
+      loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to update user");
+    }
+  };
+
+  const handleDeleteUser = async (userId: number, uName: string) => {
+    if (!confirm(`Are you sure you want to delete user '${uName}'?`)) return;
+    try {
+      await deleteDashboardUser(userId);
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+    } catch (err: any) {
+      alert(err.message || "Failed to delete user");
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto flex flex-col min-h-[calc(100vh-8rem)]">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-200">
+        <div className="flex items-center gap-2.5">
+          <div className="h-9 w-9 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA]">
+            <Users className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              <span>Multi-Tenant User &amp; Role Management</span>
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Manage users, assign roles (JTS Admin, Client Admin), and bind client folder permissions.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={loadData}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition shadow-sm"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-[#088ADA]" : ""}`} />
+            <span>Refresh</span>
+          </button>
+
+          <button
+            onClick={() => {
+              resetForm();
+              setShowModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#088ADA] hover:bg-[#0778bd] text-white text-xs sm:text-sm font-semibold shadow-sm transition active:scale-95"
+          >
+            <UserPlus className="h-4 w-4" />
+            <span>Create New User</span>
+          </button>
+        </div>
+      </div>
+
+      {successMsg && (
+        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+          <Check className="h-4 w-4 text-emerald-600 shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
+      {/* Role Summary Badges */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="p-4 rounded-xl bg-white border border-gray-200 shadow-sm flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 text-[#088ADA] flex items-center justify-center font-bold">
+            <Shield className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-gray-800">JTS Admin</div>
+            <div className="text-[11px] text-gray-500">Full System &amp; Multi-Client Access</div>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-xl bg-white border border-gray-200 shadow-sm flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 text-[#088ADA] flex items-center justify-center font-bold">
+            <Building className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-gray-800">Client Admin</div>
+            <div className="text-[11px] text-gray-500">Scoped to Assigned Client Folder &amp; Team</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Users Table */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider">Registered Users ({users.length})</h2>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-gray-100/70 border-b border-gray-200 text-gray-500 uppercase font-semibold text-[10px]">
+              <tr>
+                <th className="p-3">User &amp; Name</th>
+                <th className="p-3">Role</th>
+                <th className="p-3">Assigned Client Folder</th>
+                <th className="p-3">Created Date</th>
+                <th className="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 font-mono">
+              {users.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-gray-400 font-sans">
+                    No users registered in database yet.
+                  </td>
+                </tr>
+              ) : (
+                users.map((u) => {
+                  const isJtsAdmin = u.role === "jts_admin";
+                  const isClientAdmin = u.role === "client_admin";
+
+                  return (
+                    <tr key={u.id} className="hover:bg-gray-50/60 transition">
+                      <td className="p-3">
+                        <div className="font-bold text-gray-800 flex items-center gap-1.5 font-sans">
+                          <span>{u.name || u.username}</span>
+                          {u.name && <span className="text-[11px] text-gray-400 font-mono">(@{u.username})</span>}
+                        </div>
+                        {u.email && <div className="text-[10px] text-gray-400 font-sans">{u.email}</div>}
+                      </td>
+                      <td className="p-3 font-sans">
+                        {isJtsAdmin ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-800 border border-gray-200 font-semibold text-[10px]">
+                            JTS Admin
+                          </span>
+                        ) : isClientAdmin ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200 font-semibold text-[10px]">
+                            Client Admin
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[10px]">
+                            Client Standard
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3 text-gray-600 font-sans">
+                        {u.client_folder_name ? (
+                          <div className="space-y-0.5">
+                            <span className="font-semibold text-gray-800 flex items-center gap-1">
+                              <Building className="h-3.5 w-3.5 text-[#088ADA]" />
+                              {u.client_folder_name}
+                            </span>
+                            {u.organization_name && (
+                              <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
+                                <Building2 className="h-3 w-3 text-emerald-600" />
+                                {u.organization_name}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 italic">All Clients (Global)</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-gray-400 text-[10px]">
+                        {formatLocalDateTime(u.created_at)}
+                      </td>
+                      <td className="p-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => handleSendSetupEmail(u)}
+                            disabled={sendingEmailId === u.id}
+                            className="p-1.5 rounded text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 transition"
+                            title={u.email ? `Send Password Setup Email to ${u.email}` : "No email configured"}
+                          >
+                            <Mail className={`h-4 w-4 ${sendingEmailId === u.id ? "animate-pulse text-indigo-400" : ""}`} />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEditModal(u)}
+                            className="p-1.5 rounded text-[#088ADA] hover:bg-blue-50 transition"
+                            title="Edit User"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(u.id, u.name || u.username)}
+                            className="p-1.5 rounded text-rose-500 hover:bg-rose-50 transition"
+                            title="Delete User"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Create User Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4 max-h-[90vh] overflow-y-auto my-auto">
+            <div className="flex items-center justify-between border-b pb-3 border-gray-100 sticky top-0 bg-white z-10">
+              <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                <UserPlus className="h-4 w-4 text-[#088ADA]" />
+                <span>Create New User</span>
+              </h3>
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateUser} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">
+                  Full Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Alex Johnson"
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#088ADA]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">
+                  Username / User ID <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="e.g. alex_client"
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#088ADA]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">
+                  Email Address <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="alex@clientcompany.com"
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#088ADA]"
+                />
+              </div>
+
+              <div className="p-3 bg-blue-50/80 border border-blue-100 rounded-xl flex items-start gap-2.5 text-blue-900">
+                <Mail className="h-4 w-4 text-[#088ADA] shrink-0 mt-0.5" />
+                <p className="text-[11px] leading-relaxed text-blue-700">
+                  A password setup email with a secure 24-hour link will be sent to this email address so the user can set their own password.
+                </p>
+              </div>
+
+              {role === "client_admin" && (
+                <div>
+                  <label className="block text-gray-600 font-semibold mb-1">
+                    Assign Organization <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={organizationId}
+                    required
+                    onChange={(e) => setOrganizationId(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
+                  >
+                    <option value="">-- Select Organization --</option>
+                    {organizations.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {role !== "jts_admin" && (
+                <div>
+                  <label className="block text-gray-600 font-semibold mb-1">
+                    Assign Client Folder <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={clientFolderId}
+                    required
+                    onChange={(e) => setClientFolderId(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
+                  >
+                    <option value="">-- Select Client Folder --</option>
+                    {folders.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">
+                  User Access Role <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={role}
+                  onChange={(e: any) => setRole(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
+                >
+                  <option value="client_admin">Client Admin (Scoped Team &amp; Billing Manager)</option>
+                  <option value="jts_admin">JTS Admin (Full Global Access)</option>
+                </select>
+              </div>
+
+              {/* Tool Access & Permissions */}
+              <div className="pt-2 border-t border-gray-100 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-gray-700 font-bold">Tool Access Permissions</label>
+                  <span className="text-[10px] text-gray-400 font-normal">Granular Scopes</span>
+                </div>
+
+                {/* GitHub Permissions Box */}
+                <div className="p-3 bg-gray-50/80 border border-gray-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between border-b border-gray-200/60 pb-1.5">
+                    <span className="font-semibold text-gray-800 flex items-center gap-1.5 text-[11px]">
+                      <GitBranch className="h-3.5 w-3.5 text-[#088ADA]" />
+                      GitHub Permissions
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-[#088ADA] font-mono font-medium">
+                      Active
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 pt-0.5">
+                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={githubRead}
+                        onChange={(e) => setGithubRead(e.target.checked)}
+                        className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
+                      />
+                      <span>Can Read Repos</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={githubPush}
+                        onChange={(e) => setGithubPush(e.target.checked)}
+                        className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
+                      />
+                      <span>Can Push Code / Merge PRs</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Jira Permissions Box (Future) */}
+                <div className="p-3 bg-gray-50/80 border border-gray-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between border-b border-gray-200/60 pb-1.5">
+                    <span className="font-semibold text-gray-800 flex items-center gap-1.5 text-[11px]">
+                      <CheckSquare className="h-3.5 w-3.5 text-purple-600" />
+                      Jira (Future Integration)
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-mono font-medium">
+                      Future
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 pt-0.5">
+                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={jiraCreate}
+                        onChange={(e) => setJiraCreate(e.target.checked)}
+                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
+                      />
+                      <span>Can Create Tickets</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={jiraClose}
+                        onChange={(e) => setJiraClose(e.target.checked)}
+                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
+                      />
+                      <span>Can Close/Delete Tickets</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {errorMsg && (
+                <div className="p-2.5 rounded-lg bg-rose-50 text-rose-700 text-xs border border-rose-200">
+                  {errorMsg}
+                </div>
+              )}
+
+              <div className="pt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetForm();
+                    setShowModal(false);
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-gray-500 hover:bg-gray-100 border border-gray-200"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-[#088ADA] hover:bg-[#0778bd] text-white font-semibold shadow-sm transition active:scale-95"
+                >
+                  Create User
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEditModal && editingUser && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4 max-h-[90vh] overflow-y-auto my-auto">
+            <div className="flex items-center justify-between border-b pb-3 border-gray-100 sticky top-0 bg-white z-10">
+              <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                <Pencil className="h-4 w-4 text-[#088ADA]" />
+                <span>Edit User Details</span>
+              </h3>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingUser(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateUser} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">
+                  Full Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="e.g. Alex Johnson"
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#088ADA]"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-gray-600 font-semibold">Username / User ID</label>
+                  <span className="text-[10px] font-medium text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded">
+                    Not Editable
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  disabled
+                  readOnly
+                  value={editUsername}
+                  className="w-full p-2 border border-gray-200 bg-gray-100 text-gray-500 rounded-lg cursor-not-allowed font-mono select-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">
+                  Email Address <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  placeholder="alex@clientcompany.com"
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#088ADA]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">
+                  New Password <span className="text-gray-400 font-normal">(Leave blank to keep existing)</span>
+                </label>
+                <input
+                  type="password"
+                  value={editPassword}
+                  onChange={(e) => setEditPassword(e.target.value)}
+                  placeholder="•••••••• (Leave blank to keep current password)"
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#088ADA]"
+                />
+              </div>
+
+              {editRole === "client_admin" && (
+                <div>
+                  <label className="block text-gray-600 font-semibold mb-1">
+                    Assign Organization <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={editOrganizationId}
+                    required
+                    onChange={(e) => setEditOrganizationId(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
+                  >
+                    <option value="">-- Select Organization --</option>
+                    {organizations.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {editRole !== "jts_admin" && (
+                <div>
+                  <label className="block text-gray-600 font-semibold mb-1">
+                    Assign Client Folder <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={editClientFolderId}
+                    required
+                    onChange={(e) => setEditClientFolderId(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
+                  >
+                    <option value="">-- Select Client Folder --</option>
+                    {folders.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">
+                  User Access Role <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={editRole}
+                  onChange={(e: any) => setEditRole(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
+                >
+                  <option value="client_admin">Client Admin (Scoped Team &amp; Billing Manager)</option>
+                  <option value="jts_admin">JTS Admin (Full Global Access)</option>
+                </select>
+              </div>
+
+              {/* Tool Access & Permissions */}
+              <div className="pt-2 border-t border-gray-100 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-gray-700 font-bold">Tool Access Permissions</label>
+                  <span className="text-[10px] text-gray-400 font-normal">Granular Scopes</span>
+                </div>
+
+                {/* GitHub Permissions Box */}
+                <div className="p-3 bg-gray-50/80 border border-gray-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between border-b border-gray-200/60 pb-1.5">
+                    <span className="font-semibold text-gray-800 flex items-center gap-1.5 text-[11px]">
+                      <GitBranch className="h-3.5 w-3.5 text-[#088ADA]" />
+                      GitHub Permissions
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-[#088ADA] font-mono font-medium">
+                      Active
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 pt-0.5">
+                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={editGithubRead}
+                        onChange={(e) => setEditGithubRead(e.target.checked)}
+                        className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
+                      />
+                      <span>Can Read Repos</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={editGithubPush}
+                        onChange={(e) => setEditGithubPush(e.target.checked)}
+                        className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
+                      />
+                      <span>Can Push Code / Merge PRs</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Jira Permissions Box (Future) */}
+                <div className="p-3 bg-gray-50/80 border border-gray-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between border-b border-gray-200/60 pb-1.5">
+                    <span className="font-semibold text-gray-800 flex items-center gap-1.5 text-[11px]">
+                      <CheckSquare className="h-3.5 w-3.5 text-purple-600" />
+                      Jira (Future Integration)
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-mono font-medium">
+                      Future
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 pt-0.5">
+                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={editJiraCreate}
+                        onChange={(e) => setEditJiraCreate(e.target.checked)}
+                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
+                      />
+                      <span>Can Create Tickets</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={editJiraClose}
+                        onChange={(e) => setEditJiraClose(e.target.checked)}
+                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
+                      />
+                      <span>Can Close/Delete Tickets</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {errorMsg && (
+                <div className="p-2.5 rounded-lg bg-rose-50 text-rose-700 text-xs border border-rose-200">
+                  {errorMsg}
+                </div>
+              )}
+
+              <div className="pt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingUser(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-gray-500 hover:bg-gray-100 border border-gray-200"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-[#088ADA] hover:bg-[#0778bd] text-white font-semibold shadow-sm transition active:scale-95"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}

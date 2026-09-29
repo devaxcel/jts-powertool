@@ -1,0 +1,15 @@
+[Unit]
+Description=JTS PowerTool Background Queue Worker
+After=network.target postgresql.service jts-powertool.service
+
+[Service]
+Type=simple
+User=aleem
+WorkingDirectory=/home/aleem/jts-powertool
+EnvironmentFile=/home/aleem/jts-powertool/.env
+ExecStart=/home/aleem/jts-powertool/.venv/bin/python -m app.worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

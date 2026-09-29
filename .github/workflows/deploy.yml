@@ -1,0 +1,57 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to Production EC2
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          password: ${{ secrets.EC2_PASSWORD }}
+          port: 22
+          request_pty: true
+          script: |
+            echo "🚀 Navigating to project directory..."
+            cd ~/jts-powertool || exit 1
+
+            echo "📥 Pulling latest changes from main branch..."
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/AbdulAleemDev/jts-powertool.git
+            git pull origin main
+
+            echo "📦 Installing updated dependencies..."
+            source .venv/bin/activate
+            pip install -r requirements.txt
+
+            echo "🔍 Verifying Node.js and npx for GitHub MCP Server..."
+            if ! command -v npx &> /dev/null; then
+              echo "⚠️ npx not detected, installing Node.js and npm..."
+              echo "${{ secrets.EC2_PASSWORD }}" | sudo -S apt-get update -y && echo "${{ secrets.EC2_PASSWORD }}" | sudo -S apt-get install -y nodejs npm
+            fi
+
+            echo "🔨 Building frontend application..."
+            cd ~/jts-powertool/frontend || exit 1
+            npm install
+            npm run build
+            cd ~/jts-powertool || exit 1
+
+            echo "🔄 Restarting application services..."
+            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S systemctl restart jts-worker jts-powertool jts-frontend
+            echo "✅ systemd services (jts-worker, jts-powertool & jts-frontend) restarted successfully!"
+
+            echo "🎉 Deployment completed successfully!"
