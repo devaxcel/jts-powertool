@@ -16,8 +16,8 @@ const geistMono = localFont({
 import { DashboardShell } from "@/components/DashboardShell";
 
 export const metadata: Metadata = {
-  title: "JTS PowerTool • Agent Console & Management",
-  description: "Enterprise Slack-Claude & GitHub MCP Agent Control Dashboard",
+  title: "JTS PowerTool",
+  description: "Manage your Slack AI assistant, approvals, usage and billing",
 };
 
 export default function RootLayout({
@@ -26,12 +26,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased flex bg-[#088ADA] text-gray-800 min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased flex bg-[#f5f7fa] text-gray-800 min-h-screen`}
         style={{
-          backgroundColor: "#088ADA",
-          color: "#ffffff",
+          backgroundColor: "#f5f7fa",
+          color: "#1f2937",
           fontFamily: '"Myriad Pro", "Helvetica", "Arial", "Verdana", "Microsoft JhengHei", "Microsoft Sans Serif", sans-serif',
         }}
       >

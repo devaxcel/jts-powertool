@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { LogEvent, UsageSummary, ApiUsageLog, formatLocalDateTime, isClientKeyMessage } from "@/lib/types";
 import { fetchUsageSummary, fetchUsageLogs, fetchFolder, fetchFolders, fetchChannelMessages } from "@/lib/api";
+import { PageHeader } from "@/components/ui";
 
 export default function LogsPage() {
   const [logs, setLogs] = useState<LogEvent[]>([]);
@@ -281,55 +282,42 @@ export default function LogsPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto flex flex-col">
-      {/* Top Controls Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
-        <div>
-          <h1 className="text-xl font-bold text-gray-700 flex items-center gap-2">
-            <Activity className="h-5 w-5 text-[#088ADA]" />
-            <span>Telemetry, Token Usage & API Cost Monitor</span>
-          </h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Real-time API usage, calculated token costs per channel, and live telemetry log stream.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          {/* Tab Selector */}
-          <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200 text-xs font-semibold">
-            <button
-              onClick={() => setActiveTab("usage")}
-              className={`px-3 py-1.5 rounded-lg transition ${
-                activeTab === "usage"
-                  ? "bg-[#088ADA] text-white shadow"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              Token Cost Telemetry
-            </button>
+      <PageHeader
+        icon={Activity}
+        title="Activity log"
+        description="Everything the system does, as it happens: Slack messages received, AI replies, tool use and errors."
+        badge={
+          <span
+            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
+              connected ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-gray-100 border-gray-200 text-gray-600"
+            }`}
+            title={connected ? "New events appear automatically" : "Live updates are not connected. Refresh the page to try again."}
+          >
+            <Radio className={`h-3 w-3 ${connected ? "animate-pulse" : ""}`} />
+            {connected ? "Live" : "Not live"}
+          </span>
+        }
+        actions={
+          <div className="flex bg-white p-1 rounded-xl border border-gray-200 text-xs font-medium">
             <button
               onClick={() => setActiveTab("stream")}
               className={`px-3 py-1.5 rounded-lg transition ${
-                activeTab === "stream"
-                  ? "bg-[#088ADA] text-white shadow"
-                  : "text-gray-600 hover:text-gray-900"
+                activeTab === "stream" ? "bg-[#088ADA] text-white shadow-sm" : "text-gray-600 hover:text-gray-900"
               }`}
             >
-              Live Telemetry Console
+              Events
+            </button>
+            <button
+              onClick={() => setActiveTab("usage")}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                activeTab === "usage" ? "bg-[#088ADA] text-white shadow-sm" : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              AI usage &amp; cost
             </button>
           </div>
-
-          <div
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border ${
-              connected
-                ? "bg-emerald-50 border-emerald-200 text-emerald-600"
-                : "bg-rose-50 border-rose-500/20 text-rose-500"
-            }`}
-          >
-            <Radio className={`h-3 w-3 ${connected ? "animate-pulse" : ""}`} />
-            <span>{connected ? "Stream Live" : "Offline"}</span>
-          </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* TOKEN USAGE & COST TELEMETRY TAB */}
       {activeTab === "usage" && (
@@ -338,7 +326,7 @@ export default function LogsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white border border-gray-200 p-5 rounded-2xl space-y-2 shadow-sm">
               <div className="flex items-center justify-between text-xs text-gray-600 font-semibold">
-                <span>Total Calculated Cost</span>
+                <span>Total cost</span>
                 <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200">
                   <DollarSign className="h-4 w-4" />
                 </div>
@@ -346,12 +334,12 @@ export default function LogsPage() {
               <div className="text-2xl font-bold font-mono text-gray-900">
                 ${usageSummary ? usageSummary.total_cost_usd.toFixed(6) : "0.000000"}
               </div>
-              <p className="text-xs text-gray-500">Calculated per model &amp; 1M token rate</p>
+              <p className="text-xs text-gray-500">Based on each AI model's price</p>
             </div>
 
             <div className="bg-white border border-gray-200 p-5 rounded-2xl space-y-2 shadow-sm">
               <div className="flex items-center justify-between text-xs text-gray-600 font-semibold">
-                <span>Total API Calls</span>
+                <span>AI replies</span>
                 <div className="p-2 rounded-lg bg-gray-100 text-[#088ADA] border border-gray-200">
                   <Zap className="h-4 w-4" />
                 </div>
@@ -359,12 +347,12 @@ export default function LogsPage() {
               <div className="text-2xl font-bold font-mono text-gray-900">
                 {usageSummary ? usageSummary.total_calls : 0}
               </div>
-              <p className="text-xs text-gray-500">Anthropic Claude API turns</p>
+              <p className="text-xs text-gray-500">Requests sent to the AI</p>
             </div>
 
             <div className="bg-white border border-gray-200 p-5 rounded-2xl space-y-2 shadow-sm">
               <div className="flex items-center justify-between text-xs text-gray-600 font-semibold">
-                <span>Total Input Tokens</span>
+                <span>Tokens read</span>
                 <div className="p-2 rounded-lg bg-gray-100 text-[#088ADA] border border-gray-200">
                   <Cpu className="h-4 w-4" />
                 </div>
@@ -372,12 +360,12 @@ export default function LogsPage() {
               <div className="text-2xl font-bold font-mono text-gray-900">
                 {usageSummary ? usageSummary.total_input_tokens.toLocaleString() : 0}
               </div>
-              <p className="text-xs text-gray-500">Prompts &amp; Context tokens</p>
+              <p className="text-xs text-gray-500">Questions and conversation context</p>
             </div>
 
             <div className="bg-white border border-gray-200 p-5 rounded-2xl space-y-2 shadow-sm">
               <div className="flex items-center justify-between text-xs text-gray-600 font-semibold">
-                <span>Total Output Tokens</span>
+                <span>Tokens written</span>
                 <div className="p-2 rounded-lg bg-gray-100 text-[#088ADA] border border-gray-200">
                   <Layers className="h-4 w-4" />
                 </div>
@@ -385,7 +373,7 @@ export default function LogsPage() {
               <div className="text-2xl font-bold font-mono text-gray-900">
                 {usageSummary ? usageSummary.total_output_tokens.toLocaleString() : 0}
               </div>
-              <p className="text-xs text-gray-500">Generated text &amp; tool turns</p>
+              <p className="text-xs text-gray-500">The AI's answers</p>
             </div>
           </div>
 
@@ -394,7 +382,7 @@ export default function LogsPage() {
             <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
               <h2 className="text-sm font-bold text-gray-700 flex items-center gap-2">
                 <FileText className="h-4 w-4 text-[#088ADA]" />
-                <span>Usage &amp; Cost Breakdown by Slack Channel</span>
+                <span>Cost by Slack channel</span>
               </h2>
               <span className="text-xs text-gray-500 font-mono">
                 {usageSummary?.by_channel?.length || 0} active channels
@@ -411,14 +399,14 @@ export default function LogsPage() {
                     <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Input Tokens</th>
                     <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Output Tokens</th>
                     <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Total Tokens</th>
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Calculated Cost USD</th>
+                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
                   </tr>
                 </thead>
                 <tbody className="text-xs divide-y divide-gray-200">
                   {!usageSummary || usageSummary.by_channel.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-gray-500 italic bg-white">
-                        No channel usage logged yet. Make an API call via Slack to see real-time costs!
+                        No usage yet. Costs appear here after the bot answers a message in Slack.
                       </td>
                     </tr>
                   ) : (
@@ -455,10 +443,10 @@ export default function LogsPage() {
             <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
               <h2 className="text-sm font-bold text-gray-700 flex items-center gap-2">
                 <Activity className="h-4 w-4 text-[#088ADA]" />
-                <span>Recent API Usage Log History</span>
+                <span>Recent AI replies</span>
               </h2>
               <span className="text-xs text-gray-500 font-mono">
-                Showing last {usageLogs.length} records
+                Last {usageLogs.length} replies
               </span>
             </div>
 
@@ -466,7 +454,7 @@ export default function LogsPage() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
-                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Log ID</th>
+                    <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">#</th>
                     <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Timestamp</th>
                     <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel</th>
                     <th className="py-3 px-4 sticky top-0 z-20 bg-[#088ADA]">Model</th>
@@ -480,7 +468,7 @@ export default function LogsPage() {
                   {usageLogs.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-8 text-center text-gray-500 italic bg-white">
-                        No detailed API usage logs found in PostgreSQL api_usage_logs.
+                        No AI replies recorded yet.
                       </td>
                     </tr>
                   ) : (
@@ -527,7 +515,7 @@ export default function LogsPage() {
                 onChange={(e) => setSelectedCategory(e.target.value)}
                 className="bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-500 px-3 py-1.5 focus:outline-none focus:border-[#088ADA]"
               >
-                <option value="all">All Categories</option>
+                <option value="all">All areas</option>
                 <option value="CLAUDE">CLAUDE</option>
                 <option value="TOOL">TOOL</option>
                 <option value="SLACK">SLACK</option>
@@ -542,7 +530,7 @@ export default function LogsPage() {
                 onChange={(e) => setSelectedLevel(e.target.value)}
                 className="bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-500 px-3 py-1.5 focus:outline-none focus:border-[#088ADA]"
               >
-                <option value="all">All Levels</option>
+                <option value="all">All severities</option>
                 <option value="INFO">INFO</option>
                 <option value="WARN">WARN</option>
                 <option value="ERROR">ERROR</option>
@@ -558,7 +546,7 @@ export default function LogsPage() {
                 }`}
               >
                 <ArrowDown className="h-3 w-3" />
-                <span>Auto-scroll {autoScroll ? "ON" : "OFF"}</span>
+                <span>Keep newest on top: {autoScroll ? "on" : "off"}</span>
               </button>
 
               <button
@@ -566,7 +554,7 @@ export default function LogsPage() {
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-500 text-xs font-medium border border-gray-200 transition"
               >
                 <Trash2 className="h-3.5 w-3.5 text-gray-400" />
-                <span>Clear</span>
+                <span>Clear log</span>
               </button>
             </div>
 
@@ -575,7 +563,7 @@ export default function LogsPage() {
               <Search className="h-3.5 w-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search logs..."
+                placeholder="Search events"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 placeholder-gray-400 focus:outline-none focus:border-[#088ADA]"
@@ -590,7 +578,7 @@ export default function LogsPage() {
           >
             {filteredLogs.length === 0 ? (
               <div className="h-full flex items-center justify-center text-gray-400 text-xs">
-                No events recorded matching criteria.
+                No events match these filters yet.
               </div>
             ) : (
               filteredLogs.map((log, idx) => {
@@ -602,7 +590,7 @@ export default function LogsPage() {
                     key={log.id || `${log.timestamp}-${idx}`}
                     className={`p-2 rounded-lg border transition ${
                       isError
-                        ? "bg-rose-950/20 border-rose-900/40 text-rose-200"
+                        ? "bg-rose-50 border-rose-200 text-rose-900"
                         : isWarn
                         ? "bg-amber-50 border-amber-200 text-amber-900"
                         : "bg-white border-gray-200 text-gray-700 hover:bg-gray-100"
@@ -614,7 +602,7 @@ export default function LogsPage() {
                         <span
                           className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                             isError
-                              ? "bg-rose-500/20 text-rose-500"
+                              ? "bg-rose-100 text-rose-700"
                               : isWarn
                               ? "bg-amber-100 text-amber-700"
                               : "bg-emerald-50 text-emerald-600"

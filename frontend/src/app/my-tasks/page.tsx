@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { fetchApprovals } from "@/lib/api";
 import { Approval, formatLocalDateTime } from "@/lib/types";
+import { PageHeader, StatCard, EmptyState, LoadingState, Card, StatusBadge, btn } from "@/components/ui";
 
 export default function MyTasksPage() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -32,140 +33,80 @@ export default function MyTasksPage() {
     loadTasks();
   }, [loadTasks]);
 
+  const describeTarget = (a: Approval) => {
+    const args = a.tool_arguments || {};
+    return args.path || args.title || (args.issue_number ? `Issue #${args.issue_number}` : "") || args.branch || "Repository";
+  };
+
   return (
-    <div className="space-y-6 max-w-7xl mx-auto flex flex-col min-h-[calc(100vh-8rem)]">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-200">
-        <div className="flex items-center gap-2.5">
-          <div className="h-9 w-9 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA]">
-            <ListTodo className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-              <span>My Tasks &amp; Activity Portal</span>
-            </h1>
-            <p className="text-xs text-gray-500 mt-0.5">
-              View your personal task execution status, tool outputs, and action approval requests.
-            </p>
-          </div>
-        </div>
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <PageHeader
+        icon={ListTodo}
+        title="My activity"
+        description="Changes you asked the bot to make, and whether they were approved."
+        actions={
+          <button onClick={loadTasks} className={btn.secondary}>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
+          </button>
+        }
+      />
 
-        <button
-          onClick={loadTasks}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition shadow-sm"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-[#088ADA]" : ""}`} />
-          <span>Refresh</span>
-        </button>
-      </div>
-
-      {/* Task Summary Badges */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-white border border-gray-200 shadow-sm flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 text-[#088ADA] flex items-center justify-center font-bold">
-            <CheckCircle2 className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-gray-600">Completed Actions</div>
-            <div className="text-lg font-bold text-gray-900 font-mono">
-              {approvals.filter((a) => a.status === "applied").length}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white border border-gray-200 shadow-sm flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 text-[#088ADA] flex items-center justify-center font-bold">
-            <Clock className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-gray-600">Pending Approval</div>
-            <div className="text-lg font-bold text-gray-900 font-mono">
-              {approvals.filter((a) => a.status === "pending").length}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white border border-gray-200 shadow-sm flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 text-[#088ADA] flex items-center justify-center font-bold">
-            <ShieldAlert className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-gray-600">Rejected / Expired</div>
-            <div className="text-lg font-bold text-gray-900 font-mono">
-              {approvals.filter((a) => a.status === "rejected" || a.status === "expired").length}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white border border-gray-200 shadow-sm flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 text-[#088ADA] flex items-center justify-center font-bold">
-            <AlertCircle className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-gray-600">Total Activities</div>
-            <div className="text-lg font-bold text-gray-900 font-mono">{approvals.length}</div>
-          </div>
-        </div>
+        <StatCard label="Completed" value={approvals.filter((a) => a.status === "applied").length} icon={CheckCircle2} tone="green" />
+        <StatCard label="Waiting for review" value={approvals.filter((a) => a.status === "pending").length} icon={Clock} tone="amber" />
+        <StatCard
+          label="Rejected or expired"
+          value={approvals.filter((a) => a.status === "rejected" || a.status === "expired").length}
+          icon={ShieldAlert}
+          tone="rose"
+        />
+        <StatCard label="Total requests" value={approvals.length} icon={AlertCircle} tone="gray" />
       </div>
 
-      {/* Task & Action History Table */}
-      <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider">My Activity Log ({approvals.length})</h2>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-gray-100/70 border-b border-gray-200 text-gray-500 uppercase font-semibold text-[10px]">
-              <tr>
-                <th className="p-3">Action / Tool</th>
-                <th className="p-3">Channel</th>
-                <th className="p-3">Arguments / Target</th>
-                <th className="p-3">Status</th>
-                <th className="p-3">Date</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 font-mono">
-              {approvals.length === 0 ? (
+      {loading && approvals.length === 0 ? (
+        <LoadingState label="Loading your activity..." />
+      ) : approvals.length === 0 ? (
+        <EmptyState
+          icon={ListTodo}
+          title="No activity yet"
+          description="When you ask the bot in Slack to change code or create an issue, the request will show up here."
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 text-xs">
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-gray-400 font-sans">
-                    No task activity recorded yet.
-                  </td>
+                  <th className="px-4 py-3 font-medium">Request</th>
+                  <th className="px-4 py-3 font-medium">Channel</th>
+                  <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Date</th>
                 </tr>
-              ) : (
-                approvals.map((a) => (
-                  <tr key={a.id} className="hover:bg-gray-50/60 transition">
-                    <td className="p-3">
-                      <div className="font-bold text-gray-800">{a.tool_name}</div>
-                      <div className="text-[10px] text-gray-400 font-sans">ID: {a.approval_id}</div>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {approvals.map((a) => (
+                  <tr key={a.id} className="hover:bg-gray-50 transition">
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-gray-800 capitalize">{a.tool_name.replace(/_/g, " ")}</div>
+                      <div className="text-xs text-gray-500 truncate max-w-xs" title={JSON.stringify(a.tool_arguments)}>
+                        {describeTarget(a)}
+                      </div>
                     </td>
-                    <td className="p-3 text-gray-700 font-sans">#{a.channel_id}</td>
-                    <td className="p-3 text-gray-600 max-w-xs truncate">
-                      {JSON.stringify(a.tool_arguments)}
+                    <td className="px-4 py-3 text-gray-700">
+                      {a.channel_name ? a.channel_name : <span className="font-mono text-xs">{a.channel_id}</span>}
                     </td>
-                    <td className="p-3 font-sans">
-                      {a.status === "applied" ? (
-                        <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-200 font-semibold text-[10px]">
-                          Completed
-                        </span>
-                      ) : a.status === "pending" ? (
-                        <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-200 font-semibold text-[10px]">
-                          Pending Approval
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200 font-semibold text-[10px]">
-                          {a.status}
-                        </span>
-                      )}
+                    <td className="px-4 py-3">
+                      <StatusBadge status={a.status} />
                     </td>
-                    <td className="p-3 text-gray-400 text-[10px] whitespace-nowrap">{formatLocalDateTime(a.created_at)}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{formatLocalDateTime(a.created_at)}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

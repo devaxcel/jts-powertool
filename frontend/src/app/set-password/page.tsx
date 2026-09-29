@@ -37,7 +37,7 @@ function SetPasswordContent() {
     async function checkToken() {
       if (!token) {
         setVerifying(false);
-        setVerifyError("No invitation or password setup token found in this link.");
+        setVerifyError("This link is incomplete. Please open the full link from your invitation email, or ask your admin to send a new one.");
         return;
       }
 
@@ -48,10 +48,10 @@ function SetPasswordContent() {
           setTokenInfo(res);
           setVerifyError(null);
         } else {
-          setVerifyError(res.message || "This password setup link is invalid or has expired.");
+          setVerifyError(res.message || "This link has expired or was already used. Please ask your admin to send you a new invitation.");
         }
       } catch (err: any) {
-        setVerifyError(err?.message || "Failed to verify setup token.");
+        setVerifyError(err?.message || "We could not check this link right now. Please try again in a moment.");
       } finally {
         setVerifying(false);
       }
@@ -71,7 +71,7 @@ function SetPasswordContent() {
       return;
     }
     if (password !== confirmPassword) {
-      setSubmitError("Passwords do not match. Please verify.");
+      setSubmitError("The two passwords are different. Please type the same password twice.");
       return;
     }
 
@@ -86,7 +86,7 @@ function SetPasswordContent() {
       });
       setSubmitSuccess(true);
     } catch (err: any) {
-      setSubmitError(err?.message || "Failed to set password. Please try again.");
+      setSubmitError(err?.message || "We could not save your password. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -96,21 +96,21 @@ function SetPasswordContent() {
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4 relative overflow-hidden">
       {/* Background glow effects */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-[#088ADA]/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 left-1/3 -translate-x-1/2 w-[350px] h-[350px] bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-1/4 left-1/3 -translate-x-1/2 w-[350px] h-[350px] bg-sky-400/10 rounded-full blur-3xl pointer-events-none" />
 
       {/* Main Card */}
       <div className="w-full max-w-md bg-white border border-gray-200/90 rounded-2xl p-8 shadow-2xl backdrop-blur-xl relative z-10 space-y-6">
         {/* Brand & Header */}
         <div className="text-center space-y-3">
-          <div className="inline-flex h-12 w-12 rounded-xl bg-gradient-to-tr from-indigo-600 to-blue-500 items-center justify-center shadow-lg shadow-indigo-600/30 ring-4 ring-indigo-500/20">
+          <div className="inline-flex h-12 w-12 rounded-xl bg-gradient-to-tr from-[#088ADA] to-sky-500 items-center justify-center shadow-lg shadow-[#088ADA]/30">
             <Terminal className="h-6 w-6 text-white" />
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-800 tracking-tight">
-              Set Your Password
+              Create your password
             </h1>
             <p className="text-xs text-gray-500 mt-1">
-              Create a secure password to access your JTS PowerTool account
+              Choose a password you will use to sign in to JTS PowerTool.
             </p>
           </div>
         </div>
@@ -118,8 +118,8 @@ function SetPasswordContent() {
         {/* Loading State */}
         {verifying && (
           <div className="py-8 flex flex-col items-center justify-center gap-3 text-center">
-            <RefreshCw className="h-7 w-7 text-indigo-600 animate-spin" />
-            <p className="text-xs font-medium text-gray-500">Verifying your invitation link...</p>
+            <RefreshCw className="h-7 w-7 text-[#088ADA] animate-spin" />
+            <p className="text-xs font-medium text-gray-500">Checking your invitation link...</p>
           </div>
         )}
 
@@ -129,7 +129,7 @@ function SetPasswordContent() {
             <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 space-y-2">
               <div className="flex items-center gap-2 font-semibold">
                 <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
-                <span>Link Invalid or Expired</span>
+                <span>This link no longer works</span>
               </div>
               <p className="text-rose-600/90 leading-relaxed">{verifyError}</p>
             </div>
@@ -139,7 +139,7 @@ function SetPasswordContent() {
               onClick={() => router.push("/login")}
               className="w-full py-2.5 px-4 bg-gray-900 hover:bg-black text-white text-xs font-semibold rounded-xl transition flex items-center justify-center gap-2 shadow"
             >
-              <span>Back to Login</span>
+              <span>Go to sign in</span>
               <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -152,18 +152,18 @@ function SetPasswordContent() {
               <div className="inline-flex h-10 w-10 rounded-full bg-emerald-100 items-center justify-center text-emerald-600 mb-1">
                 <CheckCircle2 className="h-6 w-6" />
               </div>
-              <h3 className="text-sm font-bold text-emerald-800">Password Set Successfully!</h3>
+              <h3 className="text-sm font-bold text-emerald-800">Your password is ready</h3>
               <p className="text-xs text-emerald-700/90">
-                Your password has been updated. You can now log in using your User ID or Email.
+                You can now sign in with your username or email and this password.
               </p>
             </div>
 
             <button
               type="button"
               onClick={() => router.push("/login")}
-              className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-lg shadow-indigo-600/25 transition flex items-center justify-center gap-2"
+              className="w-full py-2.5 px-4 bg-[#088ADA] hover:bg-[#0778bd] text-white text-xs font-semibold rounded-xl shadow-lg shadow-[#088ADA]/20 transition flex items-center justify-center gap-2"
             >
-              <span>Proceed to Login</span>
+              <span>Sign in</span>
               <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -174,8 +174,8 @@ function SetPasswordContent() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* User Details Badge */}
             {tokenInfo && (
-              <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl flex items-center gap-3">
-                <div className="h-8 w-8 rounded-lg bg-indigo-600/10 flex items-center justify-center text-indigo-600 shrink-0">
+              <div className="p-3 bg-sky-50 border border-sky-100 rounded-xl flex items-center gap-3">
+                <div className="h-8 w-8 rounded-lg bg-[#088ADA]/10 flex items-center justify-center text-[#088ADA] shrink-0">
                   <UserCheck className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 text-left">
@@ -200,7 +200,7 @@ function SetPasswordContent() {
             {/* New Password */}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                New Password
+                New password
               </label>
               <div className="relative">
                 <Lock className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -211,7 +211,7 @@ function SetPasswordContent() {
                   placeholder="At least 6 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-9 pr-10 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition"
+                  className="w-full pl-9 pr-10 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#088ADA] focus:ring-2 focus:ring-[#088ADA]/20 transition"
                 />
                 <button
                   type="button"
@@ -226,17 +226,17 @@ function SetPasswordContent() {
             {/* Confirm Password */}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                Confirm New Password
+                Type it again
               </label>
               <div className="relative">
                 <Lock className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type={showPassword ? "text" : "password"}
                   required
-                  placeholder="Re-enter new password"
+                  placeholder="Same password as above"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full pl-9 pr-10 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition"
+                  className="w-full pl-9 pr-10 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#088ADA] focus:ring-2 focus:ring-[#088ADA]/20 transition"
                 />
               </div>
             </div>
@@ -245,16 +245,16 @@ function SetPasswordContent() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl shadow-lg shadow-indigo-600/25 transition flex items-center justify-center gap-2 mt-2"
+              className="w-full py-2.5 px-4 bg-[#088ADA] hover:bg-[#0778bd] disabled:opacity-50 text-white text-xs font-semibold rounded-xl shadow-lg shadow-[#088ADA]/20 transition flex items-center justify-center gap-2 mt-2"
             >
               {submitting ? (
                 <>
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                  <span>Saving Password...</span>
+                  <span>Saving...</span>
                 </>
               ) : (
                 <>
-                  <span>Set Password & Continue</span>
+                  <span>Save password</span>
                   <ArrowRight className="h-3.5 w-3.5" />
                 </>
               )}
@@ -266,14 +266,14 @@ function SetPasswordContent() {
         <div className="pt-4 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-400">
           <div className="flex items-center gap-1.5">
             <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-            <span>Encrypted Token Authentication</span>
+            <span>Secure one-time link</span>
           </div>
           <button
             type="button"
             onClick={() => router.push("/login")}
-            className="text-indigo-600 hover:text-indigo-700 font-medium"
+            className="text-[#088ADA] hover:underline font-medium"
           >
-            Back to Login
+            Back to sign in
           </button>
         </div>
       </div>
@@ -286,7 +286,7 @@ export default function SetPasswordPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <RefreshCw className="h-7 w-7 text-indigo-600 animate-spin" />
+          <RefreshCw className="h-7 w-7 text-[#088ADA] animate-spin" />
         </div>
       }
     >

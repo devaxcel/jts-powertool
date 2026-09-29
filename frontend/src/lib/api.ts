@@ -559,8 +559,10 @@ export async function login(username: string, password: string): Promise<LoginRe
     body: JSON.stringify({ username, password }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Invalid User ID or Password");
+    if (res.status === 401) {
+      throw new Error("Incorrect username or password. Please try again.");
+    }
+    throw new Error("We can't reach the server right now. Please try again in a moment.");
   }
   const data = await res.json();
   if (typeof window !== "undefined") {

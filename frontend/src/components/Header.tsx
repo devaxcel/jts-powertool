@@ -1,75 +1,89 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sparkles, Radio, Menu, User } from "lucide-react";
+import { Menu, UserCircle2, LogOut } from "lucide-react";
 import { useMobileNav } from "@/components/DashboardShell";
+import { logout } from "@/lib/api";
+
+const TITLES: Array<[string, string]> = [
+  ["/approvals", "Approvals"],
+  ["/billing", "Usage & Billing"],
+  ["/users", "Users"],
+  ["/organizations", "Organizations"],
+  ["/my-tasks", "My Activity"],
+  ["/keys", "API Keys"],
+  ["/folders", "Clients & Channels"],
+  ["/logs", "Activity Log"],
+  ["/context", "Conversation Inspector"],
+  ["/database", "Database"],
+  ["/global-settings", "System Settings"],
+  ["/settings", "My Profile"],
+];
+
+const ROLE_LABELS: Record<string, string> = {
+  jts_admin: "JTS Admin",
+  admin: "JTS Admin",
+  client_admin: "Client Admin",
+  client_standard: "Team Member",
+};
 
 export function Header() {
   const pathname = usePathname();
   const { toggleMobile } = useMobileNav();
+  const [displayName, setDisplayName] = useState("");
+  const [role, setRole] = useState("");
 
-  const titles: Record<string, string> = {
-    "/": "System Overview",
-    "/approvals": "Human-in-the-Loop Approvals",
-    "/billing": "Token & Billing Control Center",
-    "/users": "Multi-Tenant User Management",
-    "/organizations": "Organization Management",
-    "/my-tasks": "My Personal Tasks & Activity",
-    "/keys": "API Keys & Secrets Vault",
-    "/folders": "Channel Folders & Slack Projects",
-    "/logs": "Live Telemetry & Event Stream",
-    "/context": "Claude Context & Turn Inspector",
-    "/database": "PostgreSQL Database Explorer",
-    "/settings": "Account Settings & Profile",
-    "/global-settings": "Global Settings & Timezone",
-  };
+  useEffect(() => {
+    try {
+      const u = JSON.parse(sessionStorage.getItem("jts_user") || "{}");
+      setDisplayName(u.name || u.username || "");
+      setRole(sessionStorage.getItem("jts_simulated_role") || u.role || "");
+    } catch {}
+  }, [pathname]);
 
-  const title = titles[pathname] || "Dashboard";
+  const title =
+    pathname === "/" ? "Dashboard" : TITLES.find(([prefix]) => pathname.startsWith(prefix))?.[1] || "Dashboard";
 
   return (
-    <>
-      <header className="h-16 border-b border-gray-200 bg-white px-6 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={toggleMobile}
-            className="p-1.5 -ml-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 lg:hidden transition shrink-0"
-            aria-label="Toggle navigation menu"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
-          <h2 className="text-base font-semibold text-gray-800">{title}</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-mono border border-gray-200">
-            Production
-          </span>
-        </div>
+    <header className="h-14 border-b border-gray-200 bg-white px-4 sm:px-6 flex items-center justify-between sticky top-0 z-10">
+      <div className="flex items-center gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={toggleMobile}
+          className="p-1.5 -ml-1 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 lg:hidden transition shrink-0"
+          aria-label="Open navigation menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <span className="text-sm font-semibold text-gray-800 truncate">{title}</span>
+      </div>
 
-        <div className="flex items-center gap-3 text-xs">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 font-medium">
-            <Radio className="h-3.5 w-3.5 animate-pulse text-emerald-500" />
-            <span>Worker Listening</span>
+      <div className="flex items-center gap-1.5">
+        <Link
+          href="/settings"
+          className={`flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-xl transition ${
+            pathname === "/settings" ? "bg-[#088ADA]/10" : "hover:bg-gray-100"
+          }`}
+          title="My profile"
+        >
+          <UserCircle2 className="h-7 w-7 text-[#088ADA]" />
+          <div className="hidden sm:block text-left leading-tight">
+            <div className="text-xs font-semibold text-gray-800 max-w-[160px] truncate">{displayName || "My profile"}</div>
+            {role && <div className="text-[11px] text-gray-500">{ROLE_LABELS[role] || role}</div>}
           </div>
-
-          <div className="flex items-center gap-2 text-gray-600 bg-gray-100 px-3 py-1.5 rounded-xl border border-gray-200">
-            <Sparkles className="h-3.5 w-3.5 text-[#088ADA]" />
-            <span>Model: Claude 3.5 / 4.5</span>
-          </div>
-
-          <Link
-            href="/settings"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition font-medium ${
-              pathname === "/settings"
-                ? "bg-[#088ADA] text-white border-[#088ADA] shadow-sm"
-                : "bg-gray-100 hover:bg-gray-200 text-gray-700 border-gray-200"
-            }`}
-            title="Profile Settings"
-          >
-            <User className={`h-3.5 w-3.5 ${pathname === "/settings" ? "text-white" : "text-[#088ADA]"}`} />
-            <span>Profile Settings</span>
-          </Link>
-        </div>
-      </header>
-    </>
+        </Link>
+        <button
+          type="button"
+          onClick={() => logout()}
+          className="p-2 rounded-lg text-gray-500 hover:text-rose-600 hover:bg-rose-50 transition"
+          title="Sign out"
+          aria-label="Sign out"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
+      </div>
+    </header>
   );
 }

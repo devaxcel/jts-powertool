@@ -4,8 +4,6 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import {
   Globe,
   Clock,
-  CheckCircle2,
-  AlertCircle,
   Save,
   RotateCcw,
   Laptop,
@@ -20,6 +18,7 @@ import {
   Boxes,
 } from "lucide-react";
 import { fetchGlobalSettings, updateGlobalSettings, resetGlobalSettings } from "@/lib/api";
+import { PageHeader, Alert, ComingSoonBadge, btn } from "@/components/ui";
 import { formatLocalDateTime } from "@/lib/types";
 
 const DATE_FORMAT_OPTIONS = [
@@ -328,54 +327,20 @@ export default function GlobalSettingsPage() {
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-gray-200 p-6 rounded-2xl shadow-sm">
-        <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-gradient-to-tr from-[#088ADA] to-sky-400 text-white flex items-center justify-center shadow-md shrink-0">
-            <Globe className="h-6 w-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-gray-800">Global Settings & Timezone</h1>
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-[#088ADA] border border-blue-200">
-                System Wide
-              </span>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Configure universal timezone localization, timestamp display formats, and alert clocks across JTS PowerTool.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={handleUseBrowserTz}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-700 text-xs font-medium border border-gray-200 transition"
-          >
-            <Laptop className="h-3.5 w-3.5 text-[#088ADA]" />
-            <span>Use Browser Timezone</span>
+      <PageHeader
+        icon={Globe}
+        title="System settings"
+        description="Default time zone and time format for everyone using the dashboard."
+        badge={<span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-[#088ADA] border border-sky-200">Applies to all users</span>}
+        actions={
+          <button type="button" onClick={handleUseBrowserTz} className={btn.secondary}>
+            <Laptop className="h-3.5 w-3.5" />
+            <span>Use my computer&apos;s time zone</span>
           </button>
-        </div>
-      </div>
+        }
+      />
 
-      {/* Feedback Toast */}
-      {feedback && (
-        <div
-          className={`flex items-center gap-2.5 p-4 rounded-xl border text-xs font-medium transition ${
-            feedback.type === "success"
-              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-              : "bg-rose-50 text-rose-800 border-rose-200"
-          }`}
-        >
-          {feedback.type === "success" ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-          ) : (
-            <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
-          )}
-          <span>{feedback.message}</span>
-        </div>
-      )}
+      {feedback && <Alert type={feedback.type}>{feedback.message}</Alert>}
 
       {/* Live Clocks Bar */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -383,10 +348,10 @@ export default function GlobalSettingsPage() {
           <div className="flex items-center justify-between text-xs text-gray-500 font-medium">
             <span className="flex items-center gap-1.5">
               <Clock className="h-3.5 w-3.5 text-[#088ADA]" />
-              Selected Global Time
+              Dashboard time
             </span>
             <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-[#088ADA] rounded font-mono font-semibold">
-              ACTIVE
+              IN USE
             </span>
           </div>
           <p className="text-lg font-bold text-gray-800 font-mono tracking-tight">
@@ -399,7 +364,7 @@ export default function GlobalSettingsPage() {
           <div className="flex items-center justify-between text-xs text-gray-500 font-medium">
             <span className="flex items-center gap-1.5">
               <Laptop className="h-3.5 w-3.5 text-emerald-500" />
-              Local Device Time
+              Your computer
             </span>
             <span className="text-[10px] px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded font-mono">
               BROWSER
@@ -415,7 +380,7 @@ export default function GlobalSettingsPage() {
           <div className="flex items-center justify-between text-xs text-gray-500 font-medium">
             <span className="flex items-center gap-1.5">
               <Radio className="h-3.5 w-3.5 text-purple-500" />
-              Server & UTC Reference
+              UTC (server time)
             </span>
             <span className="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded font-mono">
               BASE
@@ -435,10 +400,10 @@ export default function GlobalSettingsPage() {
             <div>
               <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
                 <Globe className="h-4 w-4 text-[#088ADA]" />
-                <span>Primary System Timezone</span>
+                <span>Default time zone</span>
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                All logs, HITL approvals, telemetry streams, and session timestamps will render using this timezone.
+                Dates and times in logs, approvals and conversations are shown in this time zone. Users can pick their own in My profile.
               </p>
             </div>
 
@@ -566,10 +531,10 @@ export default function GlobalSettingsPage() {
           <div className="border-b border-gray-100 pb-4">
             <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <Sliders className="h-4 w-4 text-[#088ADA]" />
-              <span>Timestamp & Date Formatting</span>
+              <span>Date and time format</span>
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Customize how dates and times are displayed throughout the dashboard.
+              Choose how dates and times look across the dashboard.
             </p>
           </div>
 
@@ -701,16 +666,17 @@ export default function GlobalSettingsPage() {
             <div>
               <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
                 <Wrench className="h-4 w-4 text-[#088ADA]" />
-                <span>Global Tools &amp; Action Permissions</span>
+                <span>Tool permissions</span>
+                <ComingSoonBadge />
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                Manage system-wide tools list and configure default permission action checkboxes for users.
+                Preview only: these switches do not change what the AI is allowed to do yet.
               </p>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-[#088ADA] border border-blue-200 flex items-center gap-1.5">
                 <Boxes className="h-3 w-3" />
-                2 Tools Configured
+                2 tools
               </span>
             </div>
           </div>

@@ -7,16 +7,12 @@ import {
   Plus,
   Trash2,
   RefreshCw,
-  CheckCircle2,
-  AlertCircle,
-  Database,
-  X,
   Loader2,
-  Radio,
   Eye,
   EyeOff,
   ShieldCheck,
 } from "lucide-react";
+import { PageHeader, Alert, EmptyState, LoadingState, btn } from "@/components/ui";
 import {
   fetchVaultSecrets,
   saveVaultSecret,
@@ -103,81 +99,41 @@ export default function KeysVaultPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto flex flex-col min-h-[calc(100vh-8rem)]">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 pb-4 border-b border-gray-200">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA]">
-              <KeyRound className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <span>API Keys &amp; Secrets Vault</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center gap-1">
-                  <ShieldCheck className="h-3 w-3" />
-                  IAM Encrypted
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600 border border-gray-200 flex items-center gap-1">
-                  <Radio className="h-3 w-3" />
-                  AWS Secrets Manager
-                </span>
-              </h1>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Store OpenAI API keys, Anthropic keys, GitHub tokens, Jira credentials, or any secret value safely.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Action Button */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => loadData()}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition disabled:opacity-50"
-            title="Reload secrets from database"
-          >
+      <PageHeader
+        icon={KeyRound}
+        title="API keys"
+        description="Keys and tokens the system uses to connect to Anthropic, Slack, GitHub and other services."
+        badge={
+          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1">
+            <ShieldCheck className="h-3 w-3" />
+            Stored encrypted
+          </span>
+        }
+        actions={
+          <button onClick={() => loadData()} disabled={loading} className={btn.secondary}>
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             <span>Refresh</span>
           </button>
-        </div>
-      </div>
+        }
+      />
 
-      {/* Feedback Banner */}
       {feedback && (
-        <div
-          className={`flex items-center justify-between p-3.5 rounded-xl border text-xs sm:text-sm transition-all animate-in fade-in slide-in-from-top-1 ${
-            feedback.type === "success"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-600"
-              : "bg-rose-50 border-rose-200 text-rose-600"
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            {feedback.type === "success" ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-            ) : (
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-500" />
-            )}
-            <span>{feedback.message}</span>
-          </div>
-          <button
-            onClick={() => setFeedback(null)}
-            className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        <Alert type={feedback.type} onClose={() => setFeedback(null)}>
+          {feedback.message}
+        </Alert>
       )}
 
       {/* Section 1: Add New Secret Key Form */}
-      <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5 shadow-sm space-y-4">
-        <div className="flex items-center gap-2 pb-3 border-b border-gray-200">
-          <div className="h-7 w-7 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA]">
+      <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm space-y-4">
+        <div className="flex items-center gap-2 pb-3 border-b border-gray-100">
+          <div className="h-8 w-8 rounded-lg bg-[#088ADA]/10 flex items-center justify-center text-[#088ADA]">
             <Lock className="h-4 w-4" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-gray-800">Add New Key / Secret</h2>
-            <p className="text-[11px] text-gray-500">Key value is encrypted and stored exclusively in AWS Secrets Manager.</p>
+            <h2 className="text-sm font-semibold text-gray-800">Add a key</h2>
+            <p className="text-xs text-gray-500">
+              The value is stored securely in AWS and can&apos;t be viewed again after saving. Use the same name to replace an existing key.
+            </p>
           </div>
         </div>
 
@@ -253,7 +209,7 @@ export default function KeysVaultPage() {
               ) : (
                 <>
                   <Plus className="h-4 w-4" />
-                  <span>Store Secret Key</span>
+                  <span>Save key</span>
                 </>
               )}
             </button>
@@ -263,38 +219,24 @@ export default function KeysVaultPage() {
 
       {/* Section 2: Stored Secrets Table */}
       <div className="space-y-3 flex-1">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-            Stored Keys &amp; Secrets ({vaultSecrets.length})
-          </span>
-          <span className="text-[11px] text-gray-400 flex items-center gap-1">
-            <Database className="h-3 w-3 text-emerald-600" />
-            Registered in PostgreSQL
-          </span>
+        <div>
+          <h2 className="text-sm font-semibold text-gray-800">Saved keys ({vaultSecrets.length})</h2>
+          <p className="text-xs text-gray-500">Only the names are shown. Values are never displayed.</p>
         </div>
 
         {loading ? (
-          <div className="h-48 flex flex-col items-center justify-center gap-3 text-gray-500">
-            <Loader2 className="h-8 w-8 animate-spin text-[#088ADA]" />
-            <p className="text-sm">Loading secrets from vault...</p>
-          </div>
+          <LoadingState label="Loading keys..." />
         ) : vaultSecrets.length === 0 ? (
-          <div className="p-8 rounded-2xl border border-dashed border-gray-200 bg-gray-50 text-center">
-            <Lock className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-            <h3 className="text-xs font-semibold text-gray-700">No Secrets Stored Yet</h3>
-            <p className="text-[11px] text-gray-400 mt-0.5">
-              Use the form above to add your first API key or token to AWS Secrets Manager.
-            </p>
-          </div>
+          <EmptyState icon={Lock} title="No keys saved yet" description="Add your first API key or token using the form above." />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
             <table className="w-full text-left border-collapse">
               <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm border-b border-gray-300">
                 <tr className="bg-[#088ADA]">
-                  <th className="p-3 font-semibold bg-[#088ADA] text-white">Key Name</th>
-                  <th className="p-3 font-semibold bg-[#088ADA] text-white">AWS Secret Path</th>
-                  <th className="p-3 font-semibold bg-[#088ADA] text-white">Full Name</th>
-                  <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Date Added</th>
+                  <th className="p-3 font-semibold bg-[#088ADA] text-white">Key name</th>
+                  <th className="p-3 font-semibold bg-[#088ADA] text-white">Stored at</th>
+                  <th className="p-3 font-semibold bg-[#088ADA] text-white">Added by</th>
+                  <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Date added</th>
                   <th className="p-3 font-semibold text-right bg-[#088ADA] text-white">Actions</th>
                 </tr>
               </thead>

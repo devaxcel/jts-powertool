@@ -12,11 +12,9 @@ import {
   MapPin,
   Calendar,
   Loader2,
-  Database,
   Building,
   Pencil,
   Trash2,
-  CheckCircle2,
   AlertCircle,
   X,
   Check,
@@ -25,6 +23,7 @@ import { useRouter } from "next/navigation";
 import { fetchOrganizations, updateOrganization, deleteOrganization } from "@/lib/api";
 import { Organization, formatLocalDateTime } from "@/lib/types";
 import { AddOrganizationModal } from "@/components/AddOrganizationModal";
+import { PageHeader, Alert, EmptyState, LoadingState, btn } from "@/components/ui";
 
 export default function OrganizationsPage() {
   const router = useRouter();
@@ -118,7 +117,7 @@ export default function OrganizationsPage() {
     if (!editingOrg) return;
 
     if (!editName.trim()) {
-      setEditError("Organization Name is required.");
+      setEditError("Please enter the organization name.");
       return;
     }
 
@@ -163,7 +162,7 @@ export default function OrganizationsPage() {
 
   // Delete Organization
   const handleDeleteOrg = async (org: Organization) => {
-    if (!confirm(`Are you sure you want to permanently delete organization '${org.name}' (ID: ${org.id})?`)) {
+    if (!confirm(`Delete '${org.name}'? This cannot be undone.`)) {
       return;
     }
 
@@ -181,72 +180,28 @@ export default function OrganizationsPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto flex flex-col min-h-[calc(100vh-8rem)]">
-      {/* Top Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-xl bg-gradient-to-tr from-blue-600 to-[#088ADA] text-white flex items-center justify-center shadow-md shadow-blue-500/10 shrink-0">
-            <Building2 className="h-6 w-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-gray-900">Organizations</h1>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1">
-                <Database className="h-3 w-3" />
-                PostgreSQL
-              </span>
-            </div>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Register, update, and manage client organizations, primary contact profiles, and billing addresses.
-            </p>
-          </div>
-        </div>
+      <PageHeader
+        icon={Building2}
+        title="Organizations"
+        description="The companies you work with: their contact person, email for invoices and address."
+        actions={
+          <>
+            <button onClick={() => loadData(true)} disabled={loading || refreshing} className={btn.secondary}>
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+            <button onClick={() => setShowAddModal(true)} className={btn.primary}>
+              <Plus className="h-4 w-4" />
+              <span>Add organization</span>
+            </button>
+          </>
+        }
+      />
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => loadData(true)}
-            disabled={loading || refreshing}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium border border-gray-200 shadow-xs transition disabled:opacity-50 cursor-pointer"
-            title="Refresh organizations list"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-[#088ADA]" : ""}`} />
-            <span>Refresh</span>
-          </button>
-
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#088ADA] hover:bg-[#0779bf] active:scale-95 text-white text-xs font-bold shadow-sm hover:shadow transition-all cursor-pointer select-none"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Add Organization</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Global Feedback Banner */}
       {feedback && (
-        <div
-          className={`flex items-center justify-between p-3.5 rounded-xl border text-xs transition-all animate-in fade-in slide-in-from-top-1 ${
-            feedback.type === "success"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-              : "bg-rose-50 border-rose-200 text-rose-700"
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            {feedback.type === "success" ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-            ) : (
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
-            )}
-            <span>{feedback.message}</span>
-          </div>
-          <button
-            onClick={() => setFeedback(null)}
-            className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-black/5 transition"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        <Alert type={feedback.type} onClose={() => setFeedback(null)}>
+          {feedback.message}
+        </Alert>
       )}
 
       {/* Search & Filter Bar */}
@@ -257,7 +212,7 @@ export default function OrganizationsPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by ID, name, POC, email, or phone..."
+            placeholder="Search by name, contact person, email or phone"
             className="w-full pl-9 pr-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#088ADA] focus:bg-white transition"
           />
         </div>
@@ -272,46 +227,38 @@ export default function OrganizationsPage() {
       {/* Organizations Table Container */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-xs overflow-hidden flex-1 flex flex-col">
         {loading ? (
-          <div className="h-64 flex flex-col items-center justify-center gap-3 text-gray-500">
-            <Loader2 className="h-8 w-8 animate-spin text-[#088ADA]" />
-            <p className="text-sm font-medium">Loading registered organizations...</p>
-          </div>
+          <LoadingState label="Loading organizations..." />
         ) : filteredOrgs.length === 0 ? (
-          <div className="h-64 flex flex-col items-center justify-center text-center p-8 text-gray-400">
-            <div className="h-14 w-14 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
-              <Building className="h-7 w-7 text-gray-400" />
-            </div>
-            <h3 className="text-sm font-bold text-gray-700">
-              {searchQuery ? "No matching organizations found" : "No organizations registered yet"}
-            </h3>
-            <p className="text-xs text-gray-400 mt-1 max-w-sm">
-              {searchQuery
-                ? "Try adjusting your search terms to find the organization you're looking for."
-                : "Get started by adding your first client organization profile to the database."}
-            </p>
-            {!searchQuery && (
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="mt-4 flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#088ADA] hover:bg-[#0779bf] text-white text-xs font-bold shadow-sm transition"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add First Organization</span>
-              </button>
-            )}
-          </div>
+          <EmptyState
+            icon={Building}
+            title={searchQuery ? "No organizations match your search" : "No organizations yet"}
+            description={
+              searchQuery
+                ? "Check the spelling or search by name, contact person, email or phone."
+                : "Add your first client organization to start linking users and Slack channels to it."
+            }
+            action={
+              !searchQuery && (
+                <button onClick={() => setShowAddModal(true)} className={btn.primary}>
+                  <Plus className="h-4 w-4" />
+                  <span>Add organization</span>
+                </button>
+              )
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-10 shadow-xs border-b border-gray-300">
+              <thead className="bg-gray-50 text-gray-500 text-[11px] uppercase tracking-wider sticky top-0 z-10 shadow-xs border-b border-gray-300">
                 <tr>
-                  <th className="p-3.5 font-semibold bg-[#088ADA] text-white w-20">Org ID</th>
-                  <th className="p-3.5 font-semibold bg-[#088ADA] text-white">Organization Name</th>
-                  <th className="p-3.5 font-semibold bg-[#088ADA] text-white">Primary Contact</th>
-                  <th className="p-3.5 font-semibold bg-[#088ADA] text-white">Billing Email</th>
-                  <th className="p-3.5 font-semibold bg-[#088ADA] text-white">Phone</th>
-                  <th className="p-3.5 font-semibold bg-[#088ADA] text-white">Address</th>
-                  <th className="p-3.5 font-semibold bg-[#088ADA] text-white">Created Date</th>
-                  <th className="p-3.5 font-semibold text-right bg-[#088ADA] text-white w-28">Actions</th>
+                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500 w-20">ID</th>
+                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Organization</th>
+                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Contact person</th>
+                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Invoice email</th>
+                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Phone</th>
+                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Address</th>
+                  <th className="p-3.5 font-semibold bg-gray-50 text-gray-500">Added on</th>
+                  <th className="p-3.5 font-semibold text-right bg-gray-50 text-gray-500 w-28">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 text-xs text-gray-700">
@@ -460,7 +407,7 @@ export default function OrganizationsPage() {
                   <Building2 className="h-5 w-5 text-[#088ADA]" />
                 </div>
                 <div>
-                  <h3 className="text-base font-semibold text-gray-900">Edit Organization</h3>
+                  <h3 className="text-base font-semibold text-gray-900">Edit organization</h3>
                   <p className="text-xs text-gray-500">Update organization details for ID: {editingOrg.id && editingOrg.id < 101 ? editingOrg.id + 100 : editingOrg.id}</p>
                 </div>
               </div>
@@ -622,7 +569,7 @@ export default function OrganizationsPage() {
                   ) : (
                     <>
                       <Check className="h-3.5 w-3.5" />
-                      <span>Update Organization</span>
+                      <span>Save changes</span>
                     </>
                   )}
                 </button>

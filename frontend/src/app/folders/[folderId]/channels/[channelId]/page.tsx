@@ -26,7 +26,8 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { fetchChannelMessages, fetchFolder, fetchBillingSummary, canonicalChannelId } from "@/lib/api";
-import { ConversationMessage, FolderDetails, formatLocalDateTime } from "@/lib/types";
+import { ConversationMessage, FolderDetails, formatLocalDateTime, isClientKeyMessage } from "@/lib/types";
+import { btn } from "@/components/ui";
 
 export default function ChannelMessagesPage() {
   const params = useParams();
@@ -267,42 +268,36 @@ export default function ChannelMessagesPage() {
         <div className="flex items-center gap-2">
           <Link
             href={`/folders/${folderId}`}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 border border-gray-200 px-3 py-1.5 rounded-lg transition"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-800 transition"
           >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            <span>Back to Folder ({folder?.name || `#${folderId}`})</span>
+            <ArrowLeft className="h-4 w-4" />
+            <span>Back to {folder?.name || "folder"}</span>
           </Link>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Telemetry Modal Button before Live Sync Active */}
           <button
             onClick={() => setShowTelemetryModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-50 to-teal-50 hover:from-emerald-100 hover:to-teal-100 text-emerald-800 border border-emerald-200 text-xs font-semibold shadow-xs transition cursor-pointer"
-            title="Click to view total tokens and API cost of all bot messages in this channel"
+            className={btn.secondary}
+            title="See how many AI replies this channel used and what they cost"
           >
-            <Zap className="h-3.5 w-3.5 text-emerald-600 animate-pulse" />
-            <span>Total Cost & Tokens</span>
+            <Zap className="h-3.5 w-3.5 text-emerald-600" />
+            <span>Usage &amp; cost</span>
           </button>
 
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
-              autoRefresh
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-gray-100 text-gray-600 border-gray-200"
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border transition ${
+              autoRefresh ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-white text-gray-600 border-gray-200"
             }`}
+            title={autoRefresh ? "New messages load every 5 seconds. Click to pause." : "Click to load new messages automatically"}
           >
             <span className={`h-2 w-2 rounded-full ${autoRefresh ? "bg-emerald-500 animate-pulse" : "bg-gray-400"}`} />
-            <span>{autoRefresh ? "Live Sync Active" : "Live Sync Paused"}</span>
+            <span>{autoRefresh ? "Auto-update on" : "Auto-update paused"}</span>
           </button>
 
-          <button
-            onClick={() => loadChannelData()}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-[#088ADA]" : ""}`} />
+          <button onClick={() => loadChannelData()} disabled={refreshing} className={btn.secondary}>
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
             <span>Refresh</span>
           </button>
         </div>
@@ -318,11 +313,11 @@ export default function ChannelMessagesPage() {
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold text-gray-800">{displayChannelName}</h1>
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${isDm ? "bg-gray-100 text-[#088ADA]" : "bg-emerald-50 text-emerald-600 border border-emerald-200"}`}>
-                {isDm ? "Direct Message" : "Slack Channel"}
+                {isDm ? "Direct message" : "Slack channel"}
               </span>
             </div>
-            <p className="text-xs text-gray-500 font-mono mt-0.5">
-              Channel ID: {channelId} | Folder: {folder?.name || `#${folderId}`}
+            <p className="text-xs text-gray-500 mt-0.5" title={`Slack ID: ${channelId}`}>
+              Conversation between your team and the AI assistant
             </p>
           </div>
         </div>
@@ -335,12 +330,12 @@ export default function ChannelMessagesPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search chat history..."
+              placeholder="Search messages"
               className="pl-9 pr-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#088ADA] transition w-56 sm:w-64"
             />
           </div>
           <span className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1.5 rounded-lg border border-gray-200 font-medium shrink-0">
-            {filteredMessages.length} {filteredMessages.length === 1 ? "Message" : "Messages"}
+            {filteredMessages.length} {filteredMessages.length === 1 ? "message" : "messages"}
           </span>
         </div>
       </div>
@@ -367,16 +362,19 @@ export default function ChannelMessagesPage() {
               <MessageSquare className="h-6 w-6 text-gray-400" />
             </div>
             <p className="text-sm font-semibold text-gray-600">
-              {searchQuery ? "No messages match your search filter." : "No messages recorded for this channel yet."}
+              {searchQuery ? "No messages match your search." : "No messages in this channel yet"}
             </p>
-            <p className="text-xs text-gray-400 mt-1 max-w-sm">
-              Any conversation messages sent by team members or the JTS Assistant in Slack will appear here automatically.
+            <p className="text-xs text-gray-500 mt-1 max-w-sm">
+              {searchQuery
+                ? "Try a different word."
+                : "Messages between your team and the AI assistant in this Slack channel will show up here."}
             </p>
           </div>
         ) : (
           filteredMessages.map((msg, idx) => {
             const isBot = msg.role === "assistant" || (msg.user_name && msg.user_name.includes("Assistant"));
-            const senderName = msg.user_name || (isBot ? "JTS Assistant" : msg.user_id || "Team Member");
+            const senderName = msg.user_name || (isBot ? "AI assistant" : msg.user_id || "Team member");
+            const paidByClientKey = isBot && isClientKeyMessage(msg);
 
             return (
               <div
@@ -410,22 +408,31 @@ export default function ChannelMessagesPage() {
                           : "bg-gray-100 text-gray-600 border border-gray-200"
                       }`}
                     >
-                      {isBot ? "JTS Assistant" : "User"}
+                      {isBot ? "AI" : "Team member"}
                     </span>
 
                     {isBot ? (
-                      <div className="flex items-center gap-2 ml-auto text-[10px] font-mono flex-wrap">
+                      <div className="flex items-center gap-2 ml-auto text-[10px] flex-wrap">
                         <span
-                          className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold flex items-center gap-1"
-                          title={`Tokens: ${(msg.input_tokens || 0).toLocaleString()} in / ${(msg.output_tokens || 0).toLocaleString()} out`}
+                          className="px-2 py-0.5 rounded-md bg-gray-50 text-gray-600 border border-gray-200 font-medium flex items-center gap-1"
+                          title={`Tokens: ${(msg.input_tokens || 0).toLocaleString()} read / ${(msg.output_tokens || 0).toLocaleString()} written`}
                         >
                           <Zap className="h-3 w-3 text-emerald-600" />
                           <span>{(msg.total_tokens || 0).toLocaleString()} tokens</span>
                         </span>
-                        <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 font-bold flex items-center gap-1">
-                          <DollarSign className="h-3 w-3 text-blue-600" />
-                          <span>${(msg.cost_usd || 0).toFixed(6)}</span>
-                        </span>
+                        {paidByClientKey ? (
+                          <span
+                            className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium"
+                            title="Answered with your own Anthropic key, so it isn't billed by JTS"
+                          >
+                            Your key · not billed
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md bg-sky-50 text-[#0778bd] border border-sky-200 font-medium flex items-center gap-1">
+                            <DollarSign className="h-3 w-3" />
+                            <span>{(msg.cost_usd || 0).toFixed(4)}</span>
+                          </span>
+                        )}
                         <span className="text-gray-400 flex items-center gap-1">
                           <Clock className="h-3 w-3 text-gray-300" />
                           {formatLocalDateTime(msg.created_at || msg.message_ts)}
@@ -440,7 +447,7 @@ export default function ChannelMessagesPage() {
                   </div>
 
                   {/* Body Text */}
-                  <div className="whitespace-pre-wrap break-words text-gray-700 font-sans text-xs leading-relaxed">
+                  <div className="whitespace-pre-wrap break-words text-gray-800 text-sm leading-relaxed">
                     {msg.content}
                   </div>
                 </div>
@@ -453,8 +460,8 @@ export default function ChannelMessagesPage() {
 
       {/* Footer Info */}
       <div className="flex items-center justify-between text-[11px] text-gray-400 px-2 shrink-0">
-        <span>Showing conversation log synced from Slack via WebSocket / Event API</span>
-        <span>Auto-refreshes every 5 seconds</span>
+        <span>Messages are copied from Slack as they happen.</span>
+        <span>{autoRefresh ? "Checking for new messages every 5 seconds" : "Auto-update is paused"}</span>
       </div>
 
       {/* Telemetry Pop-up Modal */}
@@ -468,10 +475,8 @@ export default function ChannelMessagesPage() {
                   <Zap className="h-5 w-5 text-emerald-600" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-gray-900 text-sm">Channel Telemetry & Cost</h3>
-                  <p className="text-[11px] text-gray-500 font-mono">
-                    {displayChannelName} ({channelId})
-                  </p>
+                  <h3 className="font-semibold text-gray-900 text-sm">Usage &amp; cost for this channel</h3>
+                  <p className="text-xs text-gray-500">{displayChannelName}</p>
                 </div>
               </div>
               <button
@@ -489,28 +494,28 @@ export default function ChannelMessagesPage() {
                 {/* Total Cost Card */}
                 <div className="bg-gradient-to-br from-blue-50/80 to-indigo-50/80 border border-blue-200/80 rounded-xl p-3.5 flex flex-col justify-between">
                   <div className="flex items-center justify-between text-blue-700 text-xs font-semibold mb-1">
-                    <span>Total API Cost</span>
+                    <span>Total cost</span>
                     <DollarSign className="h-4 w-4 text-blue-600" />
                   </div>
                   <div className="text-xl font-extrabold text-blue-950 font-mono">
                     ${channelTotalCostUsd.toFixed(6)}
                   </div>
                   <div className="text-[10px] text-blue-600 font-medium mt-1">
-                    USD for {channelTotalBotMessages} bot replies
+                    US dollars, for {channelTotalBotMessages} AI {channelTotalBotMessages === 1 ? "reply" : "replies"}
                   </div>
                 </div>
 
                 {/* Total Tokens Card */}
                 <div className="bg-gradient-to-br from-emerald-50/80 to-teal-50/80 border border-emerald-200/80 rounded-xl p-3.5 flex flex-col justify-between">
                   <div className="flex items-center justify-between text-emerald-700 text-xs font-semibold mb-1">
-                    <span>Total Tokens</span>
+                    <span>Total tokens</span>
                     <Zap className="h-4 w-4 text-emerald-600" />
                   </div>
                   <div className="text-xl font-extrabold text-emerald-950 font-mono">
                     {channelTotalTokens.toLocaleString()}
                   </div>
                   <div className="text-[10px] text-emerald-600 font-medium mt-1">
-                    Input & output combined
+                    Text the AI read and wrote
                   </div>
                 </div>
               </div>
@@ -518,16 +523,16 @@ export default function ChannelMessagesPage() {
               {/* Detailed Token Breakdown Box */}
               <div className="bg-gray-50 rounded-xl border border-gray-200/80 p-3.5 space-y-2 text-xs text-gray-700">
                 <div className="font-bold text-gray-900 pb-1.5 border-b border-gray-200 flex items-center justify-between">
-                  <span>Usage & Token Breakdown</span>
-                  <span className="text-[10px] font-mono text-gray-500 font-normal">
-                    {channelTotalBotMessages} Bot {channelTotalBotMessages === 1 ? "Reply" : "Replies"}
+                  <span>Breakdown</span>
+                  <span className="text-[10px] text-gray-500 font-normal">
+                    {channelTotalBotMessages} AI {channelTotalBotMessages === 1 ? "reply" : "replies"}
                   </span>
                 </div>
 
                 <div className="flex justify-between items-center py-0.5 font-mono text-[11px]">
                   <span className="text-gray-500 flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-blue-500 inline-block" />
-                    Input Tokens (Prompt Context):
+                    Tokens read (question + context):
                   </span>
                   <span className="font-semibold text-gray-900">{channelTotalInputTokens.toLocaleString()}</span>
                 </div>
@@ -535,20 +540,20 @@ export default function ChannelMessagesPage() {
                 <div className="flex justify-between items-center py-0.5 font-mono text-[11px]">
                   <span className="text-gray-500 flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
-                    Output Tokens (Generation):
+                    Tokens written (answers):
                   </span>
                   <span className="font-semibold text-gray-900">{channelTotalOutputTokens.toLocaleString()}</span>
                 </div>
 
                 <div className="flex justify-between items-center py-0.5 font-mono text-[11px] pt-1.5 border-t border-gray-200">
-                  <span className="text-gray-500">Average Tokens per Reply:</span>
+                  <span className="text-gray-500">Average tokens per reply:</span>
                   <span className="font-semibold text-gray-800">
                     {channelTotalBotMessages > 0 ? Math.round(channelTotalTokens / channelTotalBotMessages).toLocaleString() : 0}
                   </span>
                 </div>
 
                 <div className="flex justify-between items-center py-0.5 font-mono text-[11px]">
-                  <span className="text-gray-500">Average Cost per Reply:</span>
+                  <span className="text-gray-500">Average cost per reply:</span>
                   <span className="font-semibold text-gray-800">
                     ${channelTotalBotMessages > 0 ? (channelTotalCostUsd / channelTotalBotMessages).toFixed(6) : "0.000000"}
                   </span>

@@ -9,8 +9,6 @@ import {
   Eye,
   EyeOff,
   Shield,
-  CheckCircle2,
-  AlertCircle,
   Loader2,
   Save,
   Globe,
@@ -20,6 +18,7 @@ import {
   Check,
 } from "lucide-react";
 import { fetchMyProfile, updateMyProfile, fetchGlobalSettings } from "@/lib/api";
+import { PageHeader, Alert, LoadingState } from "@/components/ui";
 import { DashboardUser } from "@/lib/types";
 
 const TIMEZONE_OPTIONS = [
@@ -213,7 +212,7 @@ export default function SettingsPage() {
           setTimezone(u.timezone || savedTz || "SYSTEM");
         }
       } catch {}
-      setFeedback({ type: "error", message: err?.message || "Failed to load account settings." });
+      setFeedback({ type: "error", message: err?.message || "We could not load your profile. Please refresh the page." });
     } finally {
       setLoading(false);
     }
@@ -233,7 +232,7 @@ export default function SettingsPage() {
     const cleanTimezone = timezone.trim() || "SYSTEM";
 
     if (!cleanName) {
-      setFeedback({ type: "error", message: "Full Name is required." });
+      setFeedback({ type: "error", message: "Please enter your full name." });
       return;
     }
 
@@ -282,7 +281,7 @@ export default function SettingsPage() {
         message: "Your profile details and personal timezone preference have been saved successfully.",
       });
     } catch (err: any) {
-      setFeedback({ type: "error", message: err?.message || "Failed to update profile settings." });
+      setFeedback({ type: "error", message: err?.message || "We could not save your changes. Please try again." });
     } finally {
       setSaving(false);
     }
@@ -316,55 +315,25 @@ export default function SettingsPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-[#088ADA] to-cyan-500 flex items-center justify-center text-white shadow-md">
-            <Settings className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">Account &amp; Profile Settings</h1>
-            <p className="text-xs text-gray-500">
-              Manage your personal information, credentials, and access preferences.
-            </p>
-          </div>
-        </div>
-        <div>
-          {profile && roleBadge(profile.role)}
-        </div>
-      </div>
+      <PageHeader
+        icon={Settings}
+        title="My profile"
+        description="Your name, email and password."
+        badge={profile ? roleBadge(profile.role) : undefined}
+      />
 
-      {/* Feedback Alert */}
-      {feedback && (
-        <div
-          className={`p-4 rounded-xl text-sm flex items-start gap-3 border ${
-            feedback.type === "success"
-              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-              : "bg-rose-50 text-rose-800 border-rose-200"
-          }`}
-        >
-          {feedback.type === "success" ? (
-            <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
-          ) : (
-            <AlertCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
-          )}
-          <span className="flex-1 font-medium">{feedback.message}</span>
-        </div>
-      )}
+      {feedback && <Alert type={feedback.type}>{feedback.message}</Alert>}
 
       {loading ? (
-        <div className="h-64 flex flex-col items-center justify-center gap-3 text-gray-500">
-          <Loader2 className="h-8 w-8 animate-spin text-[#088ADA]" />
-          <p className="text-sm">Loading your profile settings...</p>
-        </div>
+        <LoadingState label="Loading your profile..." />
       ) : (
         <form onSubmit={handleSaveProfile} className="space-y-6">
           {/* Card 1: Personal Information */}
           <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm p-6 space-y-5">
             <div className="border-b border-gray-100 pb-3">
-              <h2 className="text-sm font-semibold text-gray-800">Personal Information</h2>
+              <h2 className="text-sm font-semibold text-gray-800">Your details</h2>
               <p className="text-xs text-gray-400">
-                Update your name, unique email address, and security credentials.
+                This is how you appear to others and how you sign in.
               </p>
             </div>
 
@@ -462,10 +431,10 @@ export default function SettingsPage() {
               <div>
                 <h2 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
                   <Globe className="h-4 w-4 text-[#088ADA]" />
-                  Personal Timezone Preference
+                  Time zone
                 </h2>
                 <p className="text-xs text-gray-400">
-                  Select your timezone for dates, tables, HITL approvals, and audit logs.
+                  All dates and times on the dashboard are shown in this time zone.
                 </p>
               </div>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-cyan-50 text-cyan-700 border border-cyan-200">
@@ -480,7 +449,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
                     <Clock className="h-3.5 w-3.5 text-gray-400" />
-                    Select Your Timezone
+                    Your time zone
                   </label>
                   <button
                     type="button"
@@ -599,7 +568,7 @@ export default function SettingsPage() {
 
                 <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-100 text-[11px] text-blue-800 flex items-center">
                   <span>
-                    <strong>Isolated to your profile:</strong> This setting applies only when you are logged into this account and does not modify the global server configuration.
+                    <strong>Only for you:</strong> this changes how times look for your account. Other users are not affected.
                   </span>
                 </div>
               </div>
@@ -616,12 +585,12 @@ export default function SettingsPage() {
               {saving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Saving Settings...</span>
+                  <span>Saving...</span>
                 </>
               ) : (
                 <>
                   <Save className="h-4 w-4" />
-                  <span>Save Profile Settings</span>
+                  <span>Save changes</span>
                 </>
               )}
             </button>

@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { fetchContextHistory, fetchContextSnapshotById } from "@/lib/api";
 import { ContextSnapshot, formatLocalDateTime } from "@/lib/types";
+import { PageHeader, btn } from "@/components/ui";
 
 export default function ContextPage() {
   const [snapshots, setSnapshots] = useState<ContextSnapshot[]>([]);
@@ -54,44 +55,31 @@ export default function ContextPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto flex flex-col min-h-[calc(100vh-8rem)]">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-200">
-        <div className="flex items-center gap-2.5">
-          <div className="h-9 w-9 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA]">
-            <Cpu className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-              <span>Claude Context &amp; Turn Inspector</span>
-            </h1>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Audit conversation histories, token payloads, vector memories, and exact prompts sent to Claude.
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={loadContext}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition shadow-sm"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-[#088ADA]" : ""}`} />
-          <span>Refresh</span>
-        </button>
-      </div>
+      <PageHeader
+        icon={Cpu}
+        title="Conversation inspector"
+        description="See exactly what the AI received for each Slack request: the instructions, earlier messages and attached files."
+        actions={
+          <button onClick={loadContext} className={btn.secondary}>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
+          </button>
+        }
+      />
 
       {/* Main Two-Panel Layout */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1 min-h-0">
         {/* Left Column: Snapshots History List */}
         <div className="bg-white border border-gray-200 rounded-2xl flex flex-col overflow-hidden shadow-sm">
           <div className="p-3 border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-600 flex items-center justify-between">
-            <span>Recorded Sessions</span>
-            <span className="text-[11px] text-gray-400 font-mono">{snapshots.length} total</span>
+            <span>Recent requests</span>
+            <span className="text-[11px] text-gray-400">{snapshots.length} shown</span>
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-gray-100 p-2 space-y-1">
             {snapshots.length === 0 ? (
-              <div className="p-8 text-center text-xs text-gray-400">
-                No context snapshots recorded yet.
+              <div className="p-8 text-center text-sm text-gray-500">
+                {loading ? "Loading..." : "No requests recorded yet. They appear here after someone messages the bot in Slack."}
               </div>
             ) : (
               snapshots.map((s) => {
@@ -127,7 +115,7 @@ export default function ContextPage() {
                         {s.model || "Claude"}
                       </span>
                       <span className="font-mono bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded border border-gray-200">
-                        {turnCount} turns
+                        {turnCount} messages
                       </span>
                     </div>
                   </button>
@@ -148,8 +136,8 @@ export default function ContextPage() {
                     <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-200 font-mono">
                       {selectedSnapshot.model}
                     </span>
-                    <span className="text-xs text-gray-500 font-mono">
-                      Session: {selectedSnapshot.session_id ? selectedSnapshot.session_id.slice(0, 22) + "..." : "default"}
+                    <span className="text-xs text-gray-500" title={selectedSnapshot.session_id || undefined}>
+                      Conversation ID: <span className="font-mono">{selectedSnapshot.session_id ? selectedSnapshot.session_id.slice(0, 8) : "new"}</span>
                     </span>
                   </div>
                   <span className="text-xs text-gray-400 font-mono">
@@ -159,10 +147,10 @@ export default function ContextPage() {
 
                 <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
                   <span>
-                    User: <strong className="text-gray-800">{selectedSnapshot.user_name}</strong>
+                    Asked by <strong className="text-gray-800">{selectedSnapshot.user_name}</strong>
                   </span>
                   <span>
-                    Turns Preserved:{" "}
+                    Messages sent to the AI:{" "}
                     <strong className="text-gray-800 font-mono">
                       {selectedSnapshot.messages_sent?.length || 0}
                     </strong>
@@ -190,10 +178,10 @@ export default function ContextPage() {
                     >
                       <div className="flex items-center gap-2">
                         <Sliders className="h-4 w-4 text-[#088ADA]" />
-                        <span>Active System Prompt &amp; Vector Memories Passed to Claude</span>
+                        <span>Instructions given to the AI</span>
                         {selectedSnapshot.system_prompt.includes("[RELEVANT VECTOR MEMORIES") && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200 font-semibold">
-                            Vector Memories Attached
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-[#0778bd] border border-sky-200 font-semibold">
+                            Includes related past messages
                           </span>
                         )}
                       </div>
@@ -235,12 +223,12 @@ export default function ContextPage() {
                             ) : (
                               <>
                                 <Bot className="h-4 w-4 text-[#088ADA]" />
-                                <span className="text-gray-800 font-bold">Claude Assistant</span>
+                                <span className="text-gray-800 font-bold">AI assistant</span>
                               </>
                             )}
                           </div>
                           <span className="text-[10px] text-gray-500 font-mono bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
-                            Turn #{idx + 1}
+                            #{idx + 1}
                           </span>
                         </div>
 
@@ -252,14 +240,14 @@ export default function ContextPage() {
                   })
                 ) : (
                   <div className="p-6 text-center text-xs text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                    No historical conversation turn payload was attached to this prompt snapshot.
+                    No earlier messages were included with this request.
                   </div>
                 )}
               </div>
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-400 text-xs">
-              Select a session from the list to inspect context.
+              Choose a request on the left to see what the AI received.
             </div>
           )}
         </div>

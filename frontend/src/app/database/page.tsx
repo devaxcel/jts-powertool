@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { fetchTables, fetchTableData, clearTableData, clearFullDatabase, deleteTableRow } from "@/lib/api";
 import { TableInfo, TableColumn, formatLocalDateTime } from "@/lib/types";
+import { PageHeader, Alert, btn } from "@/components/ui";
 
 function formatCellValue(val: any, colName?: string): { isObj: boolean; text: string; full: string } {
   if (val === null || val === undefined) {
@@ -180,41 +181,42 @@ export default function DatabasePage() {
   const hasIdColumn = columns.some((c) => c.name === "id");
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto h-[calc(100vh-8rem)] flex flex-col">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
-        <div>
-          <h1 className="text-xl font-bold text-gray-700 flex items-center gap-2">
-            <Database className="h-5 w-5 text-[#088ADA]" />
-            <span>PostgreSQL Database Explorer</span>
-          </h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Direct real-time inspection of durable tables, queue states, and audit records.
-          </p>
-        </div>
+    <div className="space-y-5 max-w-7xl mx-auto h-[calc(100vh-7rem)] flex flex-col">
+      <div className="shrink-0">
+        <PageHeader
+          icon={Database}
+          title="Database"
+          description="Browse the records the system stores. For troubleshooting only."
+          actions={
+            <>
+              <button
+                onClick={() => {
+                  loadTables();
+                  if (selectedTable) loadTableData(selectedTable);
+                }}
+                className={btn.secondary}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${tableLoading || loading ? "animate-spin" : ""}`} />
+                <span>Refresh</span>
+              </button>
+              <button
+                onClick={handleClearFullDatabase}
+                disabled={actionLoading}
+                className={btn.danger}
+                title="Permanently delete all rows in all database tables"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Delete all data</span>
+              </button>
+            </>
+          }
+        />
+      </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <button
-            onClick={handleClearFullDatabase}
-            disabled={actionLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-sm transition disabled:opacity-50"
-            title="Permanently delete all rows in all database tables"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            <span>Delete Full Database</span>
-          </button>
-
-          <button
-            onClick={() => {
-              loadTables();
-              if (selectedTable) loadTableData(selectedTable);
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-500 text-xs font-medium border border-gray-200 transition"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${tableLoading || loading ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
-          </button>
-        </div>
+      <div className="shrink-0">
+        <Alert type="warning">
+          Deleting rows or tables here is permanent and cannot be undone. Only use this if you know what the data is for.
+        </Alert>
       </div>
 
       {/* Main Layout */}
@@ -224,7 +226,7 @@ export default function DatabasePage() {
           <div className="p-3 border-b border-gray-200 bg-gray-100 text-xs font-semibold text-gray-500 flex items-center justify-between">
             <span className="flex items-center gap-1.5">
               <TableIcon className="h-3.5 w-3.5 text-[#088ADA]" />
-              <span>Public Tables</span>
+              <span>Tables</span>
             </span>
             <span className="text-[11px] text-gray-400">{tables.length}</span>
           </div>
@@ -261,7 +263,7 @@ export default function DatabasePage() {
                 {selectedTable || "Select Table"}
               </span>
               <span className="text-[11px] text-gray-400 font-mono">
-                ({filteredRows.length} of {totalRows} records)
+                showing {filteredRows.length} of {totalRows} rows
               </span>
             </div>
 
@@ -270,7 +272,7 @@ export default function DatabasePage() {
                 <Search className="h-3.5 w-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Filter rows..."
+                  placeholder="Search in this table"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-9 pr-3 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 placeholder-gray-400 focus:outline-none focus:border-[#088ADA]"
@@ -285,7 +287,7 @@ export default function DatabasePage() {
                   title={`Permanently delete all rows in public.${selectedTable}`}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  <span>Clear Table Data</span>
+                  <span>Empty this table</span>
                 </button>
               )}
             </div>
@@ -294,27 +296,28 @@ export default function DatabasePage() {
           {/* Table Data Matrix */}
           <div className="flex-1 overflow-auto min-h-0 text-xs font-mono">
             {error ? (
-              <div className="p-8 text-center text-rose-500 bg-rose-950/20 m-4 rounded-xl border border-rose-900/40 space-y-3">
-                <p className="text-xs font-semibold">{error}</p>
+              <div className="p-8 text-center text-rose-700 bg-rose-50 m-4 rounded-xl border border-rose-200 space-y-3 font-sans">
+                <p className="text-sm font-semibold">Couldn&apos;t load this table</p>
+                <p className="text-xs">{error}</p>
                 <button
                   onClick={() => {
                     setError(null);
                     loadTables();
                     if (selectedTable) loadTableData(selectedTable);
                   }}
-                  className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-xs text-gray-600 rounded border border-gray-200 transition font-sans"
+                  className={btn.secondary}
                 >
-                  Retry
+                  Try again
                 </button>
               </div>
             ) : tableLoading ? (
               <div className="p-12 text-center text-gray-400 flex items-center justify-center gap-2">
                 <RefreshCw className="h-4 w-4 animate-spin text-[#088ADA]" />
-                <span>Loading table records...</span>
+                <span className="font-sans">Loading rows...</span>
               </div>
             ) : columns.length === 0 ? (
               <div className="p-12 text-center text-gray-400">
-                No data available for this table.
+                <span className="font-sans">Choose a table on the left to see its rows.</span>
               </div>
             ) : (
               <table className="w-full text-left border-collapse">

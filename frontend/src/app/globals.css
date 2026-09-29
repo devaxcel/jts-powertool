@@ -3,20 +3,24 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #333333;
+  --background: #f5f7fa;
+  --foreground: #1f2937;
   --primary: #088ADA;
-  --sidebar-bg: #088ADA;
+  --sidebar-bg: #0778bd;
 }
 
 * {
   font-family: "Myriad Pro", "Helvetica", "Arial", "Verdana", "Microsoft JhengHei", "Microsoft Sans Serif", sans-serif !important;
 }
 
+/* IDs, keys and code stay readable in a monospace font */
+.font-mono, code, pre, kbd {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace !important;
+}
+
 html, body {
-  background-color: #088ADA !important;
-  color: #333333;
-  font-family: "Myriad Pro", "Helvetica", "Arial", "Verdana", "Microsoft JhengHei", "Microsoft Sans Serif", sans-serif !important;
+  background-color: #f5f7fa !important;
+  color: #1f2937;
   overflow-x: hidden;
 }
 
@@ -24,22 +28,27 @@ input, textarea, select {
   color: #111827 !important;
 }
 
+/* Visible keyboard focus for accessibility */
+:focus-visible {
+  outline: 2px solid #088ADA;
+  outline-offset: 2px;
+}
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #e5e5e5;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #088ADA;
-  border-radius: 3px;
+  background: #cbd5e1;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #0778bd;
+  background: #94a3b8;
 }

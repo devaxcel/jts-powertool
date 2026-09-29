@@ -9,14 +9,11 @@ import {
   Edit3,
   RefreshCw,
   CheckCircle2,
-  AlertCircle,
-  Database,
   X,
   Loader2,
   ChevronRight,
   Hash,
   AtSign,
-  Radio,
 } from "lucide-react";
 import {
   fetchFolders,
@@ -30,6 +27,7 @@ import {
   AUTHORITATIVE_CHANNEL_NAMES,
 } from "@/lib/api";
 import { ChannelFolder, ChannelProject } from "@/lib/types";
+import { PageHeader, Alert, EmptyState, LoadingState, SectionTitle, btn } from "@/components/ui";
 
 function canonicalChannelId(cid: string, ws?: string, channelName?: string): string {
   if (!cid) return "";
@@ -277,138 +275,80 @@ export default function FoldersPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto flex flex-col min-h-[calc(100vh-8rem)]">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 pb-4 border-b border-gray-200">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA]">
-              <Folder className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <span>Channel Folders</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center gap-1">
-                  <Database className="h-3 w-3" />
-                  PostgreSQL DB
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600 border border-gray-200 flex items-center gap-1">
-                  <Radio className="h-3 w-3" />
-                  Slack Bot Synced
-                </span>
-              </h1>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Organize Slack channels &amp; members into project folders.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Corner: Action Buttons */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={handleSyncSlack}
-            disabled={syncing || loading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition disabled:opacity-50"
-            title="Scan Slack for all channels and DMs where the bot is present"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin text-[#088ADA]" : ""}`} />
-            <span>{syncing ? "Syncing..." : "Sync Slack"}</span>
-          </button>
-
-          <button
-            onClick={() => loadData()}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition disabled:opacity-50"
-            title="Reload data from database"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
-          </button>
-
-          {isMasterAdmin && (
+      <PageHeader
+        icon={Folder}
+        title={isMasterAdmin ? "Clients & channels" : "Your channels"}
+        description={
+          isMasterAdmin
+            ? "Each client has a folder. Put a client's Slack channels in their folder so their usage, billing and access stay separate."
+            : "The Slack channels that belong to your organization."
+        }
+        actions={
+          <>
             <button
-              onClick={openCreateFolderModal}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#088ADA] hover:bg-[#0778bd] text-white text-xs sm:text-sm font-semibold shadow-lg shadow-sky-600/20 transition active:scale-95"
-              title="Create a new folder"
+              onClick={handleSyncSlack}
+              disabled={syncing || loading}
+              className={btn.secondary}
+              title="Find every Slack channel and DM the bot has been added to"
             >
-              <FolderPlus className="h-4 w-4" />
-              <span>Create Folder</span>
+              <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+              <span>{syncing ? "Checking Slack..." : "Find Slack channels"}</span>
             </button>
-          )}
-        </div>
-      </div>
-
-      {/* Feedback Banner */}
-      {feedback && (
-        <div
-          className={`flex items-center justify-between p-3.5 rounded-xl border text-xs sm:text-sm transition-all animate-in fade-in slide-in-from-top-1 ${
-            feedback.type === "success"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-600"
-              : "bg-rose-50 border-rose-200 text-rose-600"
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            {feedback.type === "success" ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-            ) : (
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-500" />
+            {isMasterAdmin && (
+              <button onClick={openCreateFolderModal} className={btn.primary}>
+                <FolderPlus className="h-4 w-4" />
+                <span>New client folder</span>
+              </button>
             )}
-            <span>{feedback.message}</span>
-          </div>
-          <button
-            onClick={() => setFeedback(null)}
-            className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+          </>
+        }
+      />
+
+      {feedback && (
+        <Alert type={feedback.type} onClose={() => setFeedback(null)}>
+          {feedback.message}
+        </Alert>
       )}
 
       {/* Main Content Area */}
       <div className="space-y-8 flex-1">
         {loading ? (
-          <div className="h-64 flex flex-col items-center justify-center gap-3 text-gray-500">
-            <Loader2 className="h-8 w-8 animate-spin text-[#088ADA]" />
-            <p className="text-sm">Loading folders from database...</p>
-          </div>
+          <LoadingState label="Loading client folders..." />
         ) : (
           <>
             {/* Section 1: Folders Table */}
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Folders ({displayedFolders.length})
-                </span>
-              </div>
+              <SectionTitle
+                title={`Client folders (${displayedFolders.length})`}
+                description="Click a folder to see its channels, messages and API key settings."
+              />
 
               {displayedFolders.length === 0 ? (
-                <div className="h-48 flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center">
-                  <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] mb-2">
-                    <Folder className="h-5 w-5" />
-                  </div>
-                  <h3 className="text-xs font-semibold text-gray-700">No Folders Available</h3>
-                  <p className="text-[11px] text-gray-400 max-w-sm mt-0.5 mb-3">
-                    No folders assigned to your account.
-                  </p>
-                  {isMasterAdmin && (
-                    <button
-                      onClick={openCreateFolderModal}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#088ADA] hover:bg-[#0778bd] text-white text-xs font-semibold transition"
-                    >
-                      <FolderPlus className="h-3.5 w-3.5" />
-                      <span>Create First Folder</span>
-                    </button>
-                  )}
-                </div>
+                <EmptyState
+                  icon={Folder}
+                  title={isMasterAdmin ? "No client folders yet" : "No folder is assigned to your account"}
+                  description={
+                    isMasterAdmin
+                      ? "Create a folder for each client, then add their Slack channels to it."
+                      : "Ask your JTS administrator to assign your account to your organization's folder."
+                  }
+                  action={
+                    isMasterAdmin && (
+                      <button onClick={openCreateFolderModal} className={btn.primary}>
+                        <FolderPlus className="h-3.5 w-3.5" />
+                        <span>Create the first folder</span>
+                      </button>
+                    )
+                  }
+                />
               ) : (
                 <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
                   <table className="w-full text-left border-collapse">
                     <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm border-b border-gray-300">
                       <tr>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Folder Name</th>
+                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Client folder</th>
                         <th className="p-3 font-semibold bg-[#088ADA] text-white">Description</th>
                         <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Channels</th>
-                        <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Status</th>
                         <th className="p-3 font-semibold text-right bg-[#088ADA] text-white">Actions</th>
                       </tr>
                     </thead>
@@ -436,12 +376,6 @@ export default function FoldersPage() {
                               {folder.channel_count}
                             </span>
                           </td>
-                          <td className="p-3 text-center">
-                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                              <Database className="h-3 w-3" />
-                              Saved
-                            </span>
-                          </td>
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-1">
                               {isMasterAdmin && (
@@ -449,14 +383,16 @@ export default function FoldersPage() {
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openEditFolderModal(folder); }}
                                     className="p-1.5 text-gray-500 hover:text-[#0778bd] hover:bg-gray-300 rounded-lg transition"
-                                    title="Rename / Edit folder"
+                                    title="Rename or edit this folder"
+                                    aria-label="Edit folder"
                                   >
                                     <Edit3 className="h-3.5 w-3.5" />
                                   </button>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder); }}
                                     className="p-1.5 text-gray-500 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition"
-                                    title="Delete folder"
+                                    title="Delete this folder (its channels are kept, just unassigned)"
+                                    aria-label="Delete folder"
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </button>
@@ -476,37 +412,20 @@ export default function FoldersPage() {
             {/* Section 2: Unassigned Slack Channels */}
             {isMasterAdmin && (
             <div className="pt-4 border-t border-gray-200">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                    Unassigned Slack Channels ({dedupedUnassignedChannels.length})
-                  </span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-[#088ADA] border border-gray-200">
-                    Bot Discovered
-                  </span>
-                </div>
-                <button
-                  onClick={handleSyncSlack}
-                  disabled={syncing}
-                  className="flex items-center gap-1.5 text-xs text-[#088ADA] hover:text-[#0778bd] font-medium transition"
-                >
-                  <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
-                  <span>Scan Slack</span>
-                </button>
-              </div>
+              <SectionTitle
+                title={`Channels not in a folder yet (${dedupedUnassignedChannels.length})`}
+                description="Slack channels and DMs the bot is in that don't belong to a client yet. Pick a folder to assign each one."
+              />
 
               {dedupedUnassignedChannels.length === 0 ? (
-                <div className="p-6 rounded-2xl border border-gray-200 bg-gray-50 flex items-center justify-between text-xs text-gray-500">
+                <div className="p-4 rounded-2xl border border-gray-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm text-gray-600">
                   <div className="flex items-center gap-2.5">
                     <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                    <span>All discovered channels and members are organized into folders.</span>
+                    <span>Every channel the bot is in has been assigned to a client.</span>
                   </div>
-                  <button
-                    onClick={handleSyncSlack}
-                    disabled={syncing}
-                    className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium transition"
-                  >
-                    Check for New Slack Channels
+                  <button onClick={handleSyncSlack} disabled={syncing} className={btn.secondary}>
+                    <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+                    Check Slack for new channels
                   </button>
                 </div>
               ) : (
@@ -515,10 +434,10 @@ export default function FoldersPage() {
                     <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm border-b border-gray-300">
                       <tr>
                         <th className="p-3 font-semibold bg-[#088ADA] text-white">Workspace ID</th>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Slack Workspace</th>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Channel / Member</th>
+                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Slack workspace</th>
+                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Channel or DM</th>
                         <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Type</th>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Assign to Folder</th>
+                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Assign to client</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
@@ -560,7 +479,7 @@ export default function FoldersPage() {
                                 }}
                                 className="px-2.5 py-1 bg-white border border-gray-300 rounded-lg text-gray-800 text-xs focus:outline-none focus:border-[#088ADA] transition cursor-pointer w-full max-w-[180px]"
                               >
-                                <option value="" disabled>Select Folder...</option>
+                                <option value="" disabled>{folders.length === 0 ? "Create a folder first" : "Choose a client..."}</option>
                                 {folders.map((f) => (
                                   <option key={f.id} value={f.id}>{f.name}</option>
                                 ))}
@@ -589,8 +508,8 @@ export default function FoldersPage() {
                   <FolderPlus className="h-4 w-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-800">Create Folder</h3>
-                  <p className="text-[11px] text-gray-500">Saved permanently to database</p>
+                  <h3 className="text-sm font-semibold text-gray-800">New client folder</h3>
+                  <p className="text-xs text-gray-500">Usually one folder per client company</p>
                 </div>
               </div>
               <button
@@ -613,7 +532,7 @@ export default function FoldersPage() {
                     autoFocus
                     value={folderNameInput}
                     onChange={(e) => setFolderNameInput(e.target.value)}
-                    placeholder="Enter folder name (e.g. Production Projects)"
+                    placeholder="e.g. Acme Corporation"
                     className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 text-sm placeholder-gray-400 focus:outline-none focus:border-[#088ADA] focus:ring-1 focus:ring-[#088ADA] transition"
                   />
                 </div>
@@ -648,12 +567,12 @@ export default function FoldersPage() {
                   {folderSaving ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      <span>Saving to Database...</span>
+                      <span>Creating...</span>
                     </>
                   ) : (
                     <>
                       <FolderPlus className="h-3.5 w-3.5" />
-                      <span>Create Folder</span>
+                      <span>Create folder</span>
                     </>
                   )}
                 </button>
@@ -673,8 +592,8 @@ export default function FoldersPage() {
                   <Edit3 className="h-4 w-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-800">Edit Folder</h3>
-                  <p className="text-[11px] text-gray-500">Update folder name or description</p>
+                  <h3 className="text-sm font-semibold text-gray-800">Edit client folder</h3>
+                  <p className="text-xs text-gray-500">Change the name or description</p>
                 </div>
               </div>
               <button

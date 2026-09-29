@@ -12,11 +12,9 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  Database,
   Trash2,
   X,
   Loader2,
-  Radio,
   Search,
   Check,
   MessageSquare,
@@ -38,6 +36,7 @@ import {
 } from "@/lib/api";
 import { FolderDetails, ChannelProject } from "@/lib/types";
 import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
+import { PageHeader, Alert, EmptyState, LoadingState, SectionTitle, ComingSoonBadge, btn } from "@/components/ui";
 
 interface ToolDefinition {
   id: string;
@@ -314,93 +313,42 @@ export default function FolderDetailPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto flex flex-col min-h-[calc(100vh-8rem)]">
-      {/* Top Navigation & Breadcrumb */}
-      <div className="flex items-center justify-between">
-        <Link
-          href="/folders"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-800 transition bg-gray-100 hover:bg-gray-200 border border-gray-200 px-3 py-1.5 rounded-lg"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          <span>Back to All Folders</span>
+      {isMasterAdmin && (
+        <Link href="/folders" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-800 transition w-fit">
+          <ArrowLeft className="h-4 w-4" />
+          <span>All client folders</span>
         </Link>
-      </div>
+      )}
 
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-200">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] shrink-0">
-              <Folder className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold text-gray-800">
-                  {folder?.name || (loading ? "Loading Folder..." : `Folder #${folderId}`)}
-                </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center gap-1">
-                  <Database className="h-3 w-3" />
-                  PostgreSQL DB
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600 border border-gray-200 flex items-center gap-1">
-                  <Radio className="h-3 w-3" />
-                  Slack Bot Synced
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {folder?.description || "Manage Slack channels and members associated with this folder."}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Top-Right Action Buttons */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={handleSyncSlack}
-            disabled={syncing || loading}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition disabled:opacity-50 shadow-sm"
-            title="Scan Slack for all channels and DMs where the bot is added"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin text-[#088ADA]" : ""}`} />
-            <span>{syncing ? "Syncing Slack..." : "Sync Slack"}</span>
-          </button>
-
-          <button
-            onClick={() => loadData()}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition disabled:opacity-50"
-            title="Reload folder data"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Feedback Banner */}
-      {feedback && (
-        <div
-          className={`flex items-center justify-between p-3.5 rounded-xl border text-xs sm:text-sm transition-all animate-in fade-in slide-in-from-top-1 ${
-            feedback.type === "success"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-600"
-              : "bg-rose-50 border-rose-200 text-rose-600"
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            {feedback.type === "success" ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-            ) : (
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-500" />
+      <PageHeader
+        icon={Folder}
+        title={folder?.name || (loading ? "Loading..." : `Folder #${folderId}`)}
+        description={folder?.description || "This client's Slack channels, messages and AI key settings."}
+        actions={
+          <>
+            {isMasterAdmin && (
+              <button
+                onClick={handleSyncSlack}
+                disabled={syncing || loading}
+                className={btn.secondary}
+                title="Find every Slack channel and DM the bot has been added to"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+                <span>{syncing ? "Checking Slack..." : "Find Slack channels"}</span>
+              </button>
             )}
-            <span>{feedback.message}</span>
-          </div>
-          <button
-            onClick={() => setFeedback(null)}
-            className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+            <button onClick={() => loadData()} disabled={loading} className={btn.secondary}>
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+          </>
+        }
+      />
+
+      {feedback && (
+        <Alert type={feedback.type} onClose={() => setFeedback(null)}>
+          {feedback.message}
+        </Alert>
       )}
 
       {/* Client's own Anthropic key vs. billed JTS key */}
@@ -411,35 +359,32 @@ export default function FolderDetailPage() {
       {/* Content Area */}
       <div className="space-y-8 flex-1">
         {loading ? (
-          <div className="h-64 flex flex-col items-center justify-center gap-3 text-gray-500">
-            <Loader2 className="h-8 w-8 animate-spin text-[#088ADA]" />
-            <p className="text-sm">Loading folder channels and Slack status...</p>
-          </div>
+          <LoadingState label="Loading channels..." />
         ) : (
           <>
             {/* Section 1: Channels Added to this Folder */}
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                  Channels &amp; Members in this Folder ({dedupedFolderChannels.length})
-                </span>
-              </div>
+              <SectionTitle
+                title={`Channels in this folder (${dedupedFolderChannels.length})`}
+                description="Open a channel to read its conversation with the bot."
+              />
 
               {dedupedFolderChannels.length === 0 ? (
-                <div className="p-6 rounded-2xl border border-dashed border-gray-200 bg-gray-50 text-center">
-                  <p className="text-xs text-gray-500">
-                    No channels or members have been added to this folder yet.
-                  </p>
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    Select any available channel from the list below to associate it with this folder.
-                  </p>
-                </div>
+                <EmptyState
+                  icon={Hash}
+                  title="No channels in this folder yet"
+                  description={
+                    isMasterAdmin
+                      ? "Add a channel from the list below. The bot must already be invited to that channel in Slack."
+                      : "Ask your JTS administrator to add your team's Slack channels here."
+                  }
+                />
               ) : (
                 <div className="rounded-xl border border-gray-200 shadow-sm relative z-30 overflow-visible">
                   <table className="w-full text-left border-collapse overflow-visible">
                     <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-10 shadow-sm border-b border-gray-300">
                       <tr>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Channel / Member</th>
+                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Channel or DM</th>
                         <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Type</th>
                         <th className="p-3 font-semibold text-right bg-[#088ADA] text-white">Actions</th>
                       </tr>
@@ -486,7 +431,7 @@ export default function FolderDetailPage() {
                                     title="Add or configure tools for this channel"
                                   >
                                     <Wrench className="h-3.5 w-3.5 text-white" />
-                                    <span>Add Tools</span>
+                                    <span>Tools</span>
                                     <ChevronDown
                                       className={`h-3 w-3 text-white transition-transform duration-200 ${
                                         activeToolsDropdown === channel.channel_id ? "rotate-180" : ""
@@ -499,7 +444,7 @@ export default function FolderDetailPage() {
                                     <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 z-50 animate-in fade-in slide-in-from-top-1 duration-150 text-left">
                                       <div className="px-3 py-1.5 border-b border-gray-100 flex items-center justify-between">
                                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                                          Available Tools
+                                          Tools (coming soon)
                                         </span>
                                         <span className="text-[10px] text-gray-400 font-mono">
                                           #{channel.channel_name}
@@ -556,7 +501,7 @@ export default function FolderDetailPage() {
                                 title="View live messages in this channel"
                               >
                                 <MessageSquare className="h-3.5 w-3.5" />
-                                <span>Messages</span>
+                                <span>Open chat</span>
                               </Link>
                               {isMasterAdmin && (
                                 <button
@@ -582,16 +527,11 @@ export default function FolderDetailPage() {
               <div className="pt-6 border-t border-gray-200">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                        Available Slack Channels ({filteredUnassignedChannels.length})
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-[#088ADA] border border-gray-200">
-                        Not in Any Folder
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      Channels and members discovered from Slack. Adding one to this folder removes it from this list.
+                    <h2 className="text-sm font-semibold text-gray-800">
+                      Add a channel to this folder ({filteredUnassignedChannels.length} available)
+                    </h2>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Slack channels and DMs the bot is in that don&apos;t belong to any client yet.
                     </p>
                   </div>
 
@@ -603,7 +543,7 @@ export default function FolderDetailPage() {
                         type="text"
                         value={unassignedSearchQuery}
                         onChange={(e) => setUnassignedSearchQuery(e.target.value)}
-                        placeholder="Filter channels..."
+                        placeholder="Search channels"
                         className="pl-8 pr-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-800 text-xs placeholder-gray-400 focus:outline-none focus:border-[#088ADA] transition w-44 sm:w-56"
                       />
                     </div>
@@ -611,10 +551,10 @@ export default function FolderDetailPage() {
                       onClick={handleSyncSlack}
                       disabled={syncing}
                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition shrink-0"
-                      title="Scan Slack for new channels"
+                      title="Check Slack for channels the bot was recently added to"
                     >
                       <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin text-[#088ADA]" : ""}`} />
-                      <span>Sync</span>
+                      <span>Refresh list</span>
                     </button>
                   </div>
                 </div>
@@ -625,18 +565,14 @@ export default function FolderDetailPage() {
                       <Check className="h-4 w-4 text-emerald-600 shrink-0" />
                       <span>
                         {unassignedSearchQuery
-                          ? "No unassigned channels match your filter."
-                          : "All discovered Slack channels and members are currently added to folders."}
+                          ? "No channels match your search."
+                          : "Every channel the bot is in already belongs to a client."}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-gray-400">Need another channel?</span>
-                      <button
-                        onClick={handleSyncSlack}
-                        disabled={syncing}
-                        className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 text-xs font-medium transition"
-                      >
-                        Invite Bot in Slack &amp; Sync
+                      <span className="text-xs text-gray-500">Missing a channel? Invite the bot to it in Slack, then</span>
+                      <button onClick={handleSyncSlack} disabled={syncing} className={btn.secondary}>
+                        Check again
                       </button>
                     </div>
                   </div>
@@ -646,8 +582,8 @@ export default function FolderDetailPage() {
                       <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm border-b border-gray-300">
                         <tr>
                           <th className="p-3 font-semibold bg-[#088ADA] text-white">Workspace ID</th>
-                          <th className="p-3 font-semibold bg-[#088ADA] text-white">Slack Workspace</th>
-                          <th className="p-3 font-semibold bg-[#088ADA] text-white">Channel / Member</th>
+                          <th className="p-3 font-semibold bg-[#088ADA] text-white">Slack workspace</th>
+                          <th className="p-3 font-semibold bg-[#088ADA] text-white">Channel or DM</th>
                           <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Type</th>
                           <th className="p-3 font-semibold text-right bg-[#088ADA] text-white">Actions</th>
                         </tr>
@@ -718,15 +654,13 @@ export default function FolderDetailPage() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-gray-900 text-base">
-                      {activeToolModal.tool.name} Configuration
+                    <h3 className="font-semibold text-gray-900 text-base">
+                      {activeToolModal.tool.name} for this channel
                     </h3>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${activeToolModal.tool.badgeColor}`}>
-                      {activeToolModal.tool.badge}
-                    </span>
+                    <ComingSoonBadge />
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Configure tool secrets &amp; credentials for <span className="font-semibold text-gray-800">#{activeToolModal.channel.channel_name}</span>
+                    Connect {activeToolModal.tool.name} to <span className="font-semibold text-gray-800">{activeToolModal.channel.channel_name}</span>
                   </p>
                 </div>
               </div>
@@ -763,16 +697,13 @@ export default function FolderDetailPage() {
             )}
 
             {/* Modal Form */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setToolModalFeedback({
-                  type: "success",
-                  message: `${activeToolModal.tool.name} credentials saved for #${activeToolModal.channel.channel_name} (Frontend Ready).`,
-                });
-              }}
-              className="space-y-3.5 text-xs"
-            >
+            <Alert type="info" title="Not available yet">
+              Per-channel {activeToolModal.tool.name} settings can&apos;t be saved yet. For now the bot uses the
+              system-wide {activeToolModal.tool.name} connection set up by your JTS administrator.
+            </Alert>
+
+            <form onSubmit={(e) => e.preventDefault()} className="space-y-3.5 text-xs opacity-60">
+
               <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-gray-600 flex items-center justify-between font-mono text-[11px]">
                 <span className="flex items-center gap-1.5">
                   <KeyRound className="h-3.5 w-3.5 text-[#088ADA]" />
@@ -789,6 +720,7 @@ export default function FolderDetailPage() {
                   <input
                     type={field.type}
                     required={field.required}
+                    disabled
                     placeholder={field.placeholder}
                     value={toolKeyFields[field.key] || ""}
                     onChange={(e) =>
@@ -810,16 +742,13 @@ export default function FolderDetailPage() {
                     setToolKeyFields({});
                     setToolModalFeedback(null);
                   }}
-                  className="px-3.5 py-2 rounded-lg text-gray-600 hover:bg-gray-100 border border-gray-200 transition font-medium"
+                  className={btn.secondary}
                 >
-                  Cancel
+                  Close
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-[#088ADA] hover:bg-[#0778bd] text-white font-semibold shadow-sm transition active:scale-95 flex items-center gap-1.5"
-                >
+                <button type="submit" disabled className={btn.primary}>
                   <ShieldCheck className="h-3.5 w-3.5" />
-                  <span>Save Tool Keys</span>
+                  <span>Save (coming soon)</span>
                 </button>
               </div>
             </form>

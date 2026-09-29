@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { UsageSummary, ApiUsageLog, formatLocalDateTime, isClientKeyMessage } from "@/lib/types";
 import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
+import { PageHeader, btn } from "@/components/ui";
 import {
   fetchBillingSummary,
   fetchUsageLogs,
@@ -669,46 +670,29 @@ export default function BillingPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Top Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#088ADA] border border-gray-300 p-6 rounded-2xl shadow-md text-white">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Receipt className="h-6 w-6 text-white" />
-            <h1 className="text-xl font-bold text-white tracking-tight">
-              Token Usage &amp; Billing Control Center
-            </h1>
-            <span className="text-xs bg-white/20 text-white px-2.5 py-0.5 rounded-full font-mono border border-white/30">
-              Live Billed Rates
-            </span>
-          </div>
-          <p className="text-xs sm:text-sm text-gray-200">
-            Track real-time token consumption, calculated API cost USD, and granular billing breakdowns for every Slack workspace, channel, and user.
-          </p>
-        </div>
-
-        {/* Action Buttons Aligned Cleanly Side-by-Side */}
-        <div className="flex flex-row items-center gap-2.5 self-start md:self-auto shrink-0">
-          <button
-            onClick={loadBillingData}
-            disabled={loading || clearing}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-gray-100 text-gray-800 text-xs font-semibold shadow-md transition disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 text-[#088ADA] ${loading ? "animate-spin" : ""}`} />
-            <span>Refresh Telemetry</span>
-          </button>
-
-          {isMasterAdmin && (
-            <button
-              onClick={handleClearBillingData}
-              disabled={loading || clearing}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-md transition disabled:opacity-50"
-            >
-              <Trash2 className={`h-3.5 w-3.5 ${clearing ? "animate-spin" : ""}`} />
-              <span>Clear Billing Data</span>
+      <PageHeader
+        icon={Receipt}
+        title="Usage & billing"
+        description={
+          isMasterAdmin
+            ? "How much the AI assistant cost, per Slack workspace, channel and person. Only replies on the JTS key are billed."
+            : "How much your team's AI usage cost. Replies made with your own Anthropic key are not billed."
+        }
+        actions={
+          <>
+            <button onClick={loadBillingData} disabled={loading || clearing} className={btn.secondary}>
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
             </button>
-          )}
-        </div>
-      </div>
+            {isMasterAdmin && (
+              <button onClick={handleClearBillingData} disabled={loading || clearing} className={btn.dangerSoft}>
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>{clearing ? "Clearing..." : "Clear all billing data"}</span>
+              </button>
+            )}
+          </>
+        }
+      />
 
       {/* Client: own Anthropic key (not billed) vs. JTS key (billed) */}
       {!isMasterAdmin && myFolderId && (
@@ -720,7 +704,7 @@ export default function BillingPage() {
         {/* Total Cost */}
         <div className="bg-white border border-gray-200 p-5 rounded-2xl space-y-2 shadow-sm">
           <div className="flex items-center justify-between text-xs text-gray-600 font-semibold">
-            <span>Total Billed Cost</span>
+            <span>Total billed</span>
             <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200">
               <DollarSign className="h-4 w-4" />
             </div>
@@ -728,13 +712,13 @@ export default function BillingPage() {
           <div className="text-2xl font-bold font-mono text-gray-900">
             ${summaryStats.total_cost_usd.toFixed(6)}
           </div>
-          <p className="text-xs text-gray-500">Calculated per model rate &amp; 1M tokens</p>
+          <p className="text-xs text-gray-500">In US dollars, based on each AI model's price</p>
         </div>
 
         {/* Total Tokens */}
         <div className="bg-white border border-gray-200 p-5 rounded-2xl space-y-2 shadow-sm">
           <div className="flex items-center justify-between text-xs text-gray-600 font-semibold">
-            <span>Total Tokens Billed</span>
+            <span>Tokens used</span>
             <div className="p-2 rounded-lg bg-gray-100 text-[#088ADA] border border-gray-200">
               <Cpu className="h-4 w-4" />
             </div>
@@ -743,14 +727,14 @@ export default function BillingPage() {
             {summaryStats.total_tokens.toLocaleString()}
           </div>
           <p className="text-xs text-gray-500">
-            {`${summaryStats.total_input_tokens.toLocaleString()} in / ${summaryStats.total_output_tokens.toLocaleString()} out`}
+            {`${summaryStats.total_input_tokens.toLocaleString()} read · ${summaryStats.total_output_tokens.toLocaleString()} written`}
           </p>
         </div>
 
         {/* Active Channels */}
         <div className="bg-white border border-gray-200 p-5 rounded-2xl space-y-2 shadow-sm">
           <div className="flex items-center justify-between text-xs text-gray-600 font-semibold">
-            <span>Billed Channels</span>
+            <span>Channels</span>
             <div className="p-2 rounded-lg bg-gray-100 text-[#088ADA] border border-gray-200">
               <Layers className="h-4 w-4" />
             </div>
@@ -758,13 +742,13 @@ export default function BillingPage() {
           <div className="text-2xl font-bold font-mono text-gray-900">
             {summaryStats.active_channels_count}
           </div>
-          <p className="text-xs text-gray-500">Channels with active API calls</p>
+          <p className="text-xs text-gray-500">Slack channels that used the AI</p>
         </div>
 
         {/* Active Users */}
         <div className="bg-white border border-gray-200 p-5 rounded-2xl space-y-2 shadow-sm">
           <div className="flex items-center justify-between text-xs text-gray-600 font-semibold">
-            <span>Billed Users</span>
+            <span>People</span>
             <div className="p-2 rounded-lg bg-gray-100 text-[#088ADA] border border-gray-200">
               <Users className="h-4 w-4" />
             </div>
@@ -772,7 +756,7 @@ export default function BillingPage() {
           <div className="text-2xl font-bold font-mono text-gray-900">
             {summaryStats.active_users_count}
           </div>
-          <p className="text-xs text-gray-500">Unique user IDs generating calls</p>
+          <p className="text-xs text-gray-500">People who asked the AI something</p>
         </div>
       </div>
 
@@ -789,7 +773,7 @@ export default function BillingPage() {
             }`}
           >
             <FileText className="h-3.5 w-3.5" />
-            <span>Billing by Channel</span>
+            <span>By channel</span>
           </button>
           <button
             onClick={() => setActiveTab("user")}
@@ -800,7 +784,7 @@ export default function BillingPage() {
             }`}
           >
             <User className="h-3.5 w-3.5" />
-            <span>Billing by User</span>
+            <span>By person</span>
           </button>
           <button
             onClick={() => setActiveTab("channel_user")}
@@ -811,7 +795,7 @@ export default function BillingPage() {
             }`}
           >
             <Users className="h-3.5 w-3.5" />
-            <span>User Breakdown in Channel</span>
+            <span>Person per channel</span>
           </button>
           <button
             onClick={() => setActiveTab("logs")}
@@ -822,7 +806,7 @@ export default function BillingPage() {
             }`}
           >
             <Zap className="h-3.5 w-3.5" />
-            <span>Call History Logs</span>
+            <span>Every reply</span>
           </button>
         </div>
 
@@ -837,14 +821,14 @@ export default function BillingPage() {
                 onChange={(e) => setSelectedWorkspace(e.target.value)}
                 className="bg-white border border-gray-300 text-xs font-bold text-gray-800 rounded-lg px-2.5 py-1 focus:outline-none focus:border-[#088ADA] shadow-sm ml-1 cursor-pointer"
               >
-                <option value="ALL">🌐 All Workspaces</option>
+                <option value="ALL">All workspaces</option>
                 {availableWorkspaces.map((ws) => {
                   const displayName = ws.workspace_name.includes(ws.workspace_id)
                     ? ws.workspace_name
                     : `${ws.workspace_name} (${ws.workspace_id})`;
                   return (
                     <option key={ws.workspace_id} value={ws.workspace_id}>
-                      🏢 {displayName}
+                      {displayName}
                     </option>
                   );
                 })}
@@ -856,7 +840,7 @@ export default function BillingPage() {
             <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search channel or user ID..."
+              placeholder="Search channel or person"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-[#088ADA] focus:bg-white transition"
@@ -871,7 +855,7 @@ export default function BillingPage() {
           <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <FileText className="h-4 w-4 text-[#088ADA]" />
-              <span>Token Usage &amp; Billed Costs Grouped by Channel</span>
+              <span>Cost by channel</span>
             </h2>
             <span className="text-xs font-mono text-gray-500">
               {filteredChannels.length} channels displayed
@@ -883,14 +867,14 @@ export default function BillingPage() {
               <thead>
                 <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
                   {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Workspace ID</th>}
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack Workspace</th>}
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel Name</th>
+                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack workspace</th>}
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel</th>
                   <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel ID</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total API Calls</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Input Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Output Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Billed Cost (USD)</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">AI replies</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens read</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens written</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total tokens</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
                   {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA] text-right">Actions</th>}
                 </tr>
               </thead>
@@ -898,7 +882,7 @@ export default function BillingPage() {
                 {filteredChannels.length === 0 ? (
                   <tr>
                     <td colSpan={isMasterAdmin ? 10 : 7} className="py-8 text-center text-gray-500 italic bg-white">
-                      No channel usage records match the filter criteria.
+                      No usage found. Try another search or workspace.
                     </td>
                   </tr>
                 ) : (
@@ -956,7 +940,7 @@ export default function BillingPage() {
           <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <User className="h-4 w-4 text-[#088ADA]" />
-              <span>Token Usage &amp; Billed Costs Grouped by User</span>
+              <span>Cost by person</span>
             </h2>
             <span className="text-xs font-mono text-gray-500">
               {filteredUsers.length} users displayed
@@ -968,14 +952,14 @@ export default function BillingPage() {
               <thead>
                 <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
                   {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Workspace ID</th>}
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack Workspace</th>}
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">User Name</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">User ID</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total API Calls</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Input Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Output Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Billed Cost (USD)</th>
+                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack workspace</th>}
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Person</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack user ID</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">AI replies</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens read</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens written</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total tokens</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
                   {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA] text-right">Actions</th>}
                 </tr>
               </thead>
@@ -983,7 +967,7 @@ export default function BillingPage() {
                 {filteredUsers.length === 0 ? (
                   <tr>
                     <td colSpan={isMasterAdmin ? 10 : 7} className="py-8 text-center text-gray-500 italic bg-white">
-                      No user usage records found.
+                      No usage found. Try another search or workspace.
                     </td>
                   </tr>
                 ) : (
@@ -1045,7 +1029,7 @@ export default function BillingPage() {
           <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <Users className="h-4 w-4 text-[#088ADA]" />
-              <span>Granular User Billing Breakdown Within Each Channel</span>
+              <span>Cost per person in each channel</span>
             </h2>
             <span className="text-xs font-mono text-gray-500">
               {filteredChannelUsers.length} user-in-channel entries
@@ -1057,16 +1041,16 @@ export default function BillingPage() {
               <thead>
                 <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
                   {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Workspace ID</th>}
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack Workspace</th>}
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel Name</th>
+                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack workspace</th>}
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel</th>
                   <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel ID</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">User Name</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">User ID</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">API Calls</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Input Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Output Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Billed Cost (USD)</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Person</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack user ID</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">AI replies</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens read</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens written</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total tokens</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
                   {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA] text-right">Actions</th>}
                 </tr>
               </thead>
@@ -1074,7 +1058,7 @@ export default function BillingPage() {
                 {filteredChannelUsers.length === 0 ? (
                   <tr>
                     <td colSpan={isMasterAdmin ? 12 : 9} className="py-8 text-center text-gray-500 italic bg-white">
-                      No user breakdown records match the filter criteria.
+                      No usage found. Try another search or workspace.
                     </td>
                   </tr>
                 ) : (
@@ -1134,7 +1118,7 @@ export default function BillingPage() {
           <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <Zap className="h-4 w-4 text-[#088ADA]" />
-              <span>Detailed Billed API Call History</span>
+              <span>Every billed AI reply</span>
             </h2>
             <span className="text-xs font-mono text-gray-500">
               Showing last {filteredLogs.length} call logs
@@ -1146,16 +1130,16 @@ export default function BillingPage() {
               <thead>
                 <tr className="bg-[#088ADA] text-white font-semibold text-xs border-b border-gray-300">
                   {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Workspace ID</th>}
-                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack Workspace</th>}
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Call ID</th>
+                  {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack workspace</th>}
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">#</th>
                   <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Timestamp</th>
                   <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Channel</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">User Name</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">User ID</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Person</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Slack user ID</th>
                   <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Model</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Input Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Output Tokens</th>
-                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total Tokens</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens read</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Tokens written</th>
+                  <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Total tokens</th>
                   <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA]">Cost (USD)</th>
                   {isMasterAdmin && <th className="py-3.5 px-4 sticky top-0 z-20 bg-[#088ADA] text-right">Actions</th>}
                 </tr>
@@ -1164,7 +1148,7 @@ export default function BillingPage() {
                 {filteredLogs.length === 0 ? (
                   <tr>
                     <td colSpan={isMasterAdmin ? 13 : 10} className="py-8 text-center text-gray-500 italic bg-white">
-                      No API call logs recorded yet.
+                      No billed replies yet.
                     </td>
                   </tr>
                 ) : (

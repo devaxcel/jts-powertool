@@ -9,7 +9,6 @@ import {
   Shield,
   Building,
   Building2,
-  Check,
   X,
   Pencil,
   Mail,
@@ -28,6 +27,7 @@ import {
   extractErrorMessage,
 } from "@/lib/api";
 import { DashboardUser, ChannelFolder, Organization, formatLocalDateTime } from "@/lib/types";
+import { PageHeader, Alert, ComingSoonBadge, btn } from "@/components/ui";
 
 export default function UsersPage() {
   const router = useRouter();
@@ -46,7 +46,7 @@ export default function UsersPage() {
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"jts_admin" | "client_admin">("client_admin");
+  const [role, setRole] = useState<"jts_admin" | "client_admin" | "client_standard">("client_admin");
   const [clientFolderId, setClientFolderId] = useState<string>("");
   const [organizationId, setOrganizationId] = useState<string>("");
   const [githubRead, setGithubRead] = useState(true);
@@ -59,7 +59,7 @@ export default function UsersPage() {
   const [editUsername, setEditUsername] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editPassword, setEditPassword] = useState("");
-  const [editRole, setEditRole] = useState<"jts_admin" | "client_admin">("client_admin");
+  const [editRole, setEditRole] = useState<"jts_admin" | "client_admin" | "client_standard">("client_admin");
   const [editClientFolderId, setEditClientFolderId] = useState<string>("");
   const [editOrganizationId, setEditOrganizationId] = useState<string>("");
   const [editGithubRead, setEditGithubRead] = useState(true);
@@ -205,7 +205,7 @@ export default function UsersPage() {
     setEditUsername(u.username);
     setEditEmail(u.email || "");
     setEditPassword("");
-    setEditRole(u.role === "jts_admin" ? "jts_admin" : "client_admin");
+    setEditRole(u.role === "jts_admin" || u.role === "client_standard" ? u.role : "client_admin");
     setEditClientFolderId(u.client_folder_id ? String(u.client_folder_id) : "");
     setEditOrganizationId(u.organization_id ? String(u.organization_id) : "");
     setEditGithubRead(true);
@@ -276,60 +276,41 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto flex flex-col min-h-[calc(100vh-8rem)]">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-200">
-        <div className="flex items-center gap-2.5">
-          <div className="h-9 w-9 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA]">
-            <Users className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-              <span>Multi-Tenant User &amp; Role Management</span>
-            </h1>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Manage users, assign roles (JTS Admin, Client Admin), and bind client folder permissions.
-            </p>
-          </div>
-        </div>
+      <PageHeader
+        icon={Users}
+        title="Users"
+        description="Add people who can sign in, choose what they can see, and link them to a client."
+        actions={
+          <>
+            <button onClick={loadData} className={btn.secondary}>
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={() => {
+                resetForm();
+                setShowModal(true);
+              }}
+              className={btn.primary}
+            >
+              <UserPlus className="h-4 w-4" />
+              <span>Add user</span>
+            </button>
+          </>
+        }
+      />
 
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={loadData}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition shadow-sm"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-[#088ADA]" : ""}`} />
-            <span>Refresh</span>
-          </button>
-
-          <button
-            onClick={() => {
-              resetForm();
-              setShowModal(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#088ADA] hover:bg-[#0778bd] text-white text-xs sm:text-sm font-semibold shadow-sm transition active:scale-95"
-          >
-            <UserPlus className="h-4 w-4" />
-            <span>Create New User</span>
-          </button>
-        </div>
-      </div>
-
-      {successMsg && (
-        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
-          <Check className="h-4 w-4 text-emerald-600 shrink-0" />
-          <span>{successMsg}</span>
-        </div>
-      )}
+      {successMsg && <Alert type="success">{successMsg}</Alert>}
 
       {/* Role Summary Badges */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="p-4 rounded-xl bg-white border border-gray-200 shadow-sm flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 text-[#088ADA] flex items-center justify-center font-bold">
             <Shield className="h-5 w-5" />
           </div>
           <div>
             <div className="text-xs font-semibold text-gray-800">JTS Admin</div>
-            <div className="text-[11px] text-gray-500">Full System &amp; Multi-Client Access</div>
+            <div className="text-[11px] text-gray-500">Full access to every client and setting</div>
           </div>
         </div>
 
@@ -339,7 +320,17 @@ export default function UsersPage() {
           </div>
           <div>
             <div className="text-xs font-semibold text-gray-800">Client Admin</div>
-            <div className="text-[11px] text-gray-500">Scoped to Assigned Client Folder &amp; Team</div>
+            <div className="text-[11px] text-gray-500">Manages one client: team, billing and API key</div>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-xl bg-white border border-gray-200 shadow-sm flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-gray-100 border border-gray-200 text-emerald-600 flex items-center justify-center font-bold">
+            <Users className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-gray-800">Team Member</div>
+            <div className="text-[11px] text-gray-500">Sees only their own requests</div>
           </div>
         </div>
       </div>
@@ -347,7 +338,7 @@ export default function UsersPage() {
       {/* Users Table */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider">Registered Users ({users.length})</h2>
+          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider">All users ({users.length})</h2>
         </div>
 
         <div className="overflow-x-auto">
@@ -393,7 +384,7 @@ export default function UsersPage() {
                           </span>
                         ) : (
                           <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[10px]">
-                            Client Standard
+                            Team Member
                           </span>
                         )}
                       </td>
@@ -460,7 +451,7 @@ export default function UsersPage() {
             <div className="flex items-center justify-between border-b pb-3 border-gray-100 sticky top-0 bg-white z-10">
               <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
                 <UserPlus className="h-4 w-4 text-[#088ADA]" />
-                <span>Create New User</span>
+                <span>Add a new user</span>
               </h3>
               <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="h-4 w-4" />
@@ -568,16 +559,17 @@ export default function UsersPage() {
                   onChange={(e: any) => setRole(e.target.value)}
                   className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
                 >
-                  <option value="client_admin">Client Admin (Scoped Team &amp; Billing Manager)</option>
-                  <option value="jts_admin">JTS Admin (Full Global Access)</option>
+                  <option value="client_admin">Client Admin: manages their organization, billing and API key</option>
+                  <option value="client_standard">Team Member: sees their own requests only</option>
+                  <option value="jts_admin">JTS Admin: full access to everything</option>
                 </select>
               </div>
 
               {/* Tool Access & Permissions */}
               <div className="pt-2 border-t border-gray-100 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="block text-gray-700 font-bold">Tool Access Permissions</label>
-                  <span className="text-[10px] text-gray-400 font-normal">Granular Scopes</span>
+                  <label className="block text-gray-700 font-bold">Tool permissions</label>
+                  <ComingSoonBadge />
                 </div>
 
                 {/* GitHub Permissions Box */}
@@ -595,7 +587,7 @@ export default function UsersPage() {
                   <div className="space-y-1.5 pt-0.5">
                     <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
                       <input
-                        type="checkbox"
+                        type="checkbox" disabled
                         checked={githubRead}
                         onChange={(e) => setGithubRead(e.target.checked)}
                         className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
@@ -605,7 +597,7 @@ export default function UsersPage() {
 
                     <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
                       <input
-                        type="checkbox"
+                        type="checkbox" disabled
                         checked={githubPush}
                         onChange={(e) => setGithubPush(e.target.checked)}
                         className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
@@ -630,7 +622,7 @@ export default function UsersPage() {
                   <div className="space-y-1.5 pt-0.5">
                     <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
                       <input
-                        type="checkbox"
+                        type="checkbox" disabled
                         checked={jiraCreate}
                         onChange={(e) => setJiraCreate(e.target.checked)}
                         className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
@@ -640,7 +632,7 @@ export default function UsersPage() {
 
                     <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
                       <input
-                        type="checkbox"
+                        type="checkbox" disabled
                         checked={jiraClose}
                         onChange={(e) => setJiraClose(e.target.checked)}
                         className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
@@ -688,7 +680,7 @@ export default function UsersPage() {
             <div className="flex items-center justify-between border-b pb-3 border-gray-100 sticky top-0 bg-white z-10">
               <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
                 <Pencil className="h-4 w-4 text-[#088ADA]" />
-                <span>Edit User Details</span>
+                <span>Edit user</span>
               </h3>
               <button
                 onClick={() => {
@@ -810,16 +802,17 @@ export default function UsersPage() {
                   onChange={(e: any) => setEditRole(e.target.value)}
                   className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
                 >
-                  <option value="client_admin">Client Admin (Scoped Team &amp; Billing Manager)</option>
-                  <option value="jts_admin">JTS Admin (Full Global Access)</option>
+                  <option value="client_admin">Client Admin: manages their organization, billing and API key</option>
+                  <option value="client_standard">Team Member: sees their own requests only</option>
+                  <option value="jts_admin">JTS Admin: full access to everything</option>
                 </select>
               </div>
 
               {/* Tool Access & Permissions */}
               <div className="pt-2 border-t border-gray-100 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="block text-gray-700 font-bold">Tool Access Permissions</label>
-                  <span className="text-[10px] text-gray-400 font-normal">Granular Scopes</span>
+                  <label className="block text-gray-700 font-bold">Tool permissions</label>
+                  <ComingSoonBadge />
                 </div>
 
                 {/* GitHub Permissions Box */}
@@ -837,7 +830,7 @@ export default function UsersPage() {
                   <div className="space-y-1.5 pt-0.5">
                     <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
                       <input
-                        type="checkbox"
+                        type="checkbox" disabled
                         checked={editGithubRead}
                         onChange={(e) => setEditGithubRead(e.target.checked)}
                         className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
@@ -847,7 +840,7 @@ export default function UsersPage() {
 
                     <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
                       <input
-                        type="checkbox"
+                        type="checkbox" disabled
                         checked={editGithubPush}
                         onChange={(e) => setEditGithubPush(e.target.checked)}
                         className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
@@ -872,7 +865,7 @@ export default function UsersPage() {
                   <div className="space-y-1.5 pt-0.5">
                     <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
                       <input
-                        type="checkbox"
+                        type="checkbox" disabled
                         checked={editJiraCreate}
                         onChange={(e) => setEditJiraCreate(e.target.checked)}
                         className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
@@ -882,7 +875,7 @@ export default function UsersPage() {
 
                     <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
                       <input
-                        type="checkbox"
+                        type="checkbox" disabled
                         checked={editJiraClose}
                         onChange={(e) => setEditJiraClose(e.target.checked)}
                         className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
