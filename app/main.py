@@ -14,6 +14,7 @@ from app.api_approvals import api_approvals_router
 from app.channel_secrets_router import channel_secrets_router, vault_router
 from app.auth_router import auth_router, users_router, verify_session_token, SESSION_COOKIE_NAME
 from app.usage_router import usage_router
+from app.invoice_router import invoice_router
 from app.organizations_router import organizations_router
 from app.global_settings_router import global_settings_router
 
@@ -140,5 +141,6 @@ app.include_router(vault_router)
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(users_router)
 app.include_router(usage_router)
+app.include_router(invoice_router)
 app.include_router(organizations_router)
 app.include_router(global_settings_router)

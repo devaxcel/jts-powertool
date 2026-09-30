@@ -25,11 +25,11 @@ from app.tools.mcp_client import GitHubMCPClient
 from app.tools.secrets_manager import get_secret
 from app.slack_router import build_approved_card_blocks, build_rejected_card_blocks
 from app.auth_router import (
-    SESSION_COOKIE_NAME,
     get_user_context,
     get_folder_channel_ids,
-    get_user_from_db,
-    verify_session_token,
+    require_session,
+    client_channel_scope,
+    channel_in_scope,
 )
 from app.services.usage_service import KNOWN_USERS
 from app.slack_router import get_slack_user_profile
@@ -61,62 +61,24 @@ def serialize_data(val: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 def _require_login(request: Request) -> dict:
-    """
-    Returns the caller's user context, but only for a real, signed session token.
-    Approvals change GitHub, so the header-only fallback in get_user_context is not accepted here.
-    """
-    token = None
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
-    if not token:
-        token = request.cookies.get(SESSION_COOKIE_NAME)
-
-    payload = verify_session_token(token) if token else None
-    if not payload:
-        raise HTTPException(status_code=401, detail="Please sign in again.")
-
-    ctx = get_user_context(request)
-    actual_role = payload.get("role", "jts_admin")
-
-    # Resolve the real client folder instead of relying on the "folder 2" default.
-    if ctx.get("role") in ("client_admin", "client_standard"):
-        if actual_role in ("client_admin", "client_standard"):
-            folder_id = payload.get("client_folder_id")
-            if not folder_id:
-                db_u = get_user_from_db(payload.get("user", ""))
-                folder_id = db_u.get("client_folder_id") if db_u else None
-            ctx["client_folder_id"] = folder_id
-        # A JTS admin previewing a client role keeps the simulated folder from get_user_context.
-    return ctx
-
-
-def _norm(value: Any) -> str:
-    return str(value or "").strip().lower().lstrip("#@")
+    return require_session(request)
 
 
 def _channel_scope(ctx: dict) -> Optional[set]:
-    """None means the caller sees every approval (JTS admin). Otherwise the set of allowed channel keys."""
-    if ctx.get("role") not in ("client_admin", "client_standard"):
-        return None
-    folder_id = ctx.get("client_folder_id")
-    if not folder_id:
-        return set()
-    return {_norm(c) for c in get_folder_channel_ids(folder_id) if _norm(c)}
+    return client_channel_scope(ctx)
 
 
 def _is_visible(record: dict, scope: Optional[set]) -> bool:
     if scope is None:
         return True
     args = record.get("tool_arguments") or {}
-    candidates = [
+    # Exact matches only: an approval without a channel is never shown to a client.
+    return channel_in_scope(
+        scope,
         record.get("channel_id"),
         record.get("channel_name"),
         args.get("channel_id") if isinstance(args, dict) else None,
-    ]
-    keys = {_norm(c) for c in candidates if _norm(c)}
-    # Exact matches only: an approval without a channel is never shown to a client.
-    return bool(keys & scope)
+    )
 
 
 # ---------------------------------------------------------------------------

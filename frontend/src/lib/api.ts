@@ -15,6 +15,8 @@ import {
   VaultSecret,
   UsageSummary,
   ApiUsageLog,
+  Invoice,
+  InvoicePreview,
   DashboardUser,
   ConversationMessage,
   VerifyTokenResponse,
@@ -714,13 +716,140 @@ export async function fetchUsageSummary(): Promise<UsageSummary> {
   return res.json();
 }
 
-export async function fetchBillingSummary(): Promise<UsageSummary> {
-  const res = await fetch(`${API_BASE}/api/usage/billing`, {
+/** Inclusive YYYY-MM-DD dates (UTC). Omit a side for an open-ended range. */
+export type DateRange = { start?: string; end?: string };
+
+function rangeQuery(range?: DateRange, extra: Record<string, string | number | undefined> = {}): string {
+  const params = new URLSearchParams();
+  if (range?.start) params.set("start", range.start);
+  if (range?.end) params.set("end", range.end);
+  Object.entries(extra).forEach(([k, v]) => {
+    if (v !== undefined && v !== "") params.set(k, String(v));
+  });
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
+export async function fetchBillingSummary(range?: DateRange): Promise<UsageSummary> {
+  const res = await fetch(`${API_BASE}/api/usage/billing${rangeQuery(range)}`, {
     headers: getAuthHeaders(),
     cache: "no-store",
   });
-  if (!res.ok) return fetchUsageSummary();
-  return res.json();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load billing data. Please refresh the page."));
+  return data;
+}
+
+export async function fetchUsageLogsInRange(limit: number, range?: DateRange): Promise<ApiUsageLog[]> {
+  const res = await fetch(`${API_BASE}/api/usage/logs${rangeQuery(range, { limit })}`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => []);
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load the reply history."));
+  return data;
+}
+
+/** Downloads a CSV of the chosen view for the period (the browser saves it). */
+export async function downloadUsageCsv(
+  view: "channel" | "user" | "channel_user" | "logs",
+  range?: DateRange,
+  workspaceId?: string
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/usage/export${rangeQuery(range, { view, workspace_id: workspaceId && workspaceId !== "ALL" ? workspaceId : undefined })}`,
+    { headers: getAuthHeaders(), cache: "no-store" }
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(data, "We couldn't create the CSV file."));
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = match ? match[1] : `jts-usage-${view}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function recalculateUsageCosts(): Promise<{ status: string; updated_count: number }> {
+  const res = await fetch(`${API_BASE}/api/usage/recalculate`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't recalculate costs."));
+  return data;
+}
+
+/* ---------------------------------- Invoices ---------------------------------- */
+
+async function invoiceRequest<T>(path: string, init: RequestInit = {}, fallback = "Something went wrong."): Promise<T> {
+  const res = await fetch(`${API_BASE}/api/invoices${path}`, {
+    ...init,
+    headers: getAuthHeaders(init.body ? { "Content-Type": "application/json" } : {}),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, fallback));
+  return data as T;
+}
+
+export async function fetchInvoices(status?: string): Promise<Invoice[]> {
+  const data = await invoiceRequest<{ invoices: Invoice[] }>(
+    status && status !== "all" ? `?status=${encodeURIComponent(status)}` : "",
+    {},
+    "We couldn't load invoices."
+  );
+  return data.invoices || [];
+}
+
+export async function fetchInvoice(invoiceId: number | string): Promise<Invoice> {
+  const data = await invoiceRequest<{ invoice: Invoice }>(`/${encodeURIComponent(String(invoiceId))}`, {}, "We couldn't load this invoice.");
+  return data.invoice;
+}
+
+export async function previewInvoice(params: {
+  folder_id: number;
+  period_start: string;
+  period_end: string;
+  markup_percent: number;
+}): Promise<InvoicePreview> {
+  const q = new URLSearchParams({
+    folder_id: String(params.folder_id),
+    period_start: params.period_start,
+    period_end: params.period_end,
+    markup_percent: String(params.markup_percent || 0),
+  });
+  return invoiceRequest<InvoicePreview>(`/preview?${q.toString()}`, {}, "We couldn't calculate this invoice.");
+}
+
+export async function createInvoice(payload: {
+  folder_id: number;
+  period_start: string;
+  period_end: string;
+  organization_id?: number | null;
+  markup_percent: number;
+  due_days: number;
+  notes?: string;
+}): Promise<{ invoice: Invoice; message: string }> {
+  return invoiceRequest("", { method: "POST", body: JSON.stringify(payload) }, "We couldn't create this invoice.");
+}
+
+export async function markInvoicePaid(
+  invoiceId: number,
+  payload: { paid_on: string; reference?: string }
+): Promise<{ invoice: Invoice; message: string }> {
+  return invoiceRequest(`/${invoiceId}/mark-paid`, { method: "POST", body: JSON.stringify(payload) }, "We couldn't mark this invoice as paid.");
+}
+
+export async function voidInvoice(invoiceId: number, reason?: string): Promise<{ invoice: Invoice; message: string }> {
+  return invoiceRequest(`/${invoiceId}/void`, { method: "POST", body: JSON.stringify({ reason }) }, "We couldn't void this invoice.");
 }
 
 export async function clearBillingData(): Promise<{ status: string; message: string; deleted_count: number }> {

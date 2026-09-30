@@ -240,6 +240,68 @@ def get_user_context(request: Request, ignore_simulation: bool = False) -> dict:
     return {"username": "admin", "role": active_role if not ignore_simulation else actual_role, "actual_role": actual_role, "client_folder_id": folder_id}
 
 
+def require_session(request: Request) -> dict:
+    """
+    Returns the caller's user context, but only for a real, signed session token.
+    Unlike get_user_context, it never trusts role headers without a login, and it
+    resolves a client's real folder instead of defaulting to folder 2 (None if unassigned).
+    Raises 401 when the caller is not signed in.
+    """
+    token = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+
+    payload = verify_session_token(token) if token else None
+    if not payload:
+        raise HTTPException(status_code=401, detail="Please sign in again.")
+
+    ctx = get_user_context(request)
+    actual_role = payload.get("role", "jts_admin")
+    if ctx.get("role") in ("client_admin", "client_standard") and actual_role in ("client_admin", "client_standard"):
+        folder_id = payload.get("client_folder_id")
+        if not folder_id:
+            db_u = get_user_from_db(payload.get("user", ""))
+            folder_id = db_u.get("client_folder_id") if db_u else None
+        ctx["client_folder_id"] = folder_id
+    # A JTS admin previewing a client role keeps the simulated folder from get_user_context.
+    return ctx
+
+
+def _norm_channel_key(value: Any) -> str:
+    return str(value or "").strip().lower().lstrip("#@")
+
+
+def client_channel_scope(ctx: dict) -> Optional[set]:
+    """
+    None means the caller sees every channel (JTS admin).
+    Otherwise the set of normalized channel IDs/names in the caller's client folder (empty if unassigned).
+    """
+    if ctx.get("role") not in ("client_admin", "client_standard"):
+        return None
+    folder_id = ctx.get("client_folder_id")
+    if not folder_id:
+        return set()
+    return {_norm_channel_key(c) for c in get_folder_channel_ids(folder_id) if _norm_channel_key(c)}
+
+
+def channel_in_scope(scope: Optional[set], *values: Any) -> bool:
+    """Exact (case- and #/@-insensitive) match of any channel ID or name against the scope."""
+    if scope is None:
+        return True
+    return any(_norm_channel_key(v) in scope for v in values if _norm_channel_key(v))
+
+
+def require_jts_admin(request: Request) -> dict:
+    """Signed-in JTS admin only (a JTS admin previewing a client role is treated as that client)."""
+    ctx = require_session(request)
+    if ctx.get("role") != "jts_admin":
+        raise HTTPException(status_code=403, detail="Only JTS admins can do this.")
+    return ctx
+
+
 def get_folder_channel_ids(client_folder_id: Optional[int]) -> List[str]:
     """Retrieves all channel_ids and channel_names assigned to a given client folder, including prefixed/bare variants."""
     if not client_folder_id:

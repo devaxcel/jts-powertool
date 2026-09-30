@@ -527,3 +527,63 @@ export interface FolderApiKeyStatus {
 
 
 
+
+export interface InvoiceLineItem {
+  channel_id: string;
+  channel_name: string;
+  replies: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+export interface InvoiceBillTo {
+  organization_id?: number;
+  name?: string;
+  contact?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+}
+
+export interface Invoice {
+  id: number;
+  invoice_number: string;
+  folder_id: number;
+  folder_name: string;
+  organization_id?: number | null;
+  bill_to: InvoiceBillTo;
+  period_start: string;
+  period_end: string;
+  replies: number;
+  total_tokens: number;
+  usage_cost_usd: number;
+  markup_percent: number;
+  amount_usd: number;
+  line_items: InvoiceLineItem[];
+  status: "unpaid" | "paid" | "void";
+  /** status, or "overdue" when unpaid past the due date */
+  display_status: "unpaid" | "paid" | "void" | "overdue";
+  due_date?: string | null;
+  notes?: string | null;
+  paid_at?: string | null;
+  payment_reference?: string | null;
+  void_reason?: string | null;
+  created_by?: string | null;
+  created_at?: string;
+}
+
+export interface InvoicePreview {
+  folder_id: number;
+  folder_name: string;
+  channel_count: number;
+  line_items: InvoiceLineItem[];
+  replies: number;
+  total_tokens: number;
+  usage_cost_usd: number;
+  markup_percent: number;
+  amount_usd: number;
+  suggested_organization_id: number | null;
+  overlapping_invoice: string | null;
+}

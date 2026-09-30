@@ -3,31 +3,53 @@ Token Usage & API Cost Calculation Service.
 Calculates token counts and cost USD per API call, tracked by Channel and User.
 """
 import logging
-from typing import Dict, List, Optional, Any
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple
 from app.db.session import get_db_connection
 
 logger = logging.getLogger(__name__)
 
-# Standard model pricing per 1,000,000 tokens (USD)
+# Standard model pricing per 1,000,000 tokens (USD), Anthropic first-party API rates.
+# Matching picks the LONGEST key contained in the model name, so specific versions win
+# over family names (e.g. "claude-opus-4-8" beats "claude-opus-4").
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
-    # Haiku models (Anthropic - $1.00 / $5.00 per 1M tokens)
-    "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00},
-    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
-    "haiku-4-5": {"input": 1.00, "output": 5.00},
-    "claude-3-5-haiku": {"input": 1.00, "output": 5.00},
-    "claude-3-haiku": {"input": 0.25, "output": 1.25},
-    "haiku": {"input": 1.00, "output": 5.00},
-    # Sonnet models
+    # Fable / Mythos
+    "claude-fable-5-1": {"input": 10.00, "output": 50.00},
+    "claude-fable-5": {"input": 10.00, "output": 50.00},
+    "claude-mythos": {"input": 10.00, "output": 50.00},
+    # Opus
+    "claude-opus-5-5": {"input": 4.00, "output": 20.00},
+    "claude-opus-5": {"input": 5.00, "output": 25.00},
+    "claude-opus-4-8": {"input": 5.00, "output": 25.00},
+    "claude-opus-4-7": {"input": 5.00, "output": 25.00},
+    "claude-opus-4-6": {"input": 5.00, "output": 25.00},
+    "claude-opus-4-5": {"input": 5.00, "output": 25.00},
+    "claude-opus-4-1": {"input": 15.00, "output": 75.00},
+    "claude-opus-4": {"input": 15.00, "output": 75.00},
+    "claude-3-opus": {"input": 15.00, "output": 75.00},
+    # Sonnet
+    "claude-sonnet-5-5": {"input": 2.00, "output": 10.00},
+    "claude-sonnet-5": {"input": 2.00, "output": 10.00},
+    "claude-sonnet-4": {"input": 3.00, "output": 15.00},
     "claude-3-7-sonnet": {"input": 3.00, "output": 15.00},
     "claude-3-5-sonnet": {"input": 3.00, "output": 15.00},
     "claude-3-sonnet": {"input": 3.00, "output": 15.00},
-    "sonnet": {"input": 3.00, "output": 15.00},
-    # Opus models
-    "claude-3-opus": {"input": 15.00, "output": 75.00},
-    "opus": {"input": 15.00, "output": 75.00},
+    # Haiku
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
+    "claude-3-5-haiku": {"input": 0.80, "output": 4.00},
+    "claude-3-haiku": {"input": 0.25, "output": 1.25},
     # OpenAI models
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "gpt-4o": {"input": 2.50, "output": 10.00},
+}
+
+# Used only when a model name matches nothing above (a warning is logged).
+FAMILY_FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
+    "fable": {"input": 10.00, "output": 50.00},
+    "mythos": {"input": 10.00, "output": 50.00},
+    "opus": {"input": 5.00, "output": 25.00},
+    "sonnet": {"input": 3.00, "output": 15.00},
+    "haiku": {"input": 1.00, "output": 5.00},
 }
 
 DEFAULT_PRICING = {"input": 1.00, "output": 5.00}
@@ -131,33 +153,23 @@ def resolve_channel_display_name(
     return channel_id
 
 
+def get_model_pricing(model_name: str) -> Dict[str, float]:
+    """Returns {"input": $/1M, "output": $/1M} for a model name."""
+    model_key = (model_name or "").strip().lower()
+    matches = [k for k in MODEL_PRICING if k in model_key]
+    if matches:
+        return MODEL_PRICING[max(matches, key=len)]
+    for family, pricing in FAMILY_FALLBACK_PRICING.items():
+        if family in model_key:
+            logger.warning(f"[USAGE_SERVICE] No exact price for model '{model_name}', using {family} family price.")
+            return pricing
+    logger.warning(f"[USAGE_SERVICE] Unknown model '{model_name}', using default price.")
+    return DEFAULT_PRICING
+
+
 def calculate_token_cost(model_name: str, input_tokens: int, output_tokens: int) -> float:
     """Calculates total cost in USD for a given model, input tokens, and output tokens."""
-    model_key = (model_name or "").strip().lower()
-    
-    # 1. Check exact or substring match in MODEL_PRICING
-    pricing = None
-    for k, p in MODEL_PRICING.items():
-        if k in model_key:
-            pricing = p
-            break
-
-    # 2. Intelligent model family fallback
-    if not pricing:
-        if "haiku" in model_key:
-            if "3-haiku" in model_key:
-                pricing = {"input": 0.25, "output": 1.25}
-            else:
-                pricing = {"input": 1.00, "output": 5.00}
-        elif "opus" in model_key:
-            pricing = {"input": 15.00, "output": 75.00}
-        elif "mini" in model_key:
-            pricing = {"input": 0.15, "output": 0.60}
-        elif "sonnet" in model_key:
-            pricing = {"input": 3.00, "output": 15.00}
-        else:
-            pricing = DEFAULT_PRICING
-
+    pricing = get_model_pricing(model_name)
     input_cost = (max(0, input_tokens) / 1_000_000.0) * pricing["input"]
     output_cost = (max(0, output_tokens) / 1_000_000.0) * pricing["output"]
     return round(input_cost + output_cost, 6)
@@ -327,17 +339,32 @@ def record_api_usage(
             conn.close()
 
 
-def get_usage_summary() -> Dict[str, Any]:
+def _date_filter(alias: str, start: Optional[datetime] = None, end: Optional[datetime] = None) -> Tuple[str, list]:
+    """SQL fragment (starting with AND) restricting created_at to [start, end)."""
+    col = f"{alias}.created_at" if alias else "created_at"
+    parts, params = [], []
+    if start is not None:
+        parts.append(f"{col} >= %s")
+        params.append(start)
+    if end is not None:
+        parts.append(f"{col} < %s")
+        params.append(end)
+    return ("".join(f" AND {p}" for p in parts), params)
+
+
+def get_usage_summary(start: Optional[datetime] = None, end: Optional[datetime] = None) -> Dict[str, Any]:
     """
     Retrieves aggregated token usage and cost statistics overall and grouped by channel & user.
+    Optional start/end restrict to calls made in [start, end).
     """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             _ensure_key_source_column(cur)
             conn.commit()
+            date_sql, date_params = _date_filter("l", start, end)
             # Aggregate totals overall (billable JTS-key calls only)
-            cur.execute("""
+            cur.execute(f"""
                 SELECT 
                     COUNT(*) as total_calls,
                     COALESCE(SUM(input_tokens), 0) as total_input_tokens,
@@ -346,13 +373,13 @@ def get_usage_summary() -> Dict[str, Any]:
                     COALESCE(SUM(cost_usd), 0.0) as total_cost_usd,
                     COUNT(DISTINCT channel_id) as active_channels_count,
                     COUNT(DISTINCT user_id) as active_users_count
-                FROM api_usage_logs
-                WHERE COALESCE(key_source, 'jts') = 'jts';
-            """)
+                FROM api_usage_logs l
+                WHERE COALESCE(l.key_source, 'jts') = 'jts'{date_sql};
+            """, date_params)
             overall = cur.fetchone() or {}
 
             # Grouped by channel
-            cur.execute("""
+            cur.execute(f"""
                 SELECT 
                     COALESCE(sw.team_id, cm.workspace_id, l.workspace_id, 'T5ZMF56H5') as workspace_id,
                     COALESCE(sw.team_name, cm.workspace_name, l.workspace_name, 'Axcel World') as workspace_name,
@@ -366,14 +393,14 @@ def get_usage_summary() -> Dict[str, Any]:
                 FROM api_usage_logs l
                 LEFT JOIN channel_metadata cm ON l.channel_id = cm.channel_id
                 LEFT JOIN slack_workspaces sw ON COALESCE(l.workspace_id, cm.workspace_id) = sw.team_id
-                WHERE COALESCE(l.key_source, 'jts') = 'jts'
+                WHERE COALESCE(l.key_source, 'jts') = 'jts'{date_sql}
                 GROUP BY
                     COALESCE(sw.team_id, cm.workspace_id, l.workspace_id, 'T5ZMF56H5'),
                     COALESCE(sw.team_name, cm.workspace_name, l.workspace_name, 'Axcel World'),
                     l.channel_id,
                     cm.channel_name
                 ORDER BY total_cost_usd DESC;
-            """)
+            """, date_params)
             by_channel_rows = cur.fetchall() or []
 
             chan_map = {}
@@ -421,7 +448,7 @@ def get_usage_summary() -> Dict[str, Any]:
             by_channel = sorted(list(chan_map.values()), key=lambda x: x["total_cost_usd"], reverse=True)
 
             # Grouped by user
-            cur.execute("""
+            cur.execute(f"""
                 SELECT 
                     COALESCE(sw.team_id, l.workspace_id, 'T5ZMF56H5') as workspace_id,
                     COALESCE(sw.team_name, l.workspace_name, 'Axcel World') as workspace_name,
@@ -433,13 +460,13 @@ def get_usage_summary() -> Dict[str, Any]:
                     COALESCE(SUM(l.cost_usd), 0.0) as total_cost_usd
                 FROM api_usage_logs l
                 LEFT JOIN slack_workspaces sw ON l.workspace_id = sw.team_id
-                WHERE COALESCE(l.key_source, 'jts') = 'jts'
+                WHERE COALESCE(l.key_source, 'jts') = 'jts'{date_sql}
                 GROUP BY
                     COALESCE(sw.team_id, l.workspace_id, 'T5ZMF56H5'),
                     COALESCE(sw.team_name, l.workspace_name, 'Axcel World'),
                     l.user_id
                 ORDER BY total_cost_usd DESC;
-            """)
+            """, date_params)
             by_user_rows = cur.fetchall() or []
 
             user_map = {}
@@ -479,7 +506,7 @@ def get_usage_summary() -> Dict[str, Any]:
             by_user = sorted(list(user_map.values()), key=lambda x: x["total_cost_usd"], reverse=True)
 
             # Grouped by channel AND user
-            cur.execute("""
+            cur.execute(f"""
                 SELECT 
                     COALESCE(sw.team_id, cm.workspace_id, l.workspace_id, 'T5ZMF56H5') as workspace_id,
                     COALESCE(sw.team_name, cm.workspace_name, l.workspace_name, 'Axcel World') as workspace_name,
@@ -494,7 +521,7 @@ def get_usage_summary() -> Dict[str, Any]:
                 FROM api_usage_logs l
                 LEFT JOIN channel_metadata cm ON l.channel_id = cm.channel_id
                 LEFT JOIN slack_workspaces sw ON COALESCE(l.workspace_id, cm.workspace_id) = sw.team_id
-                WHERE COALESCE(l.key_source, 'jts') = 'jts'
+                WHERE COALESCE(l.key_source, 'jts') = 'jts'{date_sql}
                 GROUP BY
                     COALESCE(sw.team_id, cm.workspace_id, l.workspace_id, 'T5ZMF56H5'),
                     COALESCE(sw.team_name, cm.workspace_name, l.workspace_name, 'Axcel World'),
@@ -502,7 +529,7 @@ def get_usage_summary() -> Dict[str, Any]:
                     cm.channel_name,
                     l.user_id
                 ORDER BY total_cost_usd DESC;
-            """)
+            """, date_params)
             by_channel_user_rows = cur.fetchall() or []
 
             cu_map = {}
@@ -588,16 +615,20 @@ def get_usage_summary() -> Dict[str, Any]:
             conn.close()
 
 
-def get_usage_logs(limit: int = 100) -> List[Dict[str, Any]]:
+def get_usage_logs(
+    limit: int = 100, start: Optional[datetime] = None, end: Optional[datetime] = None
+) -> List[Dict[str, Any]]:
     """
     Returns recent API call usage log records with channel names and user names.
+    Optional start/end restrict to calls made in [start, end).
     """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             _ensure_key_source_column(cur)
             conn.commit()
-            cur.execute("""
+            date_sql, date_params = _date_filter("l", start, end)
+            cur.execute(f"""
                 SELECT
                     l.id,
                     l.workspace_id,
@@ -615,10 +646,10 @@ def get_usage_logs(limit: int = 100) -> List[Dict[str, Any]]:
                 FROM api_usage_logs l
                 LEFT JOIN channel_metadata cm ON l.channel_id = cm.channel_id
                 LEFT JOIN slack_workspaces sw ON l.workspace_id = sw.team_id
-                WHERE COALESCE(l.key_source, 'jts') = 'jts'
+                WHERE COALESCE(l.key_source, 'jts') = 'jts'{date_sql}
                 ORDER BY l.created_at DESC
                 LIMIT %s;
-            """, (limit,))
+            """, (*date_params, limit))
             rows = cur.fetchall() or []
             logs = []
             seen_ids = set()

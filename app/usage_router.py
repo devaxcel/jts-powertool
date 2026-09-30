@@ -1,7 +1,12 @@
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
-from app.auth_router import get_user_context, get_folder_channel_ids, get_user_from_db
-from app.db.session import get_db_connection
+import csv
+import io
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional, Tuple
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+
+from app.auth_router import require_session, require_jts_admin, client_channel_scope, channel_in_scope
 from app.services.usage_service import (
     get_usage_summary,
     get_usage_logs,
@@ -15,235 +20,182 @@ from app.services.usage_service import (
 
 usage_router = APIRouter(prefix="/api/usage", tags=["Usage Telemetry"])
 
+MAX_LOG_ROWS = 5000
+
+
+def _parse_range(start: Optional[str], end: Optional[str]) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """Inclusive YYYY-MM-DD dates (UTC) -> [start, end) datetimes. Missing values mean open-ended."""
+    def parse(value: Optional[str]) -> Optional[date]:
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"'{value}' is not a valid date (use YYYY-MM-DD).")
+
+    s, e = parse(start), parse(end)
+    if s and e and e < s:
+        raise HTTPException(status_code=400, detail="The end date must be on or after the start date.")
+    start_dt = datetime(s.year, s.month, s.day, tzinfo=timezone.utc) if s else None
+    end_dt = datetime(e.year, e.month, e.day, tzinfo=timezone.utc) + timedelta(days=1) if e else None
+    return start_dt, end_dt
+
+
+def _in_scope(scope: Optional[set], item: dict) -> bool:
+    return channel_in_scope(scope, item.get("channel_id"), item.get("channel_name"))
+
+
+def _scoped_summary(request: Request, start: Optional[str], end: Optional[str]) -> dict:
+    ctx = require_session(request)
+    start_dt, end_dt = _parse_range(start, end)
+    summary = get_usage_summary(start=start_dt, end=end_dt)
+    scope = client_channel_scope(ctx)
+    if scope is None:
+        return summary
+
+    by_channel = [c for c in summary.get("by_channel", []) if _in_scope(scope, c)]
+    by_channel_user = [cu for cu in summary.get("by_channel_user", []) if _in_scope(scope, cu)]
+
+    # People totals rebuilt from the client's own channels only.
+    user_map: dict = {}
+    for cu in by_channel_user:
+        u = user_map.setdefault(cu.get("user_id"), {
+            "workspace_id": cu.get("workspace_id"),
+            "workspace_name": cu.get("workspace_name"),
+            "user_id": cu.get("user_id"),
+            "user_name": cu.get("user_name"),
+            "calls": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "total_cost_usd": 0.0,
+        })
+        for k in ("calls", "input_tokens", "output_tokens", "total_tokens"):
+            u[k] += cu.get(k, 0) or 0
+        u["total_cost_usd"] = round(u["total_cost_usd"] + float(cu.get("total_cost_usd") or 0), 6)
+
+    # Totals come from exactly the rows the client can see, so cards and tables always agree.
+    summary["by_channel"] = by_channel
+    summary["by_channel_user"] = by_channel_user
+    summary["by_user"] = sorted(user_map.values(), key=lambda x: x["total_cost_usd"], reverse=True)
+    summary["total_calls"] = sum(c.get("calls", 0) or 0 for c in by_channel)
+    summary["total_input_tokens"] = sum(c.get("input_tokens", 0) or 0 for c in by_channel)
+    summary["total_output_tokens"] = sum(c.get("output_tokens", 0) or 0 for c in by_channel)
+    summary["total_tokens"] = sum(c.get("total_tokens", 0) or 0 for c in by_channel)
+    summary["total_cost_usd"] = round(sum(float(c.get("total_cost_usd") or 0) for c in by_channel), 6)
+    summary["active_channels_count"] = len(by_channel)
+    summary["active_users_count"] = len(user_map)
+    allowed_ws = {c.get("workspace_id") for c in by_channel if c.get("workspace_id")}
+    summary["workspaces"] = [w for w in summary.get("workspaces", []) if w.get("workspace_id") in allowed_ws]
+    return summary
+
+
+def _scoped_logs(request: Request, limit: int, start: Optional[str], end: Optional[str]) -> list:
+    ctx = require_session(request)
+    start_dt, end_dt = _parse_range(start, end)
+    limit = max(1, min(int(limit or 100), MAX_LOG_ROWS))
+    scope = client_channel_scope(ctx)
+    # Clients need a wider fetch because other clients' rows are filtered out afterwards.
+    logs = get_usage_logs(limit=MAX_LOG_ROWS if scope is not None else limit, start=start_dt, end=end_dt)
+    return [l for l in logs if _in_scope(scope, l)][:limit]
+
 
 @usage_router.get("/summary")
 @usage_router.get("/billing")
-async def fetch_usage_summary(request: Request):
-    user_ctx = get_user_context(request)
-    summary = get_usage_summary()
-
-    if user_ctx.get("role") in ("client_admin", "client_standard"):
-        folder_id = user_ctx.get("client_folder_id")
-        if not folder_id and user_ctx.get("username"):
-            db_u = get_user_from_db(user_ctx["username"])
-            if db_u and db_u.get("client_folder_id"):
-                folder_id = db_u["client_folder_id"]
-
-        if not folder_id:
-            folder_id = 2  # Fallback to default client folder if unassigned
-
-        folder_channels = set(get_folder_channel_ids(folder_id)) if folder_id else set()
-        folder_channels_lower = {x.lower() for x in folder_channels}
-
-        def matches_folder(item: dict) -> bool:
-            cid = str(item.get("channel_id") or "").strip()
-            cname = str(item.get("channel_name") or "").strip()
-            if cid and (cid in folder_channels or cid.lower() in folder_channels_lower or cid.lstrip("#@").lower() in folder_channels_lower):
-                return True
-            if cname and (cname in folder_channels or cname.lower() in folder_channels_lower or cname.lstrip("#@").lower() in folder_channels_lower):
-                return True
-            return False
-
-        summary["by_channel"] = [c for c in summary.get("by_channel", []) if matches_folder(c)]
-        summary["by_channel_user"] = [cu for cu in summary.get("by_channel_user", []) if matches_folder(cu)]
-        summary["active_channels_count"] = len(summary["by_channel"])
-
-        # Recompute by_user from folder-scoped channels only
-        user_map = {}
-        for cu in summary["by_channel_user"]:
-            u_id = cu.get("user_id")
-            if u_id not in user_map:
-                user_map[u_id] = {
-                    "workspace_id": cu.get("workspace_id"),
-                    "workspace_name": cu.get("workspace_name"),
-                    "user_id": u_id,
-                    "user_name": cu.get("user_name"),
-                    "calls": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "total_tokens": 0,
-                    "total_cost_usd": 0.0,
-                }
-            user_map[u_id]["calls"] += cu.get("calls", 0)
-            user_map[u_id]["input_tokens"] += cu.get("input_tokens", 0)
-            user_map[u_id]["output_tokens"] += cu.get("output_tokens", 0)
-            user_map[u_id]["total_tokens"] += cu.get("total_tokens", 0)
-            user_map[u_id]["total_cost_usd"] += cu.get("total_cost_usd", 0.0)
-
-        summary["by_user"] = list(user_map.values())
-        summary["active_users_count"] = len(user_map)
-
-        # Also query conversation_messages directly for bot telemetry in folder channels
-        conv_toks = 0
-        conv_in_toks = 0
-        conv_out_toks = 0
-        conv_cost = 0.0
-        conv_calls = 0
-        conn = None
-        try:
-            conn = get_db_connection()
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT 
-                        COALESCE(SUM(input_tokens), 0) as in_toks,
-                        COALESCE(SUM(output_tokens), 0) as out_toks,
-                        COALESCE(SUM(total_tokens), 0) as tot_toks,
-                        COALESCE(SUM(cost_usd), 0.0) as cost,
-                        COUNT(*) as cnt
-                    FROM conversation_messages
-                    WHERE (role = 'assistant' OR user_id = 'bot' OR user_name ILIKE '%Assistant%' OR user_name ILIKE '%Agent%')
-                      AND COALESCE(cost_usd, 0) > 0
-                      AND (
-                          channel_id = ANY(%s) OR LOWER(channel_id) = ANY(%s)
-                          OR LOWER(channel_id) IN (SELECT LOWER(channel_id) FROM channel_metadata WHERE folder_id = %s OR folder_id::text = %s)
-                          OR LOWER(channel_id) IN (SELECT LOWER(channel_name) FROM channel_metadata WHERE folder_id = %s OR folder_id::text = %s)
-                      );
-                """, (list(folder_channels), list(folder_channels_lower), folder_id, str(folder_id), folder_id, str(folder_id)))
-                crow = cur.fetchone()
-                if crow:
-                    conv_in_toks = int(crow.get("in_toks") or 0)
-                    conv_out_toks = int(crow.get("out_toks") or 0)
-                    conv_toks = int(crow.get("tot_toks") or 0)
-                    conv_cost = float(crow.get("cost") or 0.0)
-                    conv_calls = int(crow.get("cnt") or 0)
-        except Exception as e:
-            pass
-        finally:
-            if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-
-        # Combine usage log channels sum with conversation messages sum
-        log_in_toks = sum(c.get("input_tokens", 0) for c in summary["by_channel"])
-        log_out_toks = sum(c.get("output_tokens", 0) for c in summary["by_channel"])
-        log_toks = sum(c.get("total_tokens", 0) for c in summary["by_channel"])
-        log_cost = sum(c.get("total_cost_usd", 0.0) for c in summary["by_channel"])
-        log_calls = sum(c.get("calls", 0) for c in summary["by_channel"])
-
-        total_in = max(log_in_toks, conv_in_toks)
-        total_out = max(log_out_toks, conv_out_toks)
-        total_toks = max(log_toks, conv_toks)
-        total_cost = max(log_cost, conv_cost)
-        total_c = max(log_calls, conv_calls)
-
-        summary["total_calls"] = total_c
-        summary["total_input_tokens"] = total_in
-        summary["total_output_tokens"] = total_out
-        summary["total_tokens"] = total_toks
-        summary["total_cost_usd"] = round(total_cost, 6)
-
-        # Scope workspaces array to workspaces present in the folder channels
-        allowed_ws_ids = {c["workspace_id"] for c in summary["by_channel"] if c.get("workspace_id")}
-        summary["workspaces"] = [w for w in summary.get("workspaces", []) if w.get("workspace_id") in allowed_ws_ids]
-
-    return JSONResponse(content=summary)
+async def fetch_usage_summary(request: Request, start: Optional[str] = None, end: Optional[str] = None):
+    return JSONResponse(content=_scoped_summary(request, start, end))
 
 
 @usage_router.get("/logs")
-async def fetch_usage_logs(request: Request, limit: int = 100):
-    user_ctx = get_user_context(request)
-    logs = get_usage_logs(limit=limit)
+async def fetch_usage_logs(request: Request, limit: int = 100, start: Optional[str] = None, end: Optional[str] = None):
+    return JSONResponse(content=_scoped_logs(request, limit, start, end))
 
-    if user_ctx.get("role") in ("client_admin", "client_standard"):
-        folder_id = user_ctx.get("client_folder_id")
-        if not folder_id and user_ctx.get("username"):
-            db_u = get_user_from_db(user_ctx["username"])
-            if db_u and db_u.get("client_folder_id"):
-                folder_id = db_u["client_folder_id"]
 
-        if not folder_id:
-            folder_id = 2  # Fallback to default client folder if unassigned
+@usage_router.get("/export")
+async def export_usage_csv(
+    request: Request,
+    view: str = "channel",
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+):
+    """CSV download of the chosen view for the chosen period (clients get their own channels only)."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    ws_ok = lambda row: not workspace_id or workspace_id == "ALL" or row.get("workspace_id") == workspace_id  # noqa: E731
 
-        folder_channels = set(get_folder_channel_ids(folder_id)) if folder_id else set()
-        folder_channels_lower = {x.lower() for x in folder_channels}
+    if view == "logs":
+        rows = [r for r in _scoped_logs(request, MAX_LOG_ROWS, start, end) if ws_ok(r)]
+        writer.writerow(["id", "time_utc", "workspace", "channel", "channel_id", "person", "slack_user_id", "model",
+                         "tokens_read", "tokens_written", "total_tokens", "cost_usd"])
+        for r in rows:
+            writer.writerow([r["id"], r.get("created_at"), r.get("workspace_name"), r.get("channel_name"), r.get("channel_id"),
+                             r.get("user_name"), r.get("user_id"), r.get("model"), r.get("input_tokens"),
+                             r.get("output_tokens"), r.get("total_tokens"), f"{float(r.get('cost_usd') or 0):.6f}"])
+    elif view in ("channel", "user", "channel_user"):
+        summary = _scoped_summary(request, start, end)
+        key = {"channel": "by_channel", "user": "by_user", "channel_user": "by_channel_user"}[view]
+        rows = [r for r in summary.get(key, []) if ws_ok(r)]
+        head = ["workspace"]
+        if view in ("channel", "channel_user"):
+            head += ["channel", "channel_id"]
+        if view in ("user", "channel_user"):
+            head += ["person", "slack_user_id"]
+        writer.writerow(head + ["ai_replies", "tokens_read", "tokens_written", "total_tokens", "cost_usd"])
+        for r in rows:
+            line = [r.get("workspace_name")]
+            if view in ("channel", "channel_user"):
+                line += [r.get("channel_name"), r.get("channel_id")]
+            if view in ("user", "channel_user"):
+                line += [r.get("user_name"), r.get("user_id")]
+            writer.writerow(line + [r.get("calls"), r.get("input_tokens"), r.get("output_tokens"), r.get("total_tokens"),
+                                    f"{float(r.get('total_cost_usd') or 0):.6f}"])
+    else:
+        raise HTTPException(status_code=400, detail="view must be one of: channel, user, channel_user, logs")
 
-        def matches_folder_log(l: dict) -> bool:
-            cid = str(l.get("channel_id") or "").strip()
-            cname = str(l.get("channel_name") or "").strip()
-            if cid and (cid in folder_channels or cid.lower() in folder_channels_lower or cid.lstrip("#@").lower() in folder_channels_lower):
-                return True
-            if cname and (cname in folder_channels or cname.lower() in folder_channels_lower or cname.lstrip("#@").lower() in folder_channels_lower):
-                return True
-            return False
+    period = f"{start or 'start'}_to_{end or 'today'}"
+    filename = f"jts-usage-{view}-{period}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
-        logs = [l for l in logs if matches_folder_log(l)]
 
-    return JSONResponse(content=logs)
+def _result(res: dict, fallback: str) -> JSONResponse:
+    if res.get("status") == "error":
+        return JSONResponse(status_code=500, content={"detail": res.get("error") or fallback})
+    return JSONResponse(content=res)
 
 
 @usage_router.delete("/clear")
 @usage_router.delete("/billing/clear")
 async def clear_usage_billing_logs(request: Request):
-    user_ctx = get_user_context(request)
-    if user_ctx.get("role") in ("client_admin", "client_standard"):
-        return JSONResponse(status_code=403, content={"detail": "Access denied: Only JTS Admin can manage billing records."})
-
-    res = clear_all_usage_logs()
-    if res.get("status") == "error":
-        return JSONResponse(status_code=500, content={"detail": res.get("error", "Failed to clear billing logs")})
-    return JSONResponse(content=res)
+    require_jts_admin(request)
+    return _result(clear_all_usage_logs(), "Failed to clear billing logs")
 
 
 @usage_router.delete("/channel/{channel_id}")
 async def delete_channel_billing(channel_id: str, request: Request):
-    user_ctx = get_user_context(request)
-    if user_ctx.get("role") in ("client_admin", "client_standard"):
-        return JSONResponse(status_code=403, content={"detail": "Access denied: Only JTS Admin can manage billing records."})
-
-    res = delete_usage_by_channel(channel_id)
-    if res.get("status") == "error":
-        return JSONResponse(status_code=500, content={"detail": res.get("error")})
-    return JSONResponse(content=res)
+    require_jts_admin(request)
+    return _result(delete_usage_by_channel(channel_id), "Failed to delete channel records")
 
 
 @usage_router.delete("/user/{user_id}")
 async def delete_user_billing(user_id: str, request: Request):
-    user_ctx = get_user_context(request)
-    if user_ctx.get("role") in ("client_admin", "client_standard"):
-        return JSONResponse(status_code=403, content={"detail": "Access denied: Only JTS Admin can manage billing records."})
-
-    res = delete_usage_by_user(user_id)
-    if res.get("status") == "error":
-        return JSONResponse(status_code=500, content={"detail": res.get("error")})
-    return JSONResponse(content=res)
+    require_jts_admin(request)
+    return _result(delete_usage_by_user(user_id), "Failed to delete user records")
 
 
 @usage_router.delete("/channel/{channel_id}/user/{user_id}")
 async def delete_channel_user_billing(channel_id: str, user_id: str, request: Request):
-    user_ctx = get_user_context(request)
-    if user_ctx.get("role") in ("client_admin", "client_standard"):
-        return JSONResponse(status_code=403, content={"detail": "Access denied: Only JTS Admin can manage billing records."})
-
-    res = delete_usage_by_channel_and_user(channel_id, user_id)
-    if res.get("status") == "error":
-        return JSONResponse(status_code=500, content={"detail": res.get("error")})
-    return JSONResponse(content=res)
+    require_jts_admin(request)
+    return _result(delete_usage_by_channel_and_user(channel_id, user_id), "Failed to delete records")
 
 
 @usage_router.delete("/logs/{log_id}")
 async def delete_single_log_row(log_id: int, request: Request):
-    user_ctx = get_user_context(request)
-    if user_ctx.get("role") in ("client_admin", "client_standard"):
-        return JSONResponse(status_code=403, content={"detail": "Access denied: Only JTS Admin can manage billing records."})
-
-    res = delete_single_usage_log(log_id)
-    if res.get("status") == "error":
-        return JSONResponse(status_code=500, content={"detail": res.get("error")})
-    return JSONResponse(content=res)
+    require_jts_admin(request)
+    return _result(delete_single_usage_log(log_id), "Failed to delete record")
 
 
 @usage_router.post("/recalculate")
 async def recalculate_usage_costs(request: Request):
-    user_ctx = get_user_context(request)
-    if user_ctx.get("role") in ("client_admin", "client_standard"):
-        return JSONResponse(status_code=403, content={"detail": "Access denied: Only JTS Admin can manage billing records."})
-
-    res = recalculate_all_usage_costs()
-    if res.get("status") == "error":
-        return JSONResponse(status_code=500, content={"detail": res.get("error")})
-    return JSONResponse(content=res)
-
-
-
+    require_jts_admin(request)
+    return _result(recalculate_all_usage_costs(), "Failed to recalculate costs")
