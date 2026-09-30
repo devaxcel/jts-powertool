@@ -17,7 +17,7 @@ import {
   Database,
   LayoutDashboard,
 } from "lucide-react";
-import { PageHeader, StatCard, EmptyState, Alert, Card, btn } from "@/components/ui";
+import { PageHeader, StatCard, EmptyState, Alert, Card, ConfirmDialog, btn } from "@/components/ui";
 import {
   fetchStats,
   fetchApprovals,
@@ -211,6 +211,9 @@ export default function OverviewPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const [confirming, setConfirming] = useState<{ id: string; label: string; action: "approve" | "reject" } | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+
   async function handleAction(id: string, action: "approve" | "reject") {
     setActionLoading(id);
     setActionError(null);
@@ -221,13 +224,19 @@ export default function OverviewPage() {
         const u = JSON.parse(rawUser || "{}");
         currentUsername = u.username || u.display_name || "Admin User";
       }
-      await submitApprovalAction(id, action, currentUsername);
+      const res = await submitApprovalAction(id, action, currentUsername);
+      if (action === "approve" && !res.ok) {
+        setActionError(res.message || "Approved, but GitHub returned an error. Nothing was changed.");
+      } else {
+        setActionNotice(res.message || (action === "approve" ? "Approved and applied on GitHub." : "Rejected."));
+      }
       await loadData();
     } catch (err: any) {
       console.error("Error submitting approval action:", err);
       setActionError(err?.message || `Could not ${action} this request. Please try again.`);
     } finally {
       setActionLoading(null);
+      setConfirming(null);
     }
   }
 
@@ -302,6 +311,12 @@ export default function OverviewPage() {
         />
       </div>
 
+      {actionNotice && (
+        <Alert type="success" onClose={() => setActionNotice(null)}>
+          {actionNotice}
+        </Alert>
+      )}
+
       {actionError && (
         <Alert type="error" onClose={() => setActionError(null)}>
           {actionError}
@@ -357,14 +372,14 @@ export default function OverviewPage() {
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           disabled={isProcessing}
-                          onClick={() => handleAction(appr.approval_id, "reject")}
+                          onClick={() => setConfirming({ id: appr.approval_id, label: `${appr.tool_name.replace(/_/g, " ")}: ${path}`, action: "reject" })}
                           className={btn.dangerSoft}
                         >
                           Reject
                         </button>
                         <button
                           disabled={isProcessing}
-                          onClick={() => handleAction(appr.approval_id, "approve")}
+                          onClick={() => setConfirming({ id: appr.approval_id, label: `${appr.tool_name.replace(/_/g, " ")}: ${path}`, action: "approve" })}
                           className={btn.success}
                         >
                           {isProcessing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -417,6 +432,27 @@ export default function OverviewPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(confirming)}
+        busy={Boolean(actionLoading)}
+        title={confirming?.action === "approve" ? "Approve and apply this change?" : "Reject this request?"}
+        confirmLabel={confirming?.action === "approve" ? "Approve & apply" : "Reject"}
+        confirmClass={confirming?.action === "approve" ? btn.success : btn.danger}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => confirming && handleAction(confirming.id, confirming.action)}
+      >
+        {confirming && (
+          <>
+            <p>{confirming.label}</p>
+            <p className="text-xs">
+              {confirming.action === "approve"
+                ? "This runs on GitHub straight away. Open Approvals to see exactly what will change first."
+                : "Nothing will be changed on GitHub."}
+            </p>
+          </>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

@@ -197,3 +197,59 @@ export function ComingSoonBadge() {
     </span>
   );
 }
+
+export function ConfirmDialog({
+  open,
+  title,
+  children,
+  confirmLabel = "Confirm",
+  confirmClass = btn.primary,
+  busy = false,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: React.ReactNode;
+  children?: React.ReactNode;
+  confirmLabel?: React.ReactNode;
+  confirmClass?: string;
+  busy?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, busy, onCancel]);
+
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={() => !busy && onCancel()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-base font-semibold text-gray-900">{title}</h3>
+        {children && <div className="text-sm text-gray-600 space-y-2">{children}</div>}
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <button type="button" onClick={onCancel} disabled={busy} className={btn.secondary}>
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={busy} className={confirmClass} autoFocus>
+            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -236,7 +236,7 @@ def get_system_prompt(user_prompt: str = "", user_profile: Optional[dict] = None
     date_str = now_utc.strftime("%A, %B %d, %Y")
     time_str = now_utc.strftime("%H:%M UTC")
 
-    default_repo = get_secret("GITHUB_DEFAULT_REPO", "AbdulAleemDev/jts-powertool")
+    default_repo = get_secret("GITHUB_DEFAULT_REPO", "devaxcel/jts-powertool")
 
     user_tz_context = ""
     if user_profile and isinstance(user_profile, dict):
@@ -1175,7 +1175,7 @@ async def slack_interactive(request: Request):
         message = payload.get("message", {})
         message_ts = message.get("ts", "")
 
-        default_repo = get_secret("GITHUB_DEFAULT_REPO", "AbdulAleemDev/jts-powertool")
+        default_repo = get_secret("GITHUB_DEFAULT_REPO", "devaxcel/jts-powertool")
 
         # 1. View Full Diff Modal
         if action_id == "inspect_github_diff":

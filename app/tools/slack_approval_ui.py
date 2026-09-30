@@ -6,7 +6,7 @@ def build_approval_card_blocks(
     approval_id: str,
     tool_name: str,
     tool_args: Dict[str, Any],
-    default_repo: str = "AbdulAleemDev/jts-powertool",
+    default_repo: str = "devaxcel/jts-powertool",
 ) -> List[Dict[str, Any]]:
     """
     Constructs an interactive Slack Block Kit card requesting human approval
@@ -129,7 +129,7 @@ def build_approved_card_blocks(
     tool_args: Dict[str, Any],
     approved_by: str,
     execution_result: str = "",
-    default_repo: str = "AbdulAleemDev/jts-powertool",
+    default_repo: str = "devaxcel/jts-powertool",
 ) -> List[Dict[str, Any]]:
     """
     Mutates the approval card in-place to remove action buttons and display
@@ -193,7 +193,7 @@ def build_rejected_card_blocks(
     tool_name: str,
     tool_args: Dict[str, Any],
     rejected_by: str,
-    default_repo: str = "AbdulAleemDev/jts-powertool",
+    default_repo: str = "devaxcel/jts-powertool",
 ) -> List[Dict[str, Any]]:
     """
     Mutates the approval card in-place to remove action buttons and display
@@ -256,7 +256,7 @@ def build_expired_card_blocks(
     approval_id: str,
     tool_name: str,
     tool_args: Dict[str, Any],
-    default_repo: str = "AbdulAleemDev/jts-powertool",
+    default_repo: str = "devaxcel/jts-powertool",
 ) -> List[Dict[str, Any]]:
     """
     Mutates the approval card in-place to remove action buttons and display

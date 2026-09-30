@@ -329,7 +329,7 @@ class ControlledToolAdapter:
     ):
         from app.services.channel_secrets_service import canonical_channel_id
         self.mcp_client = mcp_client or GitHubMCPClient()
-        self.default_repo = get_secret("GITHUB_DEFAULT_REPO", "AbdulAleemDev/jts-powertool")
+        self.default_repo = get_secret("GITHUB_DEFAULT_REPO", "devaxcel/jts-powertool")
         self.workspace_id = workspace_id
         self.workspace_name = workspace_name
         self.channel_name = channel_name

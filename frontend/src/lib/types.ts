@@ -37,6 +37,8 @@ export interface Approval {
   created_at: string;
   updated_at: string;
   diff_preview?: string;
+  /** 'diff' = real comparison with GitHub, 'full' = whole new file (comparison unavailable), 'text' = not a file change */
+  diff_kind?: "diff" | "full" | "text";
 }
 
 export interface LogEvent {

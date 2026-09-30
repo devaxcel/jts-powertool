@@ -29,6 +29,7 @@ export function extractErrorMessage(errData: any, fallback: string = "An error o
   if (!errData) return fallback;
   if (typeof errData === "string") return errData;
   if (typeof errData.detail === "string") return errData.detail;
+  if (!errData.detail && typeof errData.message === "string") return errData.message;
   if (Array.isArray(errData.detail)) {
     return errData.detail
       .map((d: any) => {
@@ -89,6 +90,19 @@ export async function fetchApprovals(status?: string): Promise<Approval[]> {
   if (!res.ok) throw new Error("Failed to fetch approvals");
   const data = await res.json();
   return data.approvals || [];
+}
+
+export async function fetchApprovalsWithAccess(
+  status?: string
+): Promise<{ approvals: Approval[]; canApprove: boolean }> {
+  const url = status ? `${API_BASE}/api/approvals?status=${encodeURIComponent(status)}` : `${API_BASE}/api/approvals`;
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("We couldn't load approvals. Please refresh the page.");
+  const data = await res.json();
+  return { approvals: data.approvals || [], canApprove: Boolean(data.can_approve) };
 }
 
 export async function fetchApproval(approvalId: string): Promise<Approval> {

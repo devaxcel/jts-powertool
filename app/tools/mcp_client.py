@@ -103,7 +103,7 @@ class GitHubMCPClient:
             if is_err and ("Git Repository is empty" in output_text or "repository is empty" in output_text.lower()):
                 owner = arguments.get("owner")
                 repo = arguments.get("repo")
-                default_repo_str = get_secret("GITHUB_DEFAULT_REPO", "AbdulAleemDev/jts-powertool")
+                default_repo_str = get_secret("GITHUB_DEFAULT_REPO", "devaxcel/jts-powertool")
                 
                 if repo and "/" in str(repo):
                     parts = str(repo).split("/", 1)

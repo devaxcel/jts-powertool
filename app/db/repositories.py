@@ -862,6 +862,33 @@ def update_pending_approval_message_ts(approval_id: str, message_ts: str) -> boo
             conn.close()
 
 
+def expire_stale_approvals() -> int:
+    """Marks pending approvals whose expires_at has passed as 'expired'. Returns the number updated."""
+    conn = None
+    try:
+        init_pending_approvals_table()
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE pending_approvals
+                SET status = 'expired', updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'pending'
+                  AND expires_at IS NOT NULL
+                  AND expires_at < CURRENT_TIMESTAMP;
+            """)
+            count = cur.rowcount or 0
+        conn.commit()
+        return count
+    except Exception as e:
+        logger.error(f"Error expiring stale approvals: {e}")
+        if conn:
+            conn.rollback()
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+
 def get_all_approvals(status: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
     """Retrieves a list of approvals ordered by created_at descending, enriched with channel & user metadata."""
     conn = None
