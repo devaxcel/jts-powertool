@@ -47,7 +47,7 @@ export function Header() {
     pathname === "/" ? "Dashboard" : TITLES.find(([prefix]) => pathname.startsWith(prefix))?.[1] || "Dashboard";
 
   return (
-    <header className="h-14 border-b border-gray-200 bg-white px-4 sm:px-6 flex items-center justify-between sticky top-0 z-10">
+    <header className="h-14 border-b border-gray-200 bg-white px-4 sm:px-6 flex items-center justify-between shrink-0 relative z-30 shadow-sm">
       <div className="flex items-center gap-3 min-w-0">
         <button
           type="button"
