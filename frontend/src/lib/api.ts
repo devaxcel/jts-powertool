@@ -1382,40 +1382,24 @@ export async function fetchWebsites(folderId?: number): Promise<ClientWebsite[]>
 
 /* ------------------------------ Keys & Connections (per client) ------------------------------ */
 
-export interface ClientKeyProvider {
-  id: string;
-  label: string;
-  group: string;
-  used_by_bot: boolean;
-  hint: string;
-  connection?: { base_url?: string; auth_type?: KeyAuthType; auth_name?: string };
-}
-
-export type KeyAuthType = "bearer" | "header" | "query";
-
 export interface ClientKeyItem {
   provider: string;
   label: string;
-  scope: "client" | "channel";
+  applies_to: "client" | "channel";
+  channel_id?: string | null;
+  channel_name?: string | null;
   key_hint?: string | null;
   updated_by?: string | null;
   updated_at?: string | null;
   status: "ok" | "failing";
   last_error?: string | null;
-  base_url: string;
-  auth_type: KeyAuthType;
-  auth_name: string;
-  description: string;
-  /** native: the assistant uses it directly; api: it can call the service; stored: no service URL yet */
-  bot_use: "native" | "api" | "stored";
 }
 
 export interface ClientKeysData {
   folder: { id: number; name: string };
   can_edit: boolean;
-  providers: ClientKeyProvider[];
-  client_keys: ClientKeyItem[];
-  channels: Array<{ channel_id: string; channel_name: string; keys: ClientKeyItem[] }>;
+  channels: Array<{ channel_id: string; channel_name: string }>;
+  keys: ClientKeyItem[];
 }
 
 async function clientKeysRequest<T>(path: string, init: RequestInit = {}, fallback = "Something went wrong."): Promise<T> {
@@ -1433,16 +1417,7 @@ export function fetchClientKeys(folderId?: number): Promise<ClientKeysData> {
   return clientKeysRequest(folderId ? `?folder_id=${folderId}` : "", {}, "We couldn't load the keys.");
 }
 
-type SaveKeyBody = {
-  folder_id?: number;
-  provider: string;
-  /** empty keeps the saved key and only updates the service details */
-  value?: string;
-  base_url?: string;
-  auth_type?: KeyAuthType;
-  auth_name?: string;
-  description?: string;
-};
+type SaveKeyBody = { folder_id?: number; name: string; value: string };
 
 export function saveClientKey(body: SaveKeyBody): Promise<{ ok: boolean; message: string }> {
   return clientKeysRequest("/client", { method: "PUT", body: JSON.stringify(body) }, "We couldn't save the key.");

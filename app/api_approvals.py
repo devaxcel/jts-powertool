@@ -147,15 +147,6 @@ def format_diff_preview(tool_name: str, tool_args: dict) -> str:
         lines.extend(f"  {f.get('path')}  ({int(f.get('size_bytes', 0)) / 1000:.1f} KB)" for f in files)
         return "\n".join(lines)
 
-    if tool_name == "call_client_api":
-        body = args.get("body")
-        lines = [f"Service: {args.get('service', '')}", f"Request: {args.get('method', '')} {args.get('url', '')}"]
-        if args.get("reason"):
-            lines += ["", args["reason"]]
-        if body not in (None, "", {}, []):
-            lines += ["", "Data sent:", json.dumps(body, indent=2) if isinstance(body, (dict, list)) else str(body)]
-        return "\n".join(lines)
-
     if tool_name == "update_website":
         ch = args.get("changes") or {}
         lines = [f"Website: {args.get('owner', '')}/{args.get('repo', '')}", f"Change: {args.get('title', '')}"]
@@ -342,20 +333,16 @@ def _describe_action(tool_name: str, args: dict) -> str:
         return f"publish the website `{args.get('owner', '')}/{args.get('repo', '')}`"
     if tool_name == "update_website":
         return f"update the website `{args.get('owner', '')}/{args.get('repo', '')}` ({args.get('title', '')})"
-    if tool_name == "call_client_api":
-        return f"send `{args.get('method', '')} {args.get('url', '')}` to {args.get('service', '')}"
     return f"run `{tool_name}`"
 
 
 def _slack_result_text(tool_name: str, args: dict, user_display: str, ok: bool) -> str:
     action = _describe_action(tool_name, args)
-    where = args.get("service") or "the service" if tool_name == "call_client_api" else "GitHub"
     if ok:
-        return f":white_check_mark: *{user_display}* approved the request to {action} from the web dashboard. Done on {where}."
+        return f":white_check_mark: *{user_display}* approved the request to {action} from the web dashboard. Done on GitHub."
     return (
         f":warning: *{user_display}* approved the request to {action} from the web dashboard, "
-        f"but {where} returned an error{', so nothing was changed' if where == 'GitHub' else ''}. "
-        "Check the Approvals page for details."
+        f"but GitHub returned an error, so nothing was changed. Check the Approvals page for details."
     )
 
 
@@ -454,8 +441,6 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
             if existing.get("tool_name") in ("publish_website", "update_website"):
                 check_can_publish(existing.get("channel_id") or "")
                 mcp_client = None
-            elif existing.get("tool_name") == "call_client_api":
-                mcp_client = None
             else:
                 mcp_client = await github_client_for_channel(existing.get("channel_id") or "")
         except GitHubAppError as e:
@@ -491,9 +476,6 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
                 output, is_error = await execute_publish_approval(exec_tool_args, claimed_record.get("channel_id") or "")
             elif exec_tool_name == "update_website":
                 output, is_error = await execute_update_approval(exec_tool_args, claimed_record.get("channel_id") or "", user_display)
-            elif exec_tool_name == "call_client_api":
-                from app.services.client_api_service import execute_approved_call
-                output, is_error = await execute_approved_call(exec_tool_args, claimed_record.get("channel_id") or "")
             else:
                 output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
                 is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))

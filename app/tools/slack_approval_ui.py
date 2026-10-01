@@ -16,8 +16,6 @@ def build_approval_card_blocks(
         return _build_publish_website_card(approval_id, tool_args)
     if tool_name == "update_website":
         return _build_update_website_card(approval_id, tool_args)
-    if tool_name == "call_client_api":
-        return _build_client_api_card(approval_id, tool_args)
 
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
@@ -142,9 +140,6 @@ def build_approved_card_blocks(
     Mutates the approval card in-place to remove action buttons and display
     a permanent audit badge with execution results.
     """
-    if tool_name == "call_client_api":
-        return _client_api_result_blocks(approval_id, tool_args, f"Approved by <@{approved_by}>" if approved_by else "Approved",
-                                         execution_result)
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
     full_repo = f"{owner}/{repo}" if (owner and repo) else default_repo
@@ -209,8 +204,6 @@ def build_rejected_card_blocks(
     Mutates the approval card in-place to remove action buttons and display
     a cancelled audit badge.
     """
-    if tool_name == "call_client_api":
-        return _client_api_result_blocks(approval_id, tool_args, f"Rejected by <@{rejected_by}>. Nothing was sent.", "")
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
     full_repo = f"{owner}/{repo}" if (owner and repo) else default_repo
@@ -492,55 +485,4 @@ def _build_update_website_card(approval_id: str, tool_args: Dict[str, Any]) -> L
             }],
         },
     ])
-    return blocks
-
-
-def _client_api_summary(tool_args: Dict[str, Any]) -> List[Dict[str, Any]]:
-    body = tool_args.get("body")
-    body_text = json.dumps(body, indent=2) if isinstance(body, (dict, list)) else str(body or "")
-    if len(body_text) > 600:
-        body_text = body_text[:600] + "\n..."
-    blocks: List[Dict[str, Any]] = [{
-        "type": "section",
-        "fields": [
-            {"type": "mrkdwn", "text": f"*Service:*\n{tool_args.get('service', '')}"},
-            {"type": "mrkdwn", "text": f"*Request:*\n`{tool_args.get('method', '')} {tool_args.get('url', '')}`"},
-        ],
-    }]
-    if tool_args.get("reason"):
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Why:* {tool_args['reason']}"}})
-    if body_text:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Data sent:*\n```{body_text}```"}})
-    return blocks
-
-
-def _build_client_api_card(approval_id: str, tool_args: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Approval card for a change request to one of the client's own services (key added only after approval)."""
-    return [
-        {"type": "header", "text": {"type": "plain_text", "text": "Approve a change in a connected service", "emoji": False}},
-        *_client_api_summary(tool_args),
-        {"type": "divider"},
-        {
-            "type": "actions",
-            "block_id": f"approval_actions_{approval_id}",
-            "elements": [
-                {"type": "button", "text": {"type": "plain_text", "text": "Approve & Send", "emoji": False},
-                 "style": "primary", "action_id": "approve_github_action", "value": approval_id},
-                {"type": "button", "text": {"type": "plain_text", "text": "Reject", "emoji": False},
-                 "style": "danger", "action_id": "reject_github_action", "value": approval_id},
-            ],
-        },
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"Proposal ID: `{approval_id}` · The client's saved key is added only when this is approved."}]},
-    ]
-
-
-def _client_api_result_blocks(approval_id: str, tool_args: Dict[str, Any], status: str, result: str) -> List[Dict[str, Any]]:
-    blocks: List[Dict[str, Any]] = [
-        {"type": "header", "text": {"type": "plain_text", "text": "Connected service request", "emoji": False}},
-        *_client_api_summary(tool_args),
-        {"type": "section", "text": {"type": "mrkdwn", "text": status}},
-    ]
-    if result:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Result:*\n```{result[:500]}```"}})
-    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Proposal ID: `{approval_id}`"}]})
     return blocks

@@ -23,9 +23,6 @@ SITE_TOOLS = {
     "discard_site_draft",
 }
 
-# Calls a service using a key the client saved in Keys & Connections (GET runs directly, changes need approval).
-CLIENT_API_TOOL = "call_client_api"
-
 # Allowed Read Tools
 ALLOWED_READ_TOOLS = {
     "connect_github",
@@ -450,33 +447,6 @@ SITE_TOOL_SCHEMAS = [
 ]
 
 
-def _client_api_schema(services: List[Dict[str, Any]]) -> Dict[str, Any]:
-    listed = "; ".join(
-        f"{s['provider']} ({s['base_url']}{': ' + s['description'] if s.get('description') else ''})" for s in services
-    )
-    return {
-        "name": CLIENT_API_TOOL,
-        "description": (
-            "Call one of this client's own connected services (APIs whose keys the client saved in the dashboard). "
-            "The key is added automatically: never ask for it or put it in arguments. GET reads data and runs "
-            "directly; POST/PUT/PATCH/DELETE change data and are sent to a human for approval first. "
-            f"Connected services: {listed}. Use the service's documented API paths."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "service": {"type": "string", "enum": [s["provider"] for s in services]},
-                "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
-                "path": {"type": "string", "description": "Path after the service URL, e.g. /contacts or /v1/models"},
-                "query": {"type": "object", "description": "Optional query parameters"},
-                "body": {"description": "Optional JSON body (POST/PUT/PATCH)"},
-                "reason": {"type": "string", "description": "One short sentence shown to the approver (for changes)"},
-            },
-            "required": ["service", "method", "path"],
-        },
-    }
-
-
 class ControlledToolAdapter:
     """
     Safety gate between Claude Agent and external GitHub MCP Server.
@@ -522,41 +492,6 @@ class ControlledToolAdapter:
         self.slack_token = slack_token or get_secret("SLACK_BOT_TOKEN", "")
         self.require_approval_for_writes = require_approval_for_writes
         self.approval_card_posted: bool = False
-        self._client_services: Optional[List[Dict[str, Any]]] = None
-
-    def client_services(self) -> List[Dict[str, Any]]:
-        """Services this channel's client connected with a key + service URL (loaded once per request)."""
-        if self._client_services is None:
-            try:
-                from app.services.client_api_service import services_for_channel
-                self._client_services = services_for_channel(self.channel_id) if self.channel_id else []
-            except Exception as e:
-                logger.warning(f"[CLIENT_API] Could not load connected services for {self.channel_id}: {e}")
-                self._client_services = []
-        return self._client_services
-
-    async def _run_client_api(self, args: Dict[str, Any]) -> Tuple[str, bool]:
-        from app.services import client_api_service as capi
-        method = str(args.get("method") or "GET").strip().upper()
-        service = str(args.get("service") or "").strip().lower()
-        path = str(args.get("path") or "").strip()
-        query = args.get("query") if isinstance(args.get("query"), dict) else None
-        if method in capi.READ_METHODS:
-            return await capi.send_request(self.channel_id, service, method, path, query)
-        if method not in capi.WRITE_METHODS:
-            return (f"Method {method} isn't allowed.", True)
-        try:
-            svc = capi.find_service(self.channel_id, service)
-            url = capi.build_url(svc, path, query)
-        except capi.ClientApiError as e:
-            return (str(e), True)
-        effective = {
-            "service": service, "method": method, "path": path, "query": query or {}, "body": args.get("body"),
-            "url": url.split("?", 1)[0], "reason": str(args.get("reason") or "")[:300],
-        }
-        if not self.require_approval_for_writes:
-            return await capi.execute_approved_call(effective, self.channel_id)
-        return await self._submit_for_approval(CLIENT_API_TOOL, effective)
 
     async def _submit_for_approval(self, tool_name: str, effective_args: Dict[str, Any]) -> Tuple[str, bool]:
         """Stores a pending approval and posts the interactive approval card in Slack."""
@@ -600,8 +535,7 @@ class ControlledToolAdapter:
                         json={
                             "channel": self.channel_id,
                             "thread_ts": target_thread,
-                            "text": (f"🛡️ Approval needed: {effective_args.get('method')} {effective_args.get('url')}"
-                                     if tool_name == CLIENT_API_TOOL else f"🛡️ GitHub Write Permission Request: `{tool_name}`"),
+                            "text": f"🛡️ GitHub Write Permission Request: `{tool_name}`",
                             "blocks": blocks,
                         }
                     )
@@ -627,12 +561,6 @@ class ControlledToolAdapter:
             except Exception as e:
                 logger.error(f"[DEBUG_SLACK] Exception posting approval card: {e}", exc_info=True)
 
-        if tool_name == CLIENT_API_TOOL:
-            return (
-                "The request was sent for human approval with an approval card in this Slack conversation. "
-                "It runs only after someone approves it; tell the user that.",
-                False,
-            )
         return (
             f"Action proposal for '{tool_name}' has been prepared and submitted for human approval. "
             "An interactive approval card has been posted to this Slack conversation with [Approve & Apply], [View Full Diff], and [Reject] buttons. "
@@ -900,9 +828,6 @@ class ControlledToolAdapter:
 
         if self.build_mode:
             tools.extend(copy.deepcopy(SITE_TOOL_SCHEMAS))
-        services = self.client_services()
-        if services:
-            tools.append(_client_api_schema(services))
         return tools
 
     def is_tool_allowed(self, tool_name: str) -> bool:
@@ -913,8 +838,6 @@ class ControlledToolAdapter:
             return False
         if tool_name in SITE_TOOLS:
             return self.build_mode
-        if tool_name == CLIENT_API_TOOL:
-            return bool(self.client_services())
         return (tool_name in ALLOWED_READ_TOOLS) or (tool_name in ALLOWED_WRITE_TOOLS)
 
     def _inject_default_repo(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -985,9 +908,6 @@ class ControlledToolAdapter:
 
         if tool_name == "connect_github":
             return await self._post_connect_github_button()
-
-        if tool_name == CLIENT_API_TOOL:
-            return await self._run_client_api(arguments or {})
 
         if tool_name in SITE_TOOLS:
             return await self._run_site_tool(tool_name, arguments or {})
