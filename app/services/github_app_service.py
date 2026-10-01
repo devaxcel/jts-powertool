@@ -523,6 +523,10 @@ async def github_client_for_channel(channel_id: str):
     from app.tools.mcp_client import GitHubMCPClient
 
     ctx = await resolve_github_token(channel_id)
+    logger.info(
+        f"[GITHUB_APP] Approval for channel={channel_id}: credential source={ctx.get('source')} "
+        f"folder={ctx.get('folder_id')} account={ctx.get('account_login')} error={bool(ctx.get('error'))}"
+    )
     if ctx.get("error"):
         raise GitHubAppError(ctx["error"])
     if ctx.get("token"):
