@@ -666,6 +666,8 @@ async def publish_draft(args: Dict[str, Any], channel_id: str) -> Dict[str, Any]
         raise SiteBuilderError("The draft for this website no longer exists.")
     if draft["status"] == "published":
         raise SiteBuilderError(f"This website was already published at {draft.get('site_url')}.")
+    if draft["status"] == "discarded":
+        raise SiteBuilderError("This website draft was closed (the user started a different website), so it can't be published.")
     from app.services.channel_secrets_service import get_folder_id_for_channel
 
     folder_id = draft.get("folder_id") or get_folder_id_for_channel(channel_id)
@@ -1034,6 +1036,8 @@ async def apply_update(args: Dict[str, Any], channel_id: str, approved_by: Optio
         raise SiteBuilderError("The edit draft for this change no longer exists.")
     if draft["status"] == "published":
         raise SiteBuilderError("This change was already applied.")
+    if draft["status"] == "discarded":
+        raise SiteBuilderError("This edit was closed (a different change was started), so it can't be applied.")
     folder_id = draft["folder_id"]
     full, base_branch, base_sha = draft["base_repo"], draft.get("base_branch") or "main", draft["base_sha"]
     if f"{args.get('owner')}/{args.get('repo')}" != full:
