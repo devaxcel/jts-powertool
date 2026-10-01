@@ -28,46 +28,174 @@ MAX_FILES = 60
 MAX_FILE_BYTES = 250_000
 MAX_TOTAL_BYTES = 3_000_000
 PREVIEW_TTL_SECONDS = 24 * 3600
-ALLOWED_EXTENSIONS = {
-    ".html", ".htm", ".css", ".js", ".mjs", ".json", ".svg", ".txt", ".md", ".xml", ".webmanifest", ".map",
+BASE_EXTENSIONS = {
+    ".html", ".htm", ".css", ".js", ".mjs", ".cjs", ".json", ".svg", ".txt", ".md", ".xml", ".webmanifest", ".map",
+    ".yml", ".yaml",
 }
-ALLOWED_BARE_NAMES = {"CNAME", ".nojekyll", "LICENSE"}
-_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# Files/folders whose names start with a dot (or have no extension) that are allowed.
+ALLOWED_BARE_NAMES = {
+    "CNAME", ".nojekyll", "LICENSE", ".gitignore", ".editorconfig", ".nvmrc", ".prettierrc", ".htaccess",
+    ".env.example", "artisan",
+}
+ALLOWED_DOT_FOLDERS = {".github", ".vscode"}
+_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 REPO_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+# kind: "static" = served as-is by GitHub Pages; "pages_build" = GitHub Actions builds then deploys to Pages;
+#       "code_only" = repository only (needs PHP hosting that JTS doesn't provide yet).
+STACKS: Dict[str, Dict[str, Any]] = {
+    "static": {
+        "label": "Static HTML/CSS/JS (Tailwind optional)", "kind": "static",
+        "pitch": "fastest, free GitHub Pages hosting, live preview before publishing",
+        "extensions": set(), "required": [["index.html"]],
+    },
+    "react": {
+        "label": "React (Vite)", "kind": "pages_build", "build": "npm run build", "output": "dist",
+        "pitch": "modern interactive site; GitHub builds it and hosts it free on Pages",
+        "extensions": {".jsx", ".tsx", ".ts"}, "required": [["package.json"], ["index.html"]],
+    },
+    "vue": {
+        "label": "Vue (Vite)", "kind": "pages_build", "build": "npm run build", "output": "dist",
+        "pitch": "modern interactive site; GitHub builds it and hosts it free on Pages",
+        "extensions": {".vue", ".ts", ".tsx", ".jsx"}, "required": [["package.json"], ["index.html"]],
+    },
+    "svelte": {
+        "label": "Svelte (Vite)", "kind": "pages_build", "build": "npm run build", "output": "dist",
+        "pitch": "very fast interactive site; GitHub builds it and hosts it free on Pages",
+        "extensions": {".svelte", ".ts"}, "required": [["package.json"], ["index.html"]],
+    },
+    "astro": {
+        "label": "Astro", "kind": "pages_build", "build": "npm run build", "output": "dist",
+        "pitch": "content/marketing sites with top performance; built by GitHub, free Pages hosting",
+        "extensions": {".astro", ".ts", ".tsx", ".jsx", ".mdx"},
+        "required": [["package.json"], ["astro.config.mjs", "astro.config.ts", "astro.config.js"]],
+    },
+    "nextjs": {
+        "label": "Next.js (static export)", "kind": "pages_build", "build": "npm run build", "output": "out",
+        "pitch": "React framework with pages/routing; exported as static files and hosted free on Pages",
+        "extensions": {".jsx", ".tsx", ".ts"},
+        "required": [["package.json"], ["next.config.mjs", "next.config.js", "next.config.ts"]],
+    },
+    "php": {
+        "label": "Core PHP", "kind": "code_only",
+        "pitch": "classic PHP site; code goes to GitHub, NOT live until it's put on PHP hosting",
+        "extensions": {".php", ".sql", ".ini"}, "required": [["index.php"]],
+    },
+    "laravel": {
+        "label": "Laravel", "kind": "code_only",
+        "pitch": "PHP framework app with database; code goes to GitHub, NOT live until it's deployed to PHP hosting",
+        "extensions": {".php", ".sql", ".ts", ".jsx", ".vue", ".lock"}, "required": [["composer.json"], ["artisan"]],
+    },
+    "wordpress": {
+        "label": "WordPress theme", "kind": "code_only",
+        "pitch": "custom theme for an existing WordPress site; code goes to GitHub, the client installs it in WordPress",
+        "extensions": {".php", ".pot", ".po"}, "required": [["style.css"], ["index.php"]],
+    },
+}
+ALL_EXTENSIONS = BASE_EXTENSIONS.union(*(v["extensions"] for v in STACKS.values()))
+PAGES_WORKFLOW_PATH = ".github/workflows/jts-pages.yml"
+
+
+def stack_info(stack: Optional[str]) -> Dict[str, Any]:
+    return STACKS.get((stack or "static").lower(), STACKS["static"])
+
+
+def stack_choices_text() -> str:
+    return "\n".join(f"{i}. {v['label']}: {v['pitch']}" for i, v in enumerate(STACKS.values(), 1))
+
+
+def pages_workflow(stack: str) -> str:
+    info = stack_info(stack)
+    return f"""name: Build and deploy to GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: {info['build']}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: {info['output']}
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{{{ steps.deployment.outputs.page_url }}}}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+"""
+
 
 BUILD_INTENT_PATTERNS = [
     r"\b(build|create|make|design|generate|develop|set ?up)\b.{0,60}\b(web ?site|site|landing ?page|web ?page|homepage|portfolio)\b",
     r"\b(web ?site|landing ?page)\b.{0,40}\b(for (me|my|our|us)|builder)\b",
+    r"\b(build|create|make|develop|generate)\b.{0,60}\b(wordpress|php|laravel|react|vue|svelte|astro|next\.?js)\b",
     # editing a site the bot already published
     r"\b(update|change|edit|modify|add|remove|replace|redesign|tweak)\b.{0,60}\b(web ?site|site|landing ?page|homepage|home page)\b",
     r"\b(web ?site|site)\b.{0,40}\b(colou?rs?|logo|menu|footer|header|gallery|contact (page|form)|pricing)\b",
 ]
 
 # Extra instructions added to the system prompt in build mode.
-BUILD_MODE_INSTRUCTIONS = """
+BUILD_MODE_INSTRUCTIONS = (
+    """
 [WEBSITE BUILDER MODE]
-You can build complete static websites (HTML, CSS, a little JavaScript) and publish them to the client's own GitHub
-with GitHub Pages hosting.
+You build complete websites and publish them to the client's own GitHub.
 
-How to work:
-1. If the request is vague, ask at most 2 short questions (business name, pages, style/colours). Otherwise propose a
-   short plan (repo name in lowercase-with-dashes, list of pages) and start when the user agrees, or right away if they
-   said "go"/gave enough detail.
-2. Write every file with draft_write_file, one file per call, complete content, no placeholders like "...rest here".
-   Always include index.html at the root. Use relative links (about.html, styles.css), never absolute "/" paths, so
-   the site works under https://<owner>.github.io/<repo>/.
-3. Make it responsive (mobile first), accessible (alt text, labels, contrast), fast (no build step, no frameworks
-   that need compiling). You may load fonts from Google Fonts. For images use free placeholders such as
-   https://images.unsplash.com/... or https://picsum.photos/..., and tell the user they can send real photos later.
-4. Use draft_list_files to check your work before publishing.
-5. When the site is complete, call publish_website once. A human must approve it; tell the user that an approval card
-   with a preview link was posted. Never claim the site is live before approval.
-6. To change a site that's already published: call list_my_websites if unsure which one, then start_site_edit
-   with its repository name. That loads the live files into the draft. Change only what's needed with
-   draft_write_file / draft_delete_file, then call propose_site_changes with a short title and summary. A human
-   approves; the change is applied as a pull request that is merged automatically. Never use publish_website for edits.
+STEP 1 - ALWAYS ASK FOR THE STACK FIRST (no default, never choose for the user):
+Before writing any file for a NEW website, ask the user which stack they want, showing this numbered list exactly,
+plus at most one short question about pages/style if needed:
+"""
+    + stack_choices_text()
+    + """
+Wait for their answer. Only after they clearly pick one, call set_site_stack with it. If they ask for something not
+on the list, explain the closest option. Never claim PHP/Laravel/WordPress sites will be live: those produce code
+in GitHub only and need PHP hosting (WordPress themes are installed by the client in their WordPress).
+
+STEP 2 - PLAN: propose a repository name (lowercase-with-dashes) and the pages, then build when the user agrees
+(or right away if they said "go"). Keep that repository name when publishing.
+
+STEP 3 - BUILD with draft_write_file, one complete file per call (no placeholders like "...rest here"). Use draft_list_files
+to check your work. Stack rules:
+- Static: index.html at the root; relative links (about.html, css/styles.css), never absolute "/" paths, so the site
+  works under https://<owner>.github.io/<repo>/. Tailwind via its CDN script is fine. No build step.
+- React / Vue / Svelte (Vite): package.json with "build": "vite build" and the dependencies; vite.config with
+  base: './'; index.html at the root; source in src/. Don't write any GitHub workflow file (JTS adds it).
+- Astro: package.json, astro.config.mjs with site: 'https://<owner>.github.io' and base: '/<repo>'; pages in src/pages/.
+- Next.js: package.json, next.config.mjs with output: 'export', basePath: '/<repo>', images: { unoptimized: true },
+  trailingSlash: true; use the app/ or pages/ router with only static pages (no API routes, no server actions).
+- Core PHP / Laravel: complete, runnable code plus README.md with hosting/deployment steps (PHP version, database,
+  .env.example). Laravel needs composer.json and the artisan file. Never commit real passwords; use .env.example.
+- WordPress theme: style.css with the theme header, index.php, functions.php, template parts; README.md explaining how to
+  zip and install the theme.
+Always: responsive, accessible (alt text, labels, contrast). Images: link free placeholders (images.unsplash.com,
+picsum.photos); binary files can't be written yet.
+
+STEP 4 - PUBLISH: call publish_website once. A human must approve. Static sites get a preview link; framework sites are
+built by GitHub after approval; PHP/WordPress results are a repository only. Never claim anything is live before approval.
+
+EDITING a published website: call list_my_websites if unsure which one, then start_site_edit with its repository name
+(this loads its files and its stack). Change only what's needed with draft_write_file / draft_delete_file, then call
+propose_site_changes with a short title and summary. Never use publish_website for edits.
 Never ask for GitHub tokens or passwords. If GitHub isn't connected for this client, call connect_github.
-""".strip()
+"""
+).strip()
 
 
 class SiteBuilderError(Exception):
@@ -106,6 +234,7 @@ def _ensure_tables(cur) -> None:
         ALTER TABLE site_drafts ADD COLUMN IF NOT EXISTS base_repo VARCHAR(255);
         ALTER TABLE site_drafts ADD COLUMN IF NOT EXISTS base_branch VARCHAR(255);
         ALTER TABLE site_drafts ADD COLUMN IF NOT EXISTS base_sha VARCHAR(64);
+        ALTER TABLE site_drafts ADD COLUMN IF NOT EXISTS stack VARCHAR(30);
         CREATE TABLE IF NOT EXISTS site_draft_base_files (
             draft_id INTEGER NOT NULL REFERENCES site_drafts(id) ON DELETE CASCADE,
             path VARCHAR(255) NOT NULL,
@@ -125,6 +254,7 @@ def _ensure_tables(cur) -> None:
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_client_websites_folder ON client_websites (folder_id);
+        ALTER TABLE client_websites ADD COLUMN IF NOT EXISTS stack VARCHAR(30) DEFAULT 'static';
     """)
 
 
@@ -224,28 +354,49 @@ def detect_build_intent(text: str) -> bool:
 
 # --------------------------------------------------------------------------- files
 
-def normalize_path(path: str) -> str:
+def normalize_path(path: str, stack: Optional[str] = None) -> str:
+    """Validates a relative file path. With a stack, only that stack's file types are allowed."""
     p = (path or "").strip().replace("\\", "/")
     while p.startswith("./"):
         p = p[2:]
     if not p or p.startswith("/") or len(p) > 200:
-        raise SiteBuilderError("Use a relative file path like 'index.html' or 'css/styles.css'.")
+        raise SiteBuilderError("Use a relative file path like 'index.html' or 'src/App.jsx'.")
     parts = p.split("/")
-    for seg in parts:
-        if seg in ("", ".", "..") or seg.lower() == ".git" or (not _SEGMENT_RE.match(seg) and seg not in ALLOWED_BARE_NAMES):
+    for seg in parts[:-1]:
+        if seg in ("", ".", "..") or seg.lower() == ".git" or not (_SEGMENT_RE.match(seg) or seg in ALLOWED_DOT_FOLDERS):
             raise SiteBuilderError(f"'{path}' isn't an allowed file path (letters, numbers, . _ - and folders only).")
     name = parts[-1]
+    if name in ("", ".", "..") or name.lower() == ".git" or not (_SEGMENT_RE.match(name) or name in ALLOWED_BARE_NAMES):
+        raise SiteBuilderError(f"'{path}' isn't an allowed file name.")
+    if any(seg.lower() == "node_modules" for seg in parts):
+        raise SiteBuilderError("Don't write node_modules; dependencies are installed by the build.")
     ext = ("." + name.rsplit(".", 1)[1].lower()) if "." in name.lstrip(".") else ""
-    if name not in ALLOWED_BARE_NAMES and ext not in ALLOWED_EXTENSIONS:
+    allowed = ALL_EXTENSIONS if stack is None else BASE_EXTENSIONS | stack_info(stack)["extensions"]
+    if name not in ALLOWED_BARE_NAMES and ext not in allowed:
         raise SiteBuilderError(
-            f"'{name}' isn't supported. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}. "
+            f"'{name}' isn't supported for this stack. Allowed: {', '.join(sorted(allowed))}. "
             "Images must be linked from the web for now (binary files can't be written)."
         )
     return p
 
 
-def write_file(draft_id: int, path: str, content: str) -> Dict[str, Any]:
-    path = normalize_path(path)
+def set_draft_stack(draft_id: int, stack: str) -> str:
+    key = (stack or "").strip().lower()
+    aliases = {"html": "static", "tailwind": "static", "vite": "react", "next": "nextjs", "next.js": "nextjs",
+               "wp": "wordpress", "wordpress theme": "wordpress", "core php": "php"}
+    key = aliases.get(key, key)
+    if key not in STACKS:
+        raise SiteBuilderError(f"Unknown stack '{stack}'. Choose one of: {', '.join(STACKS)}.")
+
+    def run(cur):
+        cur.execute("UPDATE site_drafts SET stack = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s;", (key, draft_id))
+
+    _db(run)
+    return key
+
+
+def write_file(draft_id: int, path: str, content: str, stack: Optional[str] = None) -> Dict[str, Any]:
+    path = normalize_path(path, stack)
     if content is None:
         raise SiteBuilderError("File content is missing.")
     size = len(content.encode("utf-8"))
@@ -373,11 +524,16 @@ def build_publish_proposal(draft: Dict[str, Any], repo_name: str, description: s
         raise SiteBuilderError("This draft edits an existing website. Use propose_site_changes instead of publish_website.")
     if not REPO_NAME_RE.match(repo_name or ""):
         raise SiteBuilderError("Repository names may only use letters, numbers, '-', '_' and '.', up to 100 characters.")
+    if not draft.get("stack"):
+        raise SiteBuilderError("No stack was chosen. Ask the user which stack they want, then call set_site_stack.")
+    info = stack_info(draft["stack"])
     files = list_files(draft["id"])
     if not files:
         raise SiteBuilderError("The draft is empty. Write the site files with draft_write_file first.")
-    if not any(f["path"] == "index.html" for f in files):
-        raise SiteBuilderError("The site needs an index.html at the root before it can be published.")
+    paths = {f["path"] for f in files}
+    for options in info["required"]:
+        if not paths.intersection(options):
+            raise SiteBuilderError(f"A {info['label']} project needs {' or '.join(options)} before it can be published.")
     conn = gh.get_connection(draft.get("folder_id"))
     if not conn or conn.get("status") != "active":
         raise SiteBuilderError("This client hasn't connected GitHub yet. Call connect_github first.")
@@ -391,7 +547,11 @@ def build_publish_proposal(draft: Dict[str, Any], repo_name: str, description: s
         "files": files,
         "file_count": len(files),
         "total_bytes": sum(f["size_bytes"] for f in files),
-        "preview_url": preview_url(draft["id"]),
+        "stack": draft["stack"],
+        "stack_label": info["label"],
+        "hosting": info["kind"],
+        # Only plain static files can be previewed before GitHub builds them.
+        "preview_url": preview_url(draft["id"]) if info["kind"] == "static" else None,
     }
 
 
@@ -460,8 +620,14 @@ async def publish_draft(args: Dict[str, Any], channel_id: str) -> Dict[str, Any]
         raise SiteBuilderError("The client's GitHub connection changed since this was proposed. Ask the bot to propose publishing again.")
 
     files = _all_files(draft["id"])
-    if not any(f["path"] == "index.html" for f in files):
-        raise SiteBuilderError("The draft has no index.html.")
+    stack = draft.get("stack") or "static"
+    info = stack_info(stack)
+    paths = {f["path"] for f in files}
+    for options in info["required"]:
+        if not paths.intersection(options):
+            raise SiteBuilderError(f"The draft is missing {' or '.join(options)}.")
+    if info["kind"] == "pages_build":
+        files = [f for f in files if f["path"] != PAGES_WORKFLOW_PATH] + [{"path": PAGES_WORKFLOW_PATH, "content": pages_workflow(stack)}]
     set_status(draft["id"], "publishing")
     owner, repo = conn["account_login"], args["repo"]
     token = await _user_access_token(folder_id)
@@ -494,9 +660,23 @@ async def publish_draft(args: Dict[str, Any], channel_id: str) -> Dict[str, Any]
                     "The repository was created but JTS PowerTool can't write to it. If the GitHub app is limited to "
                     f"selected repositories, add '{full_name}' to it (or allow all repositories) and publish again."
                 )
+            # Framework sites: switch Pages to "GitHub Actions" BEFORE pushing, so the first push builds and deploys.
+            pages_ok, site_url, pages_note = info["kind"] != "code_only", f"https://{owner.lower()}.github.io/{repo}/", ""
+            if info["kind"] == "pages_build":
+                pages = await _gh_call(client, "POST", f"/repos/{full_name}/pages", token, json={"build_type": "workflow"})
+                if pages.status_code == 201:
+                    site_url = pages.json().get("html_url") or site_url
+                elif pages.status_code != 409:
+                    pages_ok = False
+                    pages_note = (
+                        "GitHub Pages couldn't be turned on"
+                        + (" (private repositories need a paid GitHub plan for Pages)" if args.get("private") else "")
+                        + f": {_err(pages)}"
+                    )
+
             base_commit = await _gh_call(client, "GET", f"/repos/{full_name}/git/commits/{base_sha}", token)
             tree_items = [{"path": f["path"], "mode": "100644", "type": "blob", "content": f["content"]} for f in files]
-            if not any(f["path"] == ".nojekyll" for f in files):
+            if info["kind"] == "static" and not any(f["path"] == ".nojekyll" for f in files):
                 tree_items.append({"path": ".nojekyll", "mode": "100644", "type": "blob", "content": "\n"})
             tree = await _gh_call(client, "POST", f"/repos/{full_name}/git/trees", token,
                                   json={"base_tree": base_commit.json()["tree"]["sha"], "tree": tree_items})
@@ -513,20 +693,19 @@ async def publish_draft(args: Dict[str, Any], channel_id: str) -> Dict[str, Any]
             if upd.status_code != 200:
                 raise SiteBuilderError(f"GitHub didn't update the branch ({upd.status_code}: {_err(upd)}).")
 
-            # 3. Turn on GitHub Pages
-            pages_ok, site_url, pages_note = True, f"https://{owner.lower()}.github.io/{repo}/", ""
-            pages = await _gh_call(client, "POST", f"/repos/{full_name}/pages", token,
-                                   json={"source": {"branch": branch, "path": "/"}})
-            if pages.status_code in (201, 409):
+            # 3. Static sites: serve the branch directly with GitHub Pages
+            if info["kind"] == "static":
+                pages = await _gh_call(client, "POST", f"/repos/{full_name}/pages", token,
+                                       json={"source": {"branch": branch, "path": "/"}})
                 if pages.status_code == 201:
                     site_url = pages.json().get("html_url") or site_url
-            else:
-                pages_ok = False
-                pages_note = (
-                    "GitHub Pages couldn't be turned on"
-                    + (" (private repositories need a paid GitHub plan for Pages)" if args.get("private") else "")
-                    + f": {_err(pages)}"
-                )
+                elif pages.status_code != 409:
+                    pages_ok = False
+                    pages_note = (
+                        "GitHub Pages couldn't be turned on"
+                        + (" (private repositories need a paid GitHub plan for Pages)" if args.get("private") else "")
+                        + f": {_err(pages)}"
+                    )
     except (SiteBuilderError, gh.GitHubAppError) as e:
         set_status(draft["id"], "failed", last_error=str(e))
         raise
@@ -536,10 +715,11 @@ async def publish_draft(args: Dict[str, Any], channel_id: str) -> Dict[str, Any]
         raise SiteBuilderError("Publishing failed because GitHub didn't respond as expected. Please try again.")
 
     set_status(draft["id"], "published", repo_full_name=full_name, site_url=site_url if pages_ok else None)
-    record_website(folder_id, full_name, site_url if pages_ok else None, branch, "First version published", None, draft.get("created_by"))
-    logger.info(f"[SITE_BUILDER] Draft {draft['id']} published to {full_name} ({len(files)} files) pages={pages_ok}")
+    record_website(folder_id, full_name, site_url if pages_ok else None, branch, "First version published", None,
+                   draft.get("created_by"), stack=stack)
+    logger.info(f"[SITE_BUILDER] Draft {draft['id']} ({stack}) published to {full_name} ({len(files)} files) pages={pages_ok}")
     return {"repo": full_name, "url": site_url if pages_ok else None, "pages": pages_ok, "pages_note": pages_note,
-            "files": len(files), "repo_url": f"{gh.GITHUB_WEB}/{full_name}"}
+            "files": len(files), "repo_url": f"{gh.GITHUB_WEB}/{full_name}", "stack": stack, "kind": info["kind"]}
 
 
 async def execute_publish_approval(args: Dict[str, Any], channel_id: str) -> Tuple[str, bool]:
@@ -548,6 +728,18 @@ async def execute_publish_approval(args: Dict[str, Any], channel_id: str) -> Tup
         res = await publish_draft(args, channel_id)
     except (SiteBuilderError, gh.GitHubAppError) as e:
         return f"[Publish Error]: {e}", True
+    label = stack_info(res.get("stack"))["label"]
+    if res.get("kind") == "code_only":
+        return (
+            f"{label} project saved to {res['repo_url']} ({res['files']} files). It is NOT live yet: it needs PHP hosting"
+            + (" (or installing the theme in WordPress)" if res.get("stack") == "wordpress" else "")
+            + ". The README in the repository explains how to set it up.", False,
+        )
+    if res["pages"] and res.get("kind") == "pages_build":
+        return (
+            f"{label} site published to {res['repo_url']} ({res['files']} files). GitHub is building it now (about 2 minutes, "
+            f"progress under the repository's Actions tab); it will be live at {res['url']}", False,
+        )
     if res["pages"]:
         return (
             f"Website published. Live at {res['url']} (GitHub Pages can take about a minute to show the first time). "
@@ -571,21 +763,22 @@ def check_can_publish(channel_id: str) -> None:
 
 def record_website(
     folder_id: Optional[int], repo_full_name: str, site_url: Optional[str], default_branch: str,
-    last_change: Optional[str], last_pr_url: Optional[str], created_by: Optional[str],
+    last_change: Optional[str], last_pr_url: Optional[str], created_by: Optional[str], stack: Optional[str] = None,
 ) -> None:
     def run(cur):
         cur.execute(
             """
-            INSERT INTO client_websites (folder_id, repo_full_name, site_url, default_branch, last_change, last_pr_url, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO client_websites (folder_id, repo_full_name, site_url, default_branch, last_change, last_pr_url, created_by, stack)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, COALESCE(%s, 'static'))
             ON CONFLICT (repo_full_name) DO UPDATE SET
                 site_url = COALESCE(EXCLUDED.site_url, client_websites.site_url),
                 default_branch = EXCLUDED.default_branch,
                 last_change = EXCLUDED.last_change,
                 last_pr_url = COALESCE(EXCLUDED.last_pr_url, client_websites.last_pr_url),
+                stack = COALESCE(%s, client_websites.stack),
                 updated_at = CURRENT_TIMESTAMP;
             """,
-            (folder_id, repo_full_name, site_url, default_branch, last_change, last_pr_url, created_by),
+            (folder_id, repo_full_name, site_url, default_branch, last_change, last_pr_url, created_by, stack, stack),
         )
 
     try:
@@ -734,16 +927,17 @@ async def start_edit(channel_id: str, thread_ts: str, folder_id: int, created_by
     def run(cur):
         cur.execute(
             """
-            INSERT INTO site_drafts (folder_id, channel_id, thread_ts, created_by, kind, base_repo, base_branch, base_sha)
-            VALUES (%s, %s, %s, %s, 'edit', %s, %s, %s) RETURNING *;
+            INSERT INTO site_drafts (folder_id, channel_id, thread_ts, created_by, kind, base_repo, base_branch, base_sha, stack)
+            VALUES (%s, %s, %s, %s, 'edit', %s, %s, %s, %s) RETURNING *;
             """,
-            (folder_id, channel_id, thread_ts, created_by, full, branch, head_sha),
+            (folder_id, channel_id, thread_ts, created_by, full, branch, head_sha, site.get("stack") or "static"),
         )
         return cur.fetchone()
 
     draft = dict(_db(run))
     _set_base_files(draft["id"], files)
-    return {"draft_id": draft["id"], "repo": full, "reused": False, "files": list_files(draft["id"]), "skipped": skipped}
+    return {"draft_id": draft["id"], "repo": full, "reused": False, "files": list_files(draft["id"]), "skipped": skipped,
+            "stack": site.get("stack") or "static"}
 
 
 def build_update_proposal(draft: Dict[str, Any], title: str, summary: str) -> Dict[str, Any]:
@@ -771,7 +965,9 @@ def build_update_proposal(draft: Dict[str, Any], title: str, summary: str) -> Di
         "summary": (summary or "").strip()[:2000],
         "changes": changes,
         "change_count": n,
-        "preview_url": preview_url(draft["id"]),
+        "stack": draft.get("stack") or "static",
+        "stack_label": stack_info(draft.get("stack"))["label"],
+        "preview_url": preview_url(draft["id"]) if stack_info(draft.get("stack"))["kind"] == "static" else None,
     }
 
 

@@ -128,3 +128,20 @@ Safety:
 All websites per client are listed on **Clients & Channels → (client) → Websites** with links to the live site,
 the repository and the last change.
 
+## Website stacks
+
+Before building a **new** website the bot always asks which stack to use (there is no default) and won't write any
+file until the client chooses:
+
+| Stack | After approval |
+|---|---|
+| Static HTML/CSS/JS (Tailwind optional) | Live on GitHub Pages; preview available before approval |
+| React, Vue, Svelte (Vite), Astro, Next.js (static export) | JTS adds a GitHub Actions workflow; GitHub builds the site (about 2 minutes) and hosts it on GitHub Pages. No preview before approval |
+| Core PHP, Laravel | Code + README saved to the client's GitHub. **Not live**: needs PHP hosting (not provided yet) |
+| WordPress theme | Theme code + README saved to GitHub; the client installs it in their own WordPress |
+
+Notes:
+- Framework sites need the GitHub App's **Workflows** and **Pages** permissions (already in the setup above).
+- Progress of framework builds: the repository's **Actions** tab.
+- A website keeps its stack; edits later use the same stack.
+

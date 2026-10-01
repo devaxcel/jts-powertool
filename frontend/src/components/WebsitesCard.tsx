@@ -6,6 +6,18 @@ import { fetchWebsites, ClientWebsite } from "@/lib/api";
 import { formatLocalDateTime } from "@/lib/types";
 import { Alert, btn } from "@/components/ui";
 
+const STACK_LABELS: Record<string, string> = {
+  static: "Static",
+  react: "React",
+  vue: "Vue",
+  svelte: "Svelte",
+  astro: "Astro",
+  nextjs: "Next.js",
+  php: "PHP · code only",
+  laravel: "Laravel · code only",
+  wordpress: "WordPress theme",
+};
+
 /** Websites the AI built and published for this client. New sites and changes are requested in Slack. */
 export function WebsitesCard({ folderId }: { folderId: number | string }) {
   const [sites, setSites] = useState<ClientWebsite[] | null>(null);
@@ -61,7 +73,14 @@ export function WebsitesCard({ folderId }: { folderId: number | string }) {
           {sites.map((w) => (
             <li key={w.repo_full_name} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-800 truncate">{w.repo_full_name}</p>
+                <p className="text-sm font-semibold text-gray-800 truncate">
+                  {w.repo_full_name}
+                  {w.stack && (
+                    <span className="ml-2 align-middle text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 border border-gray-200 text-gray-600">
+                      {STACK_LABELS[w.stack] || w.stack}
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-gray-500">
                   {w.last_change || "Published"} · {w.updated_at ? formatLocalDateTime(w.updated_at) : "—"}
                 </p>

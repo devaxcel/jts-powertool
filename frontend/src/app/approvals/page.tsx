@@ -114,8 +114,12 @@ function describeApproval(a: Approval): Summary {
         action: "Publish a website",
         headline: `${args.owner || ""}/${args.repo || ""}`,
         details: [
-          `${files.length} file${files.length === 1 ? "" : "s"} · ${args.private ? "private" : "public"} repository · hosted on GitHub Pages`,
-          "Approving creates the repository in the client's own GitHub and publishes the site.",
+          `${args.stack_label || "Static site"} · ${files.length} file${files.length === 1 ? "" : "s"} · ${args.private ? "private" : "public"} repository`,
+          args.hosting === "code_only"
+            ? "Approving saves the code to the client's GitHub. It is NOT live until it's set up on PHP hosting (or installed in WordPress)."
+            : args.hosting === "pages_build"
+            ? "Approving creates the repository; GitHub then builds the site and hosts it on GitHub Pages (about 2 minutes)."
+            : "Approving creates the repository in the client's own GitHub and publishes the site on GitHub Pages.",
         ],
       };
     }
@@ -196,7 +200,8 @@ function SitePreviewButton({ appr }: { appr: Approval }) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const draftId = appr.tool_arguments?.draft_id;
-  if (!draftId) return null;
+  // Only plain static sites can be previewed before GitHub builds them.
+  if (!draftId || !appr.tool_arguments?.preview_url) return null;
   async function open() {
     setOpening(true);
     setError(null);
@@ -610,7 +615,9 @@ export default function ApprovalsPage() {
               </p>
             ))}
             <p className="text-xs">
-              {confirming.action === "approve" && confirming.appr.tool_name === "update_website"
+              {confirming.action === "approve" && confirming.appr.tool_name === "publish_website" && confirming.appr.tool_arguments?.hosting === "code_only"
+                ? "This creates the repository in the client's GitHub with the code. It won't be live until it's set up on PHP hosting."
+                : confirming.action === "approve" && confirming.appr.tool_name === "update_website"
                 ? "This opens a pull request with these changes in the client's repository and merges it. The live site updates within about a minute."
                 : confirming.action === "approve" && confirming.appr.tool_name === "publish_website"
                 ? "This creates the repository in the client's GitHub, uploads all files and turns on GitHub Pages. The live link is posted in Slack."

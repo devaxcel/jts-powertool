@@ -416,7 +416,11 @@ def _build_publish_website_card(approval_id: str, tool_args: Dict[str, Any]) -> 
                 {"type": "mrkdwn", "text": f"*New repository:*\n`{repo}`"},
                 {"type": "mrkdwn", "text": f"*Visibility:*\n{visibility}"},
                 {"type": "mrkdwn", "text": f"*Files:*\n{tool_args.get('file_count', len(files))} ({int(tool_args.get('total_bytes', 0)) / 1000:.0f} KB)"},
-                {"type": "mrkdwn", "text": "*Hosting:*\nGitHub Pages"},
+                {"type": "mrkdwn", "text": f"*Stack / hosting:*\n{tool_args.get('stack_label', 'Static site')} · " + {
+                    "static": "GitHub Pages (live)",
+                    "pages_build": "built by GitHub, then GitHub Pages (live)",
+                    "code_only": "code only: needs PHP hosting",
+                }.get(tool_args.get("hosting", "static"), "GitHub Pages")},
             ],
         },
         {"type": "section", "text": {"type": "mrkdwn", "text": listed or "_No files_"}},
@@ -426,7 +430,8 @@ def _build_publish_website_card(approval_id: str, tool_args: Dict[str, Any]) -> 
             "type": "context",
             "elements": [{
                 "type": "mrkdwn",
-                "text": f"Proposal ID: `{approval_id}` · Approving creates the repository in the client's GitHub and publishes the site.",
+                "text": f"Proposal ID: `{approval_id}` · Approving creates the repository in the client's GitHub"
+                + (" with the code (not live until it's on PHP hosting)." if tool_args.get("hosting") == "code_only" else " and publishes the site."),
             }],
         },
     ]

@@ -19,7 +19,7 @@ LOCAL_TOOLS = {"connect_github"}
 # Website builder tools (offered only in build mode). draft_* never touch GitHub; publish_website needs approval.
 SITE_TOOLS = {
     "draft_write_file", "draft_read_file", "draft_list_files", "draft_delete_file", "publish_website",
-    "list_my_websites", "start_site_edit", "propose_site_changes",
+    "list_my_websites", "start_site_edit", "propose_site_changes", "set_site_stack",
 }
 
 # Allowed Read Tools
@@ -329,6 +329,23 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
 
 SITE_TOOL_SCHEMAS = [
     {
+        "name": "set_site_stack",
+        "description": (
+            "Website builder: record the stack the USER chose for a new website, after you asked them. Never call it "
+            "before the user answered. Values: static, react, vue, svelte, astro, nextjs, php, laravel, wordpress."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "stack": {
+                    "type": "string",
+                    "enum": ["static", "react", "vue", "svelte", "astro", "nextjs", "php", "laravel", "wordpress"],
+                },
+            },
+            "required": ["stack"],
+        },
+    },
+    {
         "name": "draft_write_file",
         "description": (
             "Website builder: create or replace ONE file in this conversation's private website draft (nothing goes to "
@@ -582,9 +599,25 @@ class ControlledToolAdapter:
                     )
                 return (out, is_err)
 
+            if tool_name == "set_site_stack":
+                draft = sb.get_or_create_draft(self.channel_id, thread_key, folder_id, self.user_id)
+                if (draft.get("kind") or "create") == "edit":
+                    return ("This conversation is editing an existing website; its stack can't be changed.", True)
+                if sb.list_files(draft["id"]) and draft.get("stack") and draft["stack"] != str(args.get("stack", "")).lower():
+                    return ("Files were already written for another stack. Ask the user to start a new conversation for a different stack.", True)
+                key = sb.set_draft_stack(draft["id"], str(args.get("stack", "")))
+                info = sb.stack_info(key)
+                return (f"Stack set to {info['label']} ({info['pitch']}). Now plan and build the site.", False)
+
             if tool_name == "draft_write_file":
                 draft = sb.get_or_create_draft(self.channel_id, thread_key, folder_id, self.user_id)
-                res = sb.write_file(draft["id"], args.get("path", ""), args.get("content"))
+                if not draft.get("stack") and (draft.get("kind") or "create") != "edit":
+                    return (
+                        "No stack chosen yet. Ask the user which stack they want (show the numbered list), wait for their "
+                        "answer, then call set_site_stack before writing files.",
+                        True,
+                    )
+                res = sb.write_file(draft["id"], args.get("path", ""), args.get("content"), draft.get("stack") or "static")
                 return (
                     f"Saved {res['path']} ({res['size_bytes']:,} bytes). Draft now has {res['file_count']} files "
                     f"({res['total_bytes']:,} bytes).",
@@ -620,10 +653,14 @@ class ControlledToolAdapter:
                 out, is_err = await self._submit_for_approval("publish_website", proposal)
                 if not is_err:
                     sb.set_status(draft["id"], "pending_approval")
+                    after = {
+                        "static": "It has a 'Preview site' button: tell the user to check the preview and approve; the live link is shared after approval.",
+                        "pages_build": "There's no preview before publishing for this stack; after approval GitHub builds it (about 2 minutes) and the live link is shared.",
+                        "code_only": "After approval the code is saved to their GitHub; it won't be live until it's set up on PHP hosting (or installed in WordPress).",
+                    }[proposal.get("hosting", "static")]
                     out = (
-                        f"Publishing was proposed: repository {proposal['owner']}/{proposal['repo']} with "
-                        f"{proposal['file_count']} files. An approval card with a 'Preview site' button was posted. "
-                        "Tell the user to check the preview and approve; the live link is shared after approval."
+                        f"Publishing was proposed: {proposal.get('stack_label', 'website')} in repository "
+                        f"{proposal['owner']}/{proposal['repo']} with {proposal['file_count']} files. An approval card was posted. {after}"
                     )
                 return (out, is_err)
         except sb.SiteBuilderError as e:

@@ -1367,6 +1367,7 @@ export interface ClientWebsite {
   default_branch: string;
   last_change: string | null;
   last_pr_url: string | null;
+  stack?: string | null;
   created_at?: string;
   updated_at?: string;
 }
