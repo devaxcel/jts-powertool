@@ -1,7 +1,9 @@
 """
 "Keys & Connections": each client manages its own API keys (whole client or per Slack channel).
 
-Values go straight to AWS Secrets Manager and are never returned. JTS admins can manage any client;
+Key names are free text, so any service works; PROVIDERS below are only suggestions. A key the bot doesn't use
+natively becomes usable when the client also gives its service URL and how the key is sent
+(see app/services/client_api_service.py). Values go straight to AWS Secrets Manager and are never returned. JTS admins can manage any client;
 Client Admins only their own; Team Members see status only.
 """
 import logging
@@ -13,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.auth_router import require_session
 from app.log_stream import emit_telemetry
+from app.services import client_api_service as capi
 from app.services.channel_secrets_service import (
     INTERNAL_FOLDER_PROVIDERS,
     channel_id_variants,
@@ -29,7 +32,8 @@ from app.services.channel_secrets_service import (
 logger = logging.getLogger(__name__)
 client_keys_router = APIRouter(prefix="/api/client-keys", tags=["Client keys"])
 
-# used_by_bot: the assistant already uses this key today. Others are stored securely for upcoming tools.
+# Suggestions only (any name is accepted). used_by_bot: the assistant uses this key natively.
+# "connection" pre-fills the service URL and how the key is sent, so the assistant can call the service.
 PROVIDERS: List[Dict[str, Any]] = [
     {"id": "anthropic", "label": "Anthropic (Claude)", "group": "AI models", "used_by_bot": True,
      "hint": "Starts with sk-ant-. Replies made with this key aren't billed by JTS."},
@@ -46,36 +50,89 @@ PROVIDERS: List[Dict[str, Any]] = [
     {"id": "sendgrid", "label": "SendGrid", "group": "Work tools", "used_by_bot": False, "hint": ""},
     {"id": "mailchimp", "label": "Mailchimp", "group": "Work tools", "used_by_bot": False, "hint": ""},
     {"id": "formspree", "label": "Formspree (website forms)", "group": "Work tools", "used_by_bot": False, "hint": ""},
-    {"id": "custom", "label": "Custom (any name)", "group": "Other", "used_by_bot": False, "hint": "Give it a name, e.g. CRM key"},
 ]
-_PROVIDER_IDS = {p["id"] for p in PROVIDERS}
+_SUGGESTED_CONNECTIONS: Dict[str, Dict[str, str]] = {
+    "openai": {"base_url": "https://api.openai.com/v1", "auth_type": "bearer"},
+    "mistral": {"base_url": "https://api.mistral.ai/v1", "auth_type": "bearer"},
+    "groq": {"base_url": "https://api.groq.com/openai/v1", "auth_type": "bearer"},
+    "google_gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta", "auth_type": "header", "auth_name": "x-goog-api-key"},
+    "elevenlabs": {"base_url": "https://api.elevenlabs.io/v1", "auth_type": "header", "auth_name": "xi-api-key"},
+    "assemblyai": {"base_url": "https://api.assemblyai.com/v2", "auth_type": "header", "auth_name": "Authorization"},
+    "hubspot": {"base_url": "https://api.hubapi.com", "auth_type": "bearer"},
+    "sendgrid": {"base_url": "https://api.sendgrid.com/v3", "auth_type": "bearer"},
+}
+for _p in PROVIDERS:
+    _p["connection"] = _SUGGESTED_CONNECTIONS.get(_p["id"], {})
 _RESERVED = INTERNAL_FOLDER_PROVIDERS | {"github"}  # GitHub is connected with the GitHub card, not a pasted key
 MAX_VALUE_LEN = 8000
+MAX_NAME_LEN = 50  # provider columns are VARCHAR(50)
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (text or "").strip().lower()).strip("_")
+
+
+_LABEL_TO_ID = {_slug(p["label"]): p["id"] for p in PROVIDERS}
 
 
 def _provider_label(provider: str) -> str:
     for p in PROVIDERS:
         if p["id"] == provider:
             return p["label"]
-    if provider.startswith("custom_"):
-        return provider[len("custom_"):].replace("_", " ").title() + " (custom)"
-    return provider
+    if provider.startswith("custom_"):  # keys saved before names were free text
+        provider = provider[len("custom_"):]
+    return provider.replace("_", " ").strip().title() or provider
 
 
-def _resolve_provider(provider: str, custom_name: Optional[str]) -> str:
-    provider = (provider or "").strip().lower()
-    if provider == "custom":
-        slug = re.sub(r"[^a-z0-9]+", "_", (custom_name or "").strip().lower()).strip("_")[:40]
-        if not slug:
-            raise HTTPException(status_code=400, detail="Give the custom key a name, e.g. 'CRM key'.")
-        return f"custom_{slug}"
-    if provider.startswith("custom_") and re.fullmatch(r"custom_[a-z0-9_]{1,40}", provider):
-        return provider
-    if provider in _RESERVED:
+def _resolve_provider(provider: str, custom_name: Optional[str] = None) -> str:
+    """Any name works. Known services (by id or label) keep their id so the bot recognises them."""
+    raw = (provider or "").strip()
+    if raw.lower() == "custom":  # older dashboard form
+        raw = (custom_name or "").strip()
+    slug = _slug(raw)
+    if not slug:
+        raise HTTPException(status_code=400, detail="Give the key a name, e.g. 'OpenAI' or 'CRM key'.")
+    slug = _LABEL_TO_ID.get(slug, slug)
+    if slug in _RESERVED or slug.startswith("github"):
         raise HTTPException(status_code=400, detail="GitHub is connected with the GitHub card, not with a key.")
-    if provider not in _PROVIDER_IDS:
-        raise HTTPException(status_code=400, detail="Unknown key type.")
-    return provider
+    if len(slug) > MAX_NAME_LEN:
+        raise HTTPException(status_code=400, detail=f"Keep the key name under {MAX_NAME_LEN} characters.")
+    return slug
+
+
+def _connection_details(payload: "SaveClientKey") -> Dict[str, str]:
+    try:
+        base_url = capi.normalize_base_url(payload.base_url)
+        auth_type, auth_name = capi.check_auth(payload.auth_type, payload.auth_name)
+    except capi.ClientApiError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "base_url": base_url,
+        "auth_type": auth_type,
+        "auth_name": auth_name,
+        "description": (payload.description or "").strip()[:300],
+    }
+
+
+def _with_connection(item: Dict[str, Any], conn: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    conn = conn or {}
+    return {
+        **item,
+        "base_url": conn.get("base_url") or "",
+        "auth_type": conn.get("auth_type") or "bearer",
+        "auth_name": conn.get("auth_name") or "",
+        "description": conn.get("description") or "",
+        # native: the bot uses it directly (Anthropic); api: callable via call_client_api; stored: no service URL yet
+        "bot_use": "native" if item["provider"] == "anthropic" else ("api" if conn.get("base_url") else "stored"),
+    }
+
+
+def _save_details(folder_id: int, channel_id: str, provider: str, details: Dict[str, str], actor: str) -> None:
+    try:
+        capi.save_connection(folder_id=folder_id, channel_id=channel_id, provider=provider, updated_by=actor, **details)
+    except Exception as e:
+        logger.error(f"[CLIENT_KEYS] Saving connection details for {provider} failed: {e}")
+        raise HTTPException(status_code=500, detail="The service details couldn't be saved. Please try again.")
 
 
 def _scope(request: Request, folder_id: Optional[int], write: bool) -> Dict[str, Any]:
@@ -136,9 +193,13 @@ def _check_value(provider: str, value: str) -> str:
 
 class SaveClientKey(BaseModel):
     folder_id: Optional[int] = None
-    provider: str = Field(..., max_length=60)
-    custom_name: Optional[str] = Field(None, max_length=60)
-    value: str
+    provider: str = Field(..., max_length=80)  # the key name, free text
+    custom_name: Optional[str] = Field(None, max_length=80)
+    value: Optional[str] = None  # empty = keep the saved key and only update the service details
+    base_url: Optional[str] = Field(None, max_length=500)
+    auth_type: Optional[str] = Field(None, max_length=20)
+    auth_name: Optional[str] = Field(None, max_length=80)
+    description: Optional[str] = Field(None, max_length=300)
 
 
 class SaveChannelKey(SaveClientKey):
@@ -149,8 +210,13 @@ class SaveChannelKey(SaveClientKey):
 def get_keys(request: Request, folder_id: Optional[int] = None):
     sc = _scope(request, folder_id, write=False)
     folder = _folder_or_404(sc["folder_id"])
+    try:
+        conns = capi.list_connections(sc["folder_id"])
+    except Exception as e:
+        logger.warning(f"[CLIENT_KEYS] Could not load service details: {e}")
+        conns = {}
     client_keys = [
-        {**k, "label": _provider_label(k["provider"]), "scope": "client"}
+        _with_connection({**k, "label": _provider_label(k["provider"]), "scope": "client"}, conns.get(("", k["provider"])))
         for k in list_folder_api_keys(sc["folder_id"])
     ]
     channels = []
@@ -159,15 +225,17 @@ def get_keys(request: Request, folder_id: Optional[int] = None):
         for k in list_channel_secrets(ch["channel_id"]):
             if k.get("status") != "active" or k.get("provider") in _RESERVED:
                 continue
-            keys.append({
+            conn = next((conns[(cid, k["provider"])] for cid in channel_id_variants(ch["channel_id"])
+                         if (cid, k["provider"]) in conns), None)
+            keys.append(_with_connection({
                 "provider": k["provider"], "label": _provider_label(k["provider"]), "scope": "channel",
                 "updated_by": k.get("updated_by"), "updated_at": k.get("updated_at"), "status": "ok",
-            })
+            }, conn))
         channels.append({"channel_id": ch["channel_id"], "channel_name": ch.get("channel_name") or ch["channel_id"], "keys": keys})
     return {
         "folder": {"id": folder["id"], "name": folder["name"]},
         "can_edit": sc["can_edit"],
-        "providers": PROVIDERS,
+        "providers": PROVIDERS,  # suggestions; any name may be used
         "client_keys": client_keys,
         "channels": channels,
     }
@@ -178,13 +246,18 @@ def save_client_key(payload: SaveClientKey, request: Request):
     sc = _scope(request, payload.folder_id, write=True)
     _folder_or_404(sc["folder_id"])
     provider = _resolve_provider(payload.provider, payload.custom_name)
-    value = _check_value(provider, payload.value)
+    details = _connection_details(payload)
     actor = sc["ctx"].get("username") or "admin"
-    try:
-        store_folder_api_key(folder_id=sc["folder_id"], api_key=value, provider=provider, updated_by=actor)
-    except Exception as e:
-        logger.error(f"[CLIENT_KEYS] Saving {provider} for client {sc['folder_id']} failed: {e}")
-        raise HTTPException(status_code=500, detail="The key couldn't be saved. Please try again.")
+    if (payload.value or "").strip():
+        value = _check_value(provider, payload.value)
+        try:
+            store_folder_api_key(folder_id=sc["folder_id"], api_key=value, provider=provider, updated_by=actor)
+        except Exception as e:
+            logger.error(f"[CLIENT_KEYS] Saving {provider} for client {sc['folder_id']} failed: {e}")
+            raise HTTPException(status_code=500, detail="The key couldn't be saved. Please try again.")
+    elif not any(k["provider"] == provider for k in list_folder_api_keys(sc["folder_id"])):
+        raise HTTPException(status_code=400, detail="Paste the key value.")
+    _save_details(sc["folder_id"], "", provider, details, actor)
     _audit(sc["ctx"], "CLIENT_KEY_SAVED", f"{actor} saved the {_provider_label(provider)} key for client {sc['folder_id']}")
     return {"ok": True, "provider": provider, "message": f"{_provider_label(provider)} key saved."}
 
@@ -198,6 +271,10 @@ def delete_client_key(provider: str, request: Request, folder_id: Optional[int] 
     removed = delete_folder_api_key(sc["folder_id"], provider)
     if not removed:
         raise HTTPException(status_code=404, detail="That key wasn't found.")
+    try:
+        capi.delete_connection(sc["folder_id"], "", provider)
+    except Exception as e:
+        logger.warning(f"[CLIENT_KEYS] Could not remove service details for {provider}: {e}")
     actor = sc["ctx"].get("username") or "admin"
     _audit(sc["ctx"], "CLIENT_KEY_REMOVED", f"{actor} removed the {_provider_label(provider)} key for client {sc['folder_id']}")
     extra = " Replies now use the JTS key and are billed." if provider == "anthropic" else ""
@@ -210,16 +287,21 @@ def save_channel_key(payload: SaveChannelKey, request: Request):
     folder = _folder_or_404(sc["folder_id"])
     ch = _channel_in_folder(folder, payload.channel_id)
     provider = _resolve_provider(payload.provider, payload.custom_name)
-    value = _check_value(provider, payload.value)
+    details = _connection_details(payload)
     actor = sc["ctx"].get("username") or "admin"
-    try:
-        store_channel_secret(channel_id=ch["channel_id"], provider=provider, api_key=value,
-                             channel_name=ch.get("channel_name"), updated_by=actor)
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        logger.error(f"[CLIENT_KEYS] Saving channel {provider} key failed: {e}")
-        raise HTTPException(status_code=500, detail="The key couldn't be saved. Please try again.")
+    if (payload.value or "").strip():
+        value = _check_value(provider, payload.value)
+        try:
+            store_channel_secret(channel_id=ch["channel_id"], provider=provider, api_key=value,
+                                 channel_name=ch.get("channel_name"), updated_by=actor)
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
+        except Exception as e:
+            logger.error(f"[CLIENT_KEYS] Saving channel {provider} key failed: {e}")
+            raise HTTPException(status_code=500, detail="The key couldn't be saved. Please try again.")
+    elif not any(k.get("provider") == provider and k.get("status") == "active" for k in list_channel_secrets(ch["channel_id"])):
+        raise HTTPException(status_code=400, detail="Paste the key value.")
+    _save_details(sc["folder_id"], ch["channel_id"].upper(), provider, details, actor)
     _audit(sc["ctx"], "CHANNEL_KEY_SAVED",
            f"{actor} saved the {_provider_label(provider)} key for channel {ch.get('channel_name') or ch['channel_id']}")
     return {"ok": True, "message": f"{_provider_label(provider)} key saved for {ch.get('channel_name') or ch['channel_id']}."}
@@ -237,6 +319,10 @@ def delete_channel_key(channel_id: str, provider: str, request: Request, folder_
     removed = delete_channel_secret(ch["channel_id"], provider, updated_by=actor)
     if not removed:
         raise HTTPException(status_code=404, detail="That key wasn't found.")
+    try:
+        capi.delete_connection(sc["folder_id"], ch["channel_id"].upper(), provider)
+    except Exception as e:
+        logger.warning(f"[CLIENT_KEYS] Could not remove service details for {provider}: {e}")
     _audit(sc["ctx"], "CHANNEL_KEY_REMOVED",
            f"{actor} removed the {_provider_label(provider)} key for channel {ch.get('channel_name') or ch['channel_id']}")
     return {"ok": True, "message": f"{_provider_label(provider)} key removed."}

@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plug, Plus, Trash2, RefreshCw, Loader2, Eye, EyeOff, Hash, Building2, Bot, Clock } from "lucide-react";
+import { Plug, Plus, Trash2, RefreshCw, Loader2, Eye, EyeOff, Hash, Building2, Bot, Clock, Link2 } from "lucide-react";
 import {
   ClientKeysData,
   ClientKeyItem,
+  KeyAuthType,
   fetchClientKeys,
   saveClientKey,
   deleteClientKey,
@@ -19,18 +20,23 @@ import { Alert, ConfirmDialog, EmptyState, LoadingState, PageHeader, btn, inputC
 
 type Target = { scope: "client" } | { scope: "channel"; channelId: string; channelName: string };
 type Pending = { provider: string; label: string; target: Target } | null;
+type Editing = { item: ClientKeyItem; target: Target } | null;
+
+const AUTH_LABELS: Record<KeyAuthType, string> = {
+  bearer: "Authorization: Bearer <key>",
+  header: "In a header",
+  query: "As a URL parameter",
+};
 
 function KeyRow({
   item,
   canEdit,
-  usedByBot,
-  onReplace,
+  onEdit,
   onRemove,
 }: {
   item: ClientKeyItem;
   canEdit: boolean;
-  usedByBot: boolean;
-  onReplace: () => void;
+  onEdit: () => void;
   onRemove: () => void;
 }) {
   return (
@@ -41,16 +47,29 @@ function KeyRow({
           {item.key_hint && <span className="font-mono text-xs text-gray-500">{item.key_hint}</span>}
           {item.status === "failing" ? (
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">Failing</span>
-          ) : usedByBot ? (
+          ) : item.bot_use === "native" ? (
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1">
               <Bot className="h-3 w-3" /> In use by the assistant
             </span>
+          ) : item.bot_use === "api" ? (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 inline-flex items-center gap-1">
+              <Link2 className="h-3 w-3" /> Assistant can call it
+            </span>
           ) : (
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200 inline-flex items-center gap-1">
-              <Clock className="h-3 w-3" /> Stored for upcoming tools
+              <Clock className="h-3 w-3" /> Stored only
             </span>
           )}
         </p>
+        {item.bot_use === "api" && (
+          <p className="text-xs text-gray-600 font-mono truncate" title={item.base_url}>
+            {item.base_url}
+          </p>
+        )}
+        {item.description && <p className="text-xs text-gray-600">{item.description}</p>}
+        {item.bot_use === "stored" && canEdit && (
+          <p className="text-[11px] text-gray-500">Add its service URL (Edit) so the assistant can use it.</p>
+        )}
         <p className="text-xs text-gray-500">
           {item.updated_by ? `Saved by ${item.updated_by}` : "Saved"}
           {item.updated_at ? ` · ${formatLocalDateTime(item.updated_at)}` : ""}
@@ -58,8 +77,8 @@ function KeyRow({
       </div>
       {canEdit && (
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={onReplace} className={btn.secondary}>
-            Replace
+          <button onClick={onEdit} className={btn.secondary}>
+            Edit
           </button>
           <button onClick={onRemove} className={btn.dangerSoft}>
             <Trash2 className="h-3.5 w-3.5" /> Remove
@@ -72,34 +91,54 @@ function KeyRow({
 
 function AddKeyForm({
   data,
-  initial,
+  editing,
   onSaved,
   onCancel,
 }: {
   data: ClientKeysData;
-  initial?: { provider: string; target: Target };
+  editing?: Editing;
   onSaved: (message: string) => void;
   onCancel: () => void;
 }) {
-  const presetCustom = initial?.provider.startsWith("custom_");
-  const [provider, setProvider] = useState(presetCustom ? "custom" : initial?.provider || "anthropic");
-  const [customName, setCustomName] = useState(presetCustom ? initial!.provider.slice(7).replace(/_/g, " ") : "");
+  const item = editing?.item;
+  const [name, setName] = useState(item?.label || "");
   const [targetKey, setTargetKey] = useState(
-    initial?.target.scope === "channel" ? `channel:${initial.target.channelId}` : "client"
+    editing?.target.scope === "channel" ? `channel:${editing.target.channelId}` : "client"
   );
   const [value, setValue] = useState("");
   const [show, setShow] = useState(false);
+  const [baseUrl, setBaseUrl] = useState(item?.base_url || "");
+  const [authType, setAuthType] = useState<KeyAuthType>(item?.auth_type || "bearer");
+  const [authName, setAuthName] = useState(item?.auth_name || "");
+  const [description, setDescription] = useState(item?.description || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const info = data.providers.find((p) => p.id === provider);
-  const groups = useMemo(() => Array.from(new Set(data.providers.map((p) => p.group))), [data.providers]);
+
+  const known = useMemo(() => {
+    const n = name.trim().toLowerCase();
+    return data.providers.find((p) => p.label.toLowerCase() === n || p.id === n.replace(/[^a-z0-9]+/g, "_"));
+  }, [name, data.providers]);
+  const isAnthropic = known?.id === "anthropic" || item?.provider === "anthropic";
+
+  // Picking a known service fills in its usual connection details (only into empty fields).
+  useEffect(() => {
+    if (item || !known?.connection?.base_url) return;
+    setBaseUrl((cur) => cur || known.connection!.base_url || "");
+    setAuthType(known.connection.auth_type || "bearer");
+    setAuthName(known.connection.auth_name || "");
+  }, [known, item]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError(null);
     try {
-      const body = { folder_id: data.folder.id, provider, custom_name: provider === "custom" ? customName : undefined, value };
+      const body = {
+        folder_id: data.folder.id,
+        provider: item?.provider || name,
+        value,
+        ...(isAnthropic ? {} : { base_url: baseUrl, auth_type: authType, auth_name: authType === "bearer" ? "" : authName, description }),
+      };
       const res = targetKey === "client" ? await saveClientKey(body) : await saveChannelKey({ ...body, channel_id: targetKey.slice(8) });
       setValue("");
       onSaved(res.message);
@@ -110,34 +149,30 @@ function AddKeyForm({
     }
   }
 
+  const needsValue = !item;
   return (
     <form onSubmit={submit} className="rounded-2xl border border-sky-200 bg-sky-50/40 p-4 space-y-3" autoComplete="off">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label className="block space-y-1">
-          <span className="text-xs font-semibold text-gray-700">Key type</span>
-          <select className={inputClass} value={provider} onChange={(e) => setProvider(e.target.value)} disabled={Boolean(initial)}>
-            {groups.map((g) => (
-              <optgroup key={g} label={g}>
-                {data.providers
-                  .filter((p) => p.group === g)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-              </optgroup>
+          <span className="text-xs font-semibold text-gray-700">Key name</span>
+          <input
+            className={inputClass}
+            list="key-name-suggestions"
+            value={name}
+            maxLength={50}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Any name, e.g. OpenAI, Shopify, CRM key"
+            disabled={Boolean(item)}
+          />
+          <datalist id="key-name-suggestions">
+            {data.providers.map((p) => (
+              <option key={p.id} value={p.label} />
             ))}
-          </select>
+          </datalist>
         </label>
-        {provider === "custom" && (
-          <label className="block space-y-1">
-            <span className="text-xs font-semibold text-gray-700">Name</span>
-            <input className={inputClass} value={customName} maxLength={40} onChange={(e) => setCustomName(e.target.value)} placeholder="e.g. CRM key" disabled={Boolean(initial)} />
-          </label>
-        )}
         <label className="block space-y-1">
           <span className="text-xs font-semibold text-gray-700">Applies to</span>
-          <select className={inputClass} value={targetKey} onChange={(e) => setTargetKey(e.target.value)} disabled={Boolean(initial)}>
+          <select className={inputClass} value={targetKey} onChange={(e) => setTargetKey(e.target.value)} disabled={Boolean(item)}>
             <option value="client">Whole client (all channels)</option>
             {data.channels.map((c) => (
               <option key={c.channel_id} value={`channel:${c.channel_id}`}>
@@ -155,7 +190,7 @@ function AddKeyForm({
             className={`${inputClass} pr-10 font-mono`}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder={info?.hint || "Paste the key"}
+            placeholder={item ? "Leave empty to keep the saved key" : known?.hint || "Paste the key"}
             autoComplete="new-password"
             spellCheck={false}
           />
@@ -163,19 +198,56 @@ function AddKeyForm({
             {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         </div>
-        <span className="block text-[11px] text-gray-500">
-          Stored encrypted in AWS Secrets Manager. It can't be viewed again, only replaced or removed.
-          {info && !info.used_by_bot && " The assistant doesn't use this key type yet; it's kept ready for upcoming tools."}
-        </span>
+        <span className="block text-[11px] text-gray-500">Stored encrypted in AWS Secrets Manager. It can't be viewed again, only replaced or removed.</span>
       </label>
+
+      {isAnthropic ? (
+        <p className="text-[11px] text-gray-600">The assistant uses this key for its own replies. Replies made with it aren&apos;t billed by JTS.</p>
+      ) : (
+        <fieldset className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+          <legend className="px-1 text-xs font-semibold text-gray-700">Let the assistant use this key (optional)</legend>
+          <p className="text-[11px] text-gray-500 -mt-1">
+            Give the service&apos;s API address and how it expects the key. The assistant can then read data from it, and ask for approval in Slack before changing anything. It never sees the key itself.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="block space-y-1">
+              <span className="text-xs font-semibold text-gray-700">Service API URL</span>
+              <input className={`${inputClass} font-mono`} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" spellCheck={false} />
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block space-y-1 col-span-2 sm:col-span-1">
+                <span className="text-xs font-semibold text-gray-700">How the key is sent</span>
+                <select className={inputClass} value={authType} onChange={(e) => setAuthType(e.target.value as KeyAuthType)}>
+                  {(Object.keys(AUTH_LABELS) as KeyAuthType[]).map((t) => (
+                    <option key={t} value={t}>
+                      {AUTH_LABELS[t]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {authType !== "bearer" && (
+                <label className="block space-y-1 col-span-2 sm:col-span-1">
+                  <span className="text-xs font-semibold text-gray-700">{authType === "header" ? "Header name" : "Parameter name"}</span>
+                  <input className={`${inputClass} font-mono`} value={authName} maxLength={80} onChange={(e) => setAuthName(e.target.value)} placeholder={authType === "header" ? "X-API-Key" : "api_key"} spellCheck={false} />
+                </label>
+              )}
+            </div>
+          </div>
+          <label className="block space-y-1">
+            <span className="text-xs font-semibold text-gray-700">What it&apos;s for</span>
+            <input className={inputClass} value={description} maxLength={300} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Our CRM: contacts and deals" />
+          </label>
+        </fieldset>
+      )}
+
       {error && <Alert type="error">{error}</Alert>}
       <div className="flex items-center justify-end gap-2">
         <button type="button" onClick={onCancel} className={btn.secondary}>
           Cancel
         </button>
-        <button type="submit" disabled={saving || !value.trim() || (provider === "custom" && !customName.trim())} className={btn.primary}>
+        <button type="submit" disabled={saving || !name.trim() || (needsValue && !value.trim())} className={btn.primary}>
           {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          {initial ? "Replace key" : "Save key"}
+          {item ? "Save changes" : "Save key"}
         </button>
       </div>
     </form>
@@ -191,7 +263,7 @@ export default function ClientKeysPage() {
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [replacing, setReplacing] = useState<{ provider: string; target: Target } | null>(null);
+  const [replacing, setReplacing] = useState<Editing>(null);
   const [removing, setRemoving] = useState<Pending>(null);
   const [busy, setBusy] = useState(false);
 
@@ -239,11 +311,6 @@ export default function ClientKeysPage() {
     load();
   }, [load]);
 
-  const usedByBot = useCallback(
-    (provider: string) => Boolean(data?.providers.find((p) => p.id === provider)?.used_by_bot),
-    [data]
-  );
-
   async function confirmRemove() {
     if (!removing || !data) return;
     setBusy(true);
@@ -270,7 +337,7 @@ export default function ClientKeysPage() {
       <PageHeader
         icon={Plug}
         title="Keys & Connections"
-        description="Your organization's own API keys and connections. Keys are stored encrypted, never shown again, and only used for your Slack channels."
+        description="Your organization's own API keys for any service. Keys are stored encrypted, never shown again, and only used for your Slack channels."
         actions={
           <>
             {isJts && folders.length > 0 && (
@@ -359,10 +426,9 @@ export default function ClientKeysPage() {
                     key={k.provider}
                     item={k}
                     canEdit={canEdit}
-                    usedByBot={usedByBot(k.provider)}
-                    onReplace={() => {
+                    onEdit={() => {
                       setAdding(false);
-                      setReplacing({ provider: k.provider, target: { scope: "client" } });
+                      setReplacing({ item: k, target: { scope: "client" } });
                     }}
                     onRemove={() => setRemoving({ provider: k.provider, label: k.label, target: { scope: "client" } })}
                   />
@@ -372,7 +438,8 @@ export default function ClientKeysPage() {
             {replacing && replacing.target.scope === "client" && (
               <AddKeyForm
                 data={data}
-                initial={replacing}
+                key={`${replacing.item.scope}-${replacing.item.provider}`}
+                editing={replacing}
                 onCancel={() => setReplacing(null)}
                 onSaved={(m) => {
                   setReplacing(null);
@@ -413,10 +480,9 @@ export default function ClientKeysPage() {
                             key={`${c.channel_id}-${k.provider}`}
                             item={k}
                             canEdit={canEdit}
-                            usedByBot={usedByBot(k.provider)}
-                            onReplace={() => {
+                            onEdit={() => {
                               setAdding(false);
-                              setReplacing({ provider: k.provider, target: { scope: "channel", channelId: c.channel_id, channelName: c.channel_name } });
+                              setReplacing({ item: k, target: { scope: "channel", channelId: c.channel_id, channelName: c.channel_name } });
                             }}
                             onRemove={() =>
                               setRemoving({
@@ -435,7 +501,8 @@ export default function ClientKeysPage() {
             {replacing && replacing.target.scope === "channel" && (
               <AddKeyForm
                 data={data}
-                initial={replacing}
+                key={`${replacing.item.scope}-${replacing.item.provider}`}
+                editing={replacing}
                 onCancel={() => setReplacing(null)}
                 onSaved={(m) => {
                   setReplacing(null);

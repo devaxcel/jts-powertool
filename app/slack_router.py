@@ -1279,6 +1279,9 @@ async def slack_interactive(request: Request):
                     elif exec_tool_name == "update_website":
                         from app.services.site_builder_service import execute_update_approval
                         output, is_error = await execute_update_approval(exec_tool_args, exec_channel, approved_by=user_id)
+                    elif exec_tool_name == "call_client_api":
+                        from app.services.client_api_service import execute_approved_call
+                        output, is_error = await execute_approved_call(exec_tool_args, exec_channel)
                     else:
                         from app.services.github_app_service import github_client_for_channel
                         mcp_client = await github_client_for_channel(exec_channel)
@@ -1337,6 +1340,12 @@ async def slack_interactive(request: Request):
                         f":globe_with_meridians: <@{user_id}> approved publishing. {output}"
                         if not is_error
                         else f"<@{user_id}> approved publishing, but it failed: {output.replace('[Publish Error]: ', '')} Nothing was published."
+                    )
+                elif exec_tool_name == "call_client_api":
+                    confirm_text = (
+                        f"<@{user_id}> approved the {exec_tool_args.get('service', '')} request. {output[:1500]}"
+                        if not is_error
+                        else f"<@{user_id}> approved the {exec_tool_args.get('service', '')} request, but it failed: {output[:1500]}"
                     )
                 elif not is_error:
                     confirm_text = f"<@{user_id}> approved `{exec_tool_name}`. Changes have been committed to GitHub successfully!\n\n> *Next Step:* If your task has remaining steps (e.g. creating files or code structure), reply to continue with the next step."
