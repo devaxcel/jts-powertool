@@ -1,6 +1,6 @@
 # Plan: One-click GitHub connection + AI website builder
 
-Status: **Phases 0, 1 and 2 built (2026-10-01), awaiting GitHub App registration and live testing** · Phase 3 (edits via pull requests, websites list) not started · Drafted 2026-09-30
+Status: **All phases (0–3) built 2026-10-01; awaiting GitHub App registration and live testing** · Drafted 2026-09-30
 Setup guide: [docs/setup/github-app-setup.md](../setup/github-app-setup.md)
 Related: *JTS PowerTool Scope of Work v0.1* (sections 4, 6, 8, 9)
 
@@ -157,7 +157,7 @@ OpenClaw runs commands on a real computer. For JTS, giving the bot a shell on th
 | 0 ✅ | Security fixes already identified: fake `X-JTS-Role` admin header, built-in `jts-admin-secret`, clients moving other clients' channels. **Strongly recommended before Phase 1 goes live.** | ~1 day |
 | 1 ✅ | GitHub App connection (Part A) + dashboard GitHub card | ~3–4 days |
 | 2 ✅ | Website builder: drafts, publish, Pages, preview, Sonnet 5.5 routing (Part B) | ~5–7 days |
-| 3 | Edits via pull requests + merge-on-approve + websites list | ~2–3 days |
+| 3 ✅ | Edits via pull requests + merge-on-approve + websites list | ~2–3 days |
 | — | JTS registers the GitHub App and adds its keys to Secrets Manager | ~30 min (guided) |
 
 Testing needs a **staging** setup (Scope §9) or at least a test GitHub org and a test Slack channel. Real installs and repo creation can't be tested locally.

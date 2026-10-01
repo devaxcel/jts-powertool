@@ -14,6 +14,8 @@ def build_approval_card_blocks(
     """
     if tool_name == "publish_website":
         return _build_publish_website_card(approval_id, tool_args)
+    if tool_name == "update_website":
+        return _build_update_website_card(approval_id, tool_args)
 
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
@@ -428,3 +430,54 @@ def _build_publish_website_card(approval_id: str, tool_args: Dict[str, Any]) -> 
             }],
         },
     ]
+
+
+def _build_update_website_card(approval_id: str, tool_args: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Approval card for changing a published website (applied as a pull request that is merged on approval)."""
+    changes = tool_args.get("changes") or {}
+    rows: List[str] = []
+    for label, key in (("added", "added"), ("changed", "modified"), ("removed", "deleted")):
+        rows.extend(f"• {label} `{p}`" for p in (changes.get(key) or []))
+    listed = "\n".join(rows[:15]) + (f"\n… and {len(rows) - 15} more" if len(rows) > 15 else "")
+    elements: List[Dict[str, Any]] = []
+    if tool_args.get("preview_url"):
+        elements.append({
+            "type": "button",
+            "text": {"type": "plain_text", "text": "Preview site", "emoji": False},
+            "url": tool_args["preview_url"],
+            "action_id": "preview_website_draft",
+        })
+    elements.extend([
+        {"type": "button", "text": {"type": "plain_text", "text": "View Changes", "emoji": False},
+         "action_id": "inspect_github_diff", "value": approval_id},
+        {"type": "button", "text": {"type": "plain_text", "text": "Approve & Merge", "emoji": False},
+         "style": "primary", "action_id": "approve_github_action", "value": approval_id},
+        {"type": "button", "text": {"type": "plain_text", "text": "Reject", "emoji": False},
+         "style": "danger", "action_id": "reject_github_action", "value": approval_id},
+    ])
+    summary = (tool_args.get("summary") or "").strip()
+    blocks: List[Dict[str, Any]] = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Update a website", "emoji": False}},
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*Website:*\n`{tool_args.get('owner', '')}/{tool_args.get('repo', '')}`"},
+                {"type": "mrkdwn", "text": f"*Change:*\n{tool_args.get('title', '')}"},
+            ],
+        },
+    ]
+    if summary:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary[:500]}})
+    blocks.extend([
+        {"type": "section", "text": {"type": "mrkdwn", "text": listed or "_No file changes_"}},
+        {"type": "divider"},
+        {"type": "actions", "block_id": f"approval_actions_{approval_id}", "elements": elements},
+        {
+            "type": "context",
+            "elements": [{
+                "type": "mrkdwn",
+                "text": f"Proposal ID: `{approval_id}` · Approving opens a pull request in the client's repository and merges it.",
+            }],
+        },
+    ])
+    return blocks

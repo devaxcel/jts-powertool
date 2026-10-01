@@ -22,7 +22,7 @@ from app.db.repositories import (
     get_system_stats,
 )
 from app.services.github_app_service import GitHubAppError, github_client_for_channel, resolve_github_token
-from app.services.site_builder_service import check_can_publish, execute_publish_approval
+from app.services.site_builder_service import check_can_publish, execute_publish_approval, execute_update_approval, update_diff_text
 from app.tools.secrets_manager import get_secret
 from app.slack_router import build_approved_card_blocks, build_rejected_card_blocks
 from app.auth_router import (
@@ -147,6 +147,17 @@ def format_diff_preview(tool_name: str, tool_args: dict) -> str:
         lines.extend(f"  {f.get('path')}  ({int(f.get('size_bytes', 0)) / 1000:.1f} KB)" for f in files)
         return "\n".join(lines)
 
+    if tool_name == "update_website":
+        ch = args.get("changes") or {}
+        lines = [f"Website: {args.get('owner', '')}/{args.get('repo', '')}", f"Change: {args.get('title', '')}"]
+        if args.get("summary"):
+            lines += ["", args["summary"]]
+        lines.append("")
+        lines += [f"  added    {p}" for p in ch.get("added") or []]
+        lines += [f"  changed  {p}" for p in ch.get("modified") or []]
+        lines += [f"  removed  {p}" for p in ch.get("deleted") or []]
+        return "\n".join(lines)
+
     return json.dumps(args, indent=2)
 
 
@@ -231,6 +242,11 @@ async def build_real_diff(tool_name: str, tool_args: dict, token: Optional[str] 
     whole file shown) or 'text' (not a file change).
     """
     args = tool_args or {}
+    if tool_name == "update_website" and args.get("draft_id"):
+        try:
+            return update_diff_text(int(args["draft_id"])), "diff"
+        except Exception:
+            return format_diff_preview(tool_name, args), "text"
     if tool_name not in FILE_TOOLS:
         return format_diff_preview(tool_name, args), "text"
 
@@ -315,6 +331,8 @@ def _describe_action(tool_name: str, args: dict) -> str:
         return f"create branch `{args.get('branch', '?')}`"
     if tool_name == "publish_website":
         return f"publish the website `{args.get('owner', '')}/{args.get('repo', '')}`"
+    if tool_name == "update_website":
+        return f"update the website `{args.get('owner', '')}/{args.get('repo', '')}` ({args.get('title', '')})"
     return f"run `{tool_name}`"
 
 
@@ -420,7 +438,7 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
     if action == "approve":
         # Resolve the client's GitHub access BEFORE claiming, so a missing connection doesn't burn the approval.
         try:
-            if existing.get("tool_name") == "publish_website":
+            if existing.get("tool_name") in ("publish_website", "update_website"):
                 check_can_publish(existing.get("channel_id") or "")
                 mcp_client = None
             else:
@@ -456,6 +474,8 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
         try:
             if exec_tool_name == "publish_website":
                 output, is_error = await execute_publish_approval(exec_tool_args, claimed_record.get("channel_id") or "")
+            elif exec_tool_name == "update_website":
+                output, is_error = await execute_update_approval(exec_tool_args, claimed_record.get("channel_id") or "", user_display)
             else:
                 output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
                 is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))

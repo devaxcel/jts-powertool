@@ -37,6 +37,7 @@ import {
 import { FolderDetails, ChannelProject } from "@/lib/types";
 import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
+import { WebsitesCard } from "@/components/WebsitesCard";
 import { PageHeader, Alert, EmptyState, LoadingState, SectionTitle, ComingSoonBadge, btn } from "@/components/ui";
 
 interface ToolDefinition {
@@ -361,6 +362,9 @@ export default function FolderDetailPage() {
       {folderId && (
         <GithubConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
       )}
+
+      {/* Websites the assistant published for this client */}
+      {folderId && <WebsitesCard folderId={folderId} />}
 
       {/* Content Area */}
       <div className="space-y-8 flex-1">

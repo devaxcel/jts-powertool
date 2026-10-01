@@ -119,6 +119,20 @@ function describeApproval(a: Approval): Summary {
         ],
       };
     }
+    case "update_website": {
+      const ch = args.changes || {};
+      const n = (ch.added?.length || 0) + (ch.modified?.length || 0) + (ch.deleted?.length || 0);
+      return {
+        icon: Globe,
+        action: "Update a website",
+        headline: `${args.owner || ""}/${args.repo || ""}: ${args.title || "changes"}`,
+        details: [
+          `${n} file${n === 1 ? "" : "s"} (${ch.added?.length || 0} added, ${ch.modified?.length || 0} changed, ${ch.deleted?.length || 0} removed)`,
+          "Approving opens a pull request in the client's repository and merges it; the live site updates.",
+          ...(args.summary ? [args.summary] : []),
+        ],
+      };
+    }
     case "add_issue_comment":
       return {
         icon: MessageSquare,
@@ -211,7 +225,8 @@ function ChangesPanel({ appr }: { appr: Approval }) {
   const [detail, setDetail] = useState<Approval | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const isFileChange = appr.tool_name === "create_or_update_file" || appr.tool_name === "push_files";
+  const isFileChange =
+    appr.tool_name === "create_or_update_file" || appr.tool_name === "push_files" || appr.tool_name === "update_website";
 
   useEffect(() => {
     if (!open || detail || loading || failed || !isFileChange) return;
@@ -533,7 +548,9 @@ export default function ApprovalsPage() {
                   </div>
                 )}
 
-                {appr.tool_name === "publish_website" && appr.status === "pending" && <SitePreviewButton appr={appr} />}
+                {(appr.tool_name === "publish_website" || appr.tool_name === "update_website") && appr.status === "pending" && (
+                  <SitePreviewButton appr={appr} />
+                )}
                 <ChangesPanel appr={appr} />
               </Card>
             );
@@ -593,7 +610,9 @@ export default function ApprovalsPage() {
               </p>
             ))}
             <p className="text-xs">
-              {confirming.action === "approve" && confirming.appr.tool_name === "publish_website"
+              {confirming.action === "approve" && confirming.appr.tool_name === "update_website"
+                ? "This opens a pull request with these changes in the client's repository and merges it. The live site updates within about a minute."
+                : confirming.action === "approve" && confirming.appr.tool_name === "publish_website"
                 ? "This creates the repository in the client's GitHub, uploads all files and turns on GitHub Pages. The live link is posted in Slack."
                 : confirming.action === "approve"
                 ? "This runs on GitHub straight away and updates the request in Slack."

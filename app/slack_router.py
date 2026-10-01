@@ -1184,6 +1184,12 @@ async def slack_interactive(request: Request):
                 return JSONResponse(content={"status": "not_found"})
             tool_name = pending.get("tool_name", "")
             tool_args = pending.get("tool_arguments", {})
+            if tool_name == "update_website" and isinstance(tool_args, dict) and tool_args.get("draft_id"):
+                try:
+                    from app.services.site_builder_service import update_diff_text
+                    tool_args = {**tool_args, "content": update_diff_text(int(tool_args["draft_id"]))}
+                except Exception as diff_err:
+                    logger.warning(f"Could not build website diff for {approval_id}: {diff_err}")
             if trigger_id:
                 modal_view = build_diff_modal_view(
                     approval_id=approval_id,
@@ -1270,6 +1276,9 @@ async def slack_interactive(request: Request):
                     if exec_tool_name == "publish_website":
                         from app.services.site_builder_service import execute_publish_approval
                         output, is_error = await execute_publish_approval(exec_tool_args, exec_channel)
+                    elif exec_tool_name == "update_website":
+                        from app.services.site_builder_service import execute_update_approval
+                        output, is_error = await execute_update_approval(exec_tool_args, exec_channel, approved_by=user_id)
                     else:
                         from app.services.github_app_service import github_client_for_channel
                         mcp_client = await github_client_for_channel(exec_channel)
@@ -1317,7 +1326,13 @@ async def slack_interactive(request: Request):
                     if (thread_ts and not thread_ts.startswith("channel_") and not thread_ts.startswith("dm_"))
                     else None
                 )
-                if exec_tool_name == "publish_website":
+                if exec_tool_name == "update_website":
+                    confirm_text = (
+                        f":globe_with_meridians: <@{user_id}> approved the website change. {output}"
+                        if not is_error
+                        else f"<@{user_id}> approved the website change, but it failed: {output.replace('[Update Error]: ', '')} Nothing was changed."
+                    )
+                elif exec_tool_name == "publish_website":
                     confirm_text = (
                         f":globe_with_meridians: <@{user_id}> approved publishing. {output}"
                         if not is_error

@@ -1358,3 +1358,23 @@ export async function fetchSitePreviewLink(draftId: number | string): Promise<{ 
   if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't open the preview."));
   return data;
 }
+
+export interface ClientWebsite {
+  id: number;
+  folder_id: number | null;
+  repo_full_name: string;
+  site_url: string | null;
+  default_branch: string;
+  last_change: string | null;
+  last_pr_url: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export async function fetchWebsites(folderId?: number): Promise<ClientWebsite[]> {
+  const q = folderId ? `?folder_id=${encodeURIComponent(String(folderId))}` : "";
+  const res = await fetch(`${API_BASE}/api/websites${q}`, { headers: getAuthHeaders(), cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load the websites."));
+  return data.websites || [];
+}

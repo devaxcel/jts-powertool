@@ -108,3 +108,23 @@ Notes:
   repository. The bot then says so; choose **All repositories** for that account, or add the new repo, and publish again.
 - GitHub Pages is free for **public** repositories; private-repository sites need a paid GitHub plan.
 
+## Changing a published website
+
+Ask in Slack, e.g. `@bot add a gallery page to our website` or `@bot change the site colours to green`.
+The bot loads the live site into a draft, makes the changes, and posts **one** approval card ("Update a website")
+with **Preview site** and **View Changes** (line-by-line diff). Approving:
+
+1. creates a branch `jts/update-…` in the client's repository,
+2. commits the changes and opens a pull request (title, summary, file list, who approved),
+3. squash-merges it and deletes the branch; GitHub Pages updates the live site within about a minute.
+
+Safety:
+- If someone changed the **same files** on GitHub after the edit started, nothing is overwritten. The bot asks to start
+  the edit again from the latest version.
+- If the repository has branch protection that requires reviews, the pull request is left open and the bot says so;
+  someone merges it on GitHub.
+- Images and other non-text files are left untouched.
+
+All websites per client are listed on **Clients & Channels → (client) → Websites** with links to the live site,
+the repository and the last change.
+

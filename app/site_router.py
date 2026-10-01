@@ -41,3 +41,18 @@ async def preview_link(draft_id: int, request: Request):
         if not folder or int(folder) != int(draft.get("folder_id") or 0):
             raise HTTPException(status_code=404, detail="That website draft was not found.")
     return {"url": sb.preview_url(draft_id), "status": draft["status"], "site_url": draft.get("site_url")}
+
+
+websites_router = APIRouter(prefix="/api/websites", tags=["Website builder"])
+
+
+@websites_router.get("")
+async def list_client_websites(request: Request, folder_id: int | None = None):
+    """JTS admin: all websites (or one client's). Client users: only their own client's websites."""
+    ctx = require_session(request)
+    if ctx.get("role") != "jts_admin":
+        own = ctx.get("client_folder_id")
+        if not own or int(own) < 1:
+            return {"websites": []}
+        folder_id = int(own)
+    return {"websites": sb.list_websites(folder_id)}

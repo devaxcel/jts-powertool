@@ -17,7 +17,10 @@ logger = logging.getLogger(__name__)
 # Tools handled inside JTS PowerTool (no GitHub call, no approval)
 LOCAL_TOOLS = {"connect_github"}
 # Website builder tools (offered only in build mode). draft_* never touch GitHub; publish_website needs approval.
-SITE_TOOLS = {"draft_write_file", "draft_read_file", "draft_list_files", "draft_delete_file", "publish_website"}
+SITE_TOOLS = {
+    "draft_write_file", "draft_read_file", "draft_list_files", "draft_delete_file", "publish_website",
+    "list_my_websites", "start_site_edit", "propose_site_changes",
+}
 
 # Allowed Read Tools
 ALLOWED_READ_TOOLS = {
@@ -373,6 +376,39 @@ SITE_TOOL_SCHEMAS = [
             "required": ["repo_name"],
         },
     },
+    {
+        "name": "list_my_websites",
+        "description": "Website builder: list the websites already published for this client (repository and live link).",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "start_site_edit",
+        "description": (
+            "Website builder: start editing a published website. Loads its current files from GitHub into this "
+            "conversation's draft so you can read and change them with the draft_* tools."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"repo": {"type": "string", "description": "Repository name, e.g. 'sunrise-bakery-site' or 'acme/sunrise-bakery-site'"}},
+            "required": ["repo"],
+        },
+    },
+    {
+        "name": "propose_site_changes",
+        "description": (
+            "Website builder: when the edits to a published website are done, propose them. Posts ONE approval card "
+            "with a preview and the list of changed files. After approval the change is applied as a pull request that "
+            "is merged automatically, and the live site updates."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short change title, e.g. 'Add gallery page'"},
+                "summary": {"type": "string", "description": "1-3 sentences on what changed and why"},
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -509,6 +545,43 @@ class ControlledToolAdapter:
             )
         thread_key = self.thread_ts or f"channel_{self.channel_id}"
         try:
+            if tool_name == "list_my_websites":
+                sites = sb.list_websites(folder_id)
+                if not sites:
+                    return ("This client has no published websites yet.", False)
+                lines = "\n".join(
+                    f"- {w['repo_full_name']}: {w.get('site_url') or 'no live link'} (last change: {w.get('last_change') or '-'})"
+                    for w in sites
+                )
+                return (f"Published websites:\n{lines}", False)
+
+            if tool_name == "start_site_edit":
+                res = await sb.start_edit(self.channel_id, thread_key, folder_id, self.user_id, str(args.get("repo", "")))
+                listing = "\n".join(f"- {f['path']} ({f['size_bytes']:,} bytes)" for f in res["files"])
+                note = ""
+                if res["skipped"]:
+                    note = f"\nNot editable here (left unchanged): {', '.join(res['skipped'][:10])}" + (" …" if len(res["skipped"]) > 10 else "")
+                return (
+                    f"{'Continuing' if res['reused'] else 'Started'} an edit of {res['repo']}. Current files:\n{listing}{note}\n"
+                    "Read files with draft_read_file before changing them.",
+                    False,
+                )
+
+            if tool_name == "propose_site_changes":
+                draft = sb.get_open_draft(self.channel_id, thread_key)
+                if not draft:
+                    return ("There's no website edit in progress here. Call start_site_edit first.", True)
+                proposal = sb.build_update_proposal(draft, str(args.get("title", "")), str(args.get("summary", "") or ""))
+                out, is_err = await self._submit_for_approval("update_website", proposal)
+                if not is_err:
+                    sb.set_status(draft["id"], "pending_approval")
+                    out = (
+                        f"Changes proposed for {proposal['owner']}/{proposal['repo']} ({proposal['change_count']} files). "
+                        "An approval card with a 'Preview site' button was posted. After approval the change is merged as a "
+                        "pull request and the live site updates."
+                    )
+                return (out, is_err)
+
             if tool_name == "draft_write_file":
                 draft = sb.get_or_create_draft(self.channel_id, thread_key, folder_id, self.user_id)
                 res = sb.write_file(draft["id"], args.get("path", ""), args.get("content"))
