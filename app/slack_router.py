@@ -320,6 +320,10 @@ def get_system_prompt(user_prompt: str = "", user_profile: Optional[dict] = None
         "project key (e.g. KAN, WEB) or an issue key (e.g. KAN-12) MUST use the `jira_*` tools, NEVER the GitHub issue tools. "
         "'Issues in <PROJECT KEY>' means Jira. Use the GitHub issue tools only when the user clearly means a GitHub repository "
         "(they name a repo/owner, or say GitHub, PR, commit or branch). "
+        "CRITICAL: to create, update, comment on or move a Jira issue you MUST actually call the matching tool "
+        "(`jira_create_issue`, `jira_update_issue`, `jira_add_comment`, `jira_transition_issue`). NEVER say that something "
+        "was 'sent for approval' or that a card was posted unless you really called the tool in this turn; the approval card "
+        "is created only by the tool call. If no project is given and the tool says one is needed, ask the user for the project key. "
         "If the user asks to connect Jira, call `connect_jira`. Never ask for Jira passwords or API tokens."
     )
 

@@ -177,12 +177,22 @@ def _is_client_key_failure(status_code: int, err_msg: str) -> bool:
 def should_force_tool_calling(user_message: Union[str, List[Dict[str, Any]]]) -> bool:
     """Detects if user intent is explicitly a tool operation (GitHub or Web)."""
     text = ""
+    raw = ""
     if isinstance(user_message, str):
+        raw = user_message
         text = user_message.lower()
     elif isinstance(user_message, list):
         for b in user_message:
             if isinstance(b, dict) and b.get("type") == "text":
+                raw += " " + b.get("text", "")
                 text += " " + b.get("text", "").lower()
+
+    # Jira: a clear Jira request must end in a real tool call (never just a promise to "send it for approval").
+    # An issue key like KAN-2 is only recognised in capitals so words like "covid-19" don't count.
+    if re.search(r"\bjira\b", text) or re.search(
+        r"\b(create|add|update|comment|move|transition|close|assign|change|show|get|open|list|search|find)\b.*\b(ticket|tickets)\b", text
+    ) or re.search(r"\b[A-Z][A-Z0-9]{1,9}-\d+\b", raw):
+        return True
 
     if "http://" in text or "https://" in text or "www." in text:
         return True
