@@ -164,7 +164,10 @@ plus at most one short question about pages/style if needed:
 """
     + stack_choices_text()
     + """
-Wait for their answer. Only after they clearly pick one, call set_site_stack with it. If they ask for something not
+Wait for their answer. A reply that is just a number (e.g. "1") or a stack name is their choice: call set_site_stack
+with the matching stack. Only after they clearly pick one, call set_site_stack with it. Never use the general GitHub
+tools (create_branch, create_or_update_file, push_files, create_repository...) to build or publish a website; use only
+the draft_* tools and publish_website / propose_site_changes. If they ask for something not
 on the list, explain the closest option. Never claim PHP/Laravel/WordPress sites will be live: those produce code
 in GitHub only and need PHP hosting (WordPress themes are installed by the client in their WordPress).
 
@@ -340,11 +343,40 @@ def set_status(draft_id: int, status: str, **fields) -> None:
 
 
 def has_open_draft(channel_id: str, thread_ts: str) -> bool:
+    """
+    Keeps build mode on for follow-up messages (e.g. the user answering "1" to the stack question).
+    An untouched draft (no stack, no files) only counts for 1 hour; a draft with work for 24 hours of inactivity.
+    """
     try:
-        return get_open_draft(channel_id, thread_ts) is not None
+        def run(cur):
+            cur.execute(
+                """
+                SELECT 1 FROM site_drafts d
+                WHERE d.channel_id = %s AND d.thread_ts = %s AND d.status IN ('drafting', 'pending_approval')
+                  AND (
+                    d.updated_at > CURRENT_TIMESTAMP - INTERVAL '1 hour'
+                    OR (
+                      (d.stack IS NOT NULL OR EXISTS (SELECT 1 FROM site_draft_files f WHERE f.draft_id = d.id))
+                      AND d.updated_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
+                    )
+                  )
+                LIMIT 1;
+                """,
+                (channel_id, thread_ts),
+            )
+            return cur.fetchone()
+
+        return bool(channel_id and thread_ts and _db(run))
     except Exception as e:
         logger.debug(f"[SITE_BUILDER] draft lookup failed: {e}")
         return False
+
+
+def touch_draft(draft_id: int) -> None:
+    def run(cur):
+        cur.execute("UPDATE site_drafts SET updated_at = CURRENT_TIMESTAMP WHERE id = %s;", (draft_id,))
+
+    _db(run)
 
 
 def detect_build_intent(text: str) -> bool:

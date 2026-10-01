@@ -485,9 +485,21 @@ async def process_job(job: dict):
         client_key_fallback_reason = None
         # Website builder: stronger model, more steps and a cost cap when building a site (or continuing a draft)
         from app.services import site_builder_service as site_builder
-        build_mode = site_builder.detect_build_intent(cleaned_prompt) or site_builder.has_open_draft(
-            channel_id, thread_ts or f"channel_{channel_id}"
-        )
+        draft_key = thread_ts or f"channel_{channel_id}"
+        build_intent = site_builder.detect_build_intent(cleaned_prompt)
+        build_mode = build_intent or site_builder.has_open_draft(channel_id, draft_key)
+        if build_mode:
+            # Open (or refresh) the draft now, so a short follow-up like "1" (the stack choice) stays in build mode.
+            try:
+                from app.services.channel_secrets_service import get_folder_id_for_channel
+                build_folder = get_folder_id_for_channel(channel_id)
+                if build_folder:
+                    open_draft = site_builder.get_open_draft(channel_id, draft_key) or site_builder.get_or_create_draft(
+                        channel_id, draft_key, build_folder, user_id
+                    )
+                    site_builder.touch_draft(open_draft["id"])
+            except Exception as draft_err:
+                logger.warning(f"[SITE_BUILDER] Could not open draft for channel={channel_id}: {draft_err}")
         active_model = MODEL
         stream_limits = {}
         if build_mode:
