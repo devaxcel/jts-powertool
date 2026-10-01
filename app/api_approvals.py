@@ -21,6 +21,7 @@ from app.db.repositories import (
     expire_stale_approvals,
     get_system_stats,
 )
+from app.services.jira_service import JiraError
 from app.services.github_app_service import GitHubAppError, github_client_for_channel, resolve_github_token
 from app.services.site_builder_service import check_can_publish, execute_publish_approval, execute_update_approval, update_diff_text
 from app.tools.secrets_manager import get_secret
@@ -146,6 +147,10 @@ def format_diff_preview(tool_name: str, tool_args: dict) -> str:
         ]
         lines.extend(f"  {f.get('path')}  ({int(f.get('size_bytes', 0)) / 1000:.1f} KB)" for f in files)
         return "\n".join(lines)
+
+    if tool_name.startswith("jira_"):
+        from app.tools.slack_approval_ui import jira_summary_lines
+        return jira_summary_lines(tool_name, args)
 
     if tool_name == "update_website":
         ch = args.get("changes") or {}
@@ -333,16 +338,22 @@ def _describe_action(tool_name: str, args: dict) -> str:
         return f"publish the website `{args.get('owner', '')}/{args.get('repo', '')}`"
     if tool_name == "update_website":
         return f"update the website `{args.get('owner', '')}/{args.get('repo', '')}` ({args.get('title', '')})"
+    if tool_name.startswith("jira_"):
+        target = args.get("issue_key") or args.get("project") or "Jira"
+        verb = {"jira_create_issue": "create a Jira issue in", "jira_update_issue": "update", "jira_add_comment": "comment on",
+                "jira_transition_issue": "move"}.get(tool_name, "change")
+        return f"{verb} `{target}`"
     return f"run `{tool_name}`"
 
 
 def _slack_result_text(tool_name: str, args: dict, user_display: str, ok: bool) -> str:
     action = _describe_action(tool_name, args)
+    where = "Jira" if tool_name.startswith("jira_") else "GitHub"
     if ok:
-        return f":white_check_mark: *{user_display}* approved the request to {action} from the web dashboard. Done on GitHub."
+        return f":white_check_mark: *{user_display}* approved the request to {action} from the web dashboard. Done on {where}."
     return (
         f":warning: *{user_display}* approved the request to {action} from the web dashboard, "
-        f"but GitHub returned an error, so nothing was changed. Check the Approvals page for details."
+        f"but {where} returned an error, so nothing was changed. Check the Approvals page for details."
     )
 
 
@@ -441,10 +452,16 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
             if existing.get("tool_name") in ("publish_website", "update_website"):
                 check_can_publish(existing.get("channel_id") or "")
                 mcp_client = None
+            elif str(existing.get("tool_name") or "").startswith("jira_"):
+                from app.services.jira_service import resolve_connection
+                await resolve_connection(existing.get("channel_id") or "")
+                mcp_client = None
             else:
                 mcp_client = await github_client_for_channel(existing.get("channel_id") or "")
         except GitHubAppError as e:
             return JSONResponse(status_code=409, content={"ok": False, "status": "github_not_connected", "message": str(e)})
+        except JiraError as e:
+            return JSONResponse(status_code=409, content={"ok": False, "status": "jira_not_connected", "message": str(e)})
 
         claim_result, claimed_record = claim_approval_for_execution(approval_id, user_id=user_display)
         if claim_result != "claimed" or not claimed_record:
@@ -476,6 +493,9 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
                 output, is_error = await execute_publish_approval(exec_tool_args, claimed_record.get("channel_id") or "")
             elif exec_tool_name == "update_website":
                 output, is_error = await execute_update_approval(exec_tool_args, claimed_record.get("channel_id") or "", user_display)
+            elif str(exec_tool_name or "").startswith("jira_"):
+                from app.services.jira_service import execute_write
+                output, is_error = await execute_write(claimed_record.get("channel_id") or "", exec_tool_name, exec_tool_args)
             else:
                 output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
                 is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))

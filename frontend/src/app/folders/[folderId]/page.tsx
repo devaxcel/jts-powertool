@@ -37,6 +37,7 @@ import {
 import { FolderDetails, ChannelProject } from "@/lib/types";
 import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
+import { JiraConnectionCard } from "@/components/JiraConnectionCard";
 import { WebsitesCard } from "@/components/WebsitesCard";
 import { PageHeader, Alert, EmptyState, LoadingState, SectionTitle, ComingSoonBadge, btn } from "@/components/ui";
 
@@ -361,6 +362,11 @@ export default function FolderDetailPage() {
       {/* Client's own GitHub (GitHub App connection) */}
       {folderId && (
         <GithubConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
+      )}
+
+      {/* Client's own Jira (Atlassian connection) */}
+      {folderId && (
+        <JiraConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
       )}
 
       {/* Websites the assistant published for this client */}

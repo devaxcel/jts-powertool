@@ -16,6 +16,7 @@ from app.auth_router import auth_router, users_router, verify_session_token, SES
 from app.usage_router import usage_router
 from app.invoice_router import invoice_router
 from app.github_router import github_public_router, github_folder_router
+from app.jira_router import jira_public_router, jira_folder_router
 from app.site_router import site_preview_router, site_drafts_router, websites_router
 from app.client_keys_router import client_keys_router
 from app.organizations_router import organizations_router
@@ -49,6 +50,9 @@ PUBLIC_EXEMPT_PREFIXES = (
     "/api/github/connect",
     "/api/github/callback",
     "/api/github/webhook",
+    # Jira (Atlassian OAuth) connect flow: protected by a single-use state link
+    "/api/jira/connect",
+    "/api/jira/callback",
     # Website draft previews: each URL carries a signed, expiring token for one draft
     "/api/site-preview/",
     "/docs",
@@ -149,6 +153,8 @@ app.include_router(usage_router)
 app.include_router(invoice_router)
 app.include_router(github_public_router)
 app.include_router(github_folder_router)
+app.include_router(jira_public_router)
+app.include_router(jira_folder_router)
 app.include_router(site_preview_router)
 app.include_router(site_drafts_router)
 app.include_router(websites_router)

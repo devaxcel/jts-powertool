@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { ChannelFolder, formatLocalDateTime } from "@/lib/types";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
+import { JiraConnectionCard } from "@/components/JiraConnectionCard";
 import { Alert, ConfirmDialog, EmptyState, LoadingState, PageHeader, btn, inputClass } from "@/components/ui";
 
 export default function ClientKeysPage() {
@@ -166,6 +167,7 @@ export default function ClientKeysPage() {
       ) : (
         <>
           <GithubConnectionCard folderId={data.folder.id} canEdit={canEdit} />
+          <JiraConnectionCard folderId={data.folder.id} canEdit={canEdit} />
 
           {canEdit ? (
             <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm space-y-4">

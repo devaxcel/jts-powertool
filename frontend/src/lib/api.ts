@@ -1349,6 +1349,51 @@ export function disconnectGithub(folderId: number): Promise<{ ok: boolean; messa
   return githubRequest(folderId, "", { method: "DELETE" }, "We couldn't disconnect GitHub.");
 }
 
+/* ------------------------------ Jira connection (per client) ------------------------------ */
+
+export interface JiraConnectionStatus {
+  configured: boolean;
+  connected: boolean;
+  connection: {
+    site_url: string | null;
+    site_name: string | null;
+    default_project: string | null;
+    connected_by: string | null;
+    status: string;
+    created_at?: string;
+    updated_at?: string;
+  } | null;
+  projects: Array<{ key: string; name: string }>;
+  error: string | null;
+}
+
+async function jiraRequest<T>(folderId: number, path: string, init: RequestInit = {}, fallback = "Something went wrong."): Promise<T> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/jira${path}`, {
+    ...init,
+    headers: getAuthHeaders(init.body ? { "Content-Type": "application/json" } : {}),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, fallback));
+  return data as T;
+}
+
+export function fetchJiraStatus(folderId: number): Promise<JiraConnectionStatus> {
+  return jiraRequest(folderId, "", {}, "We couldn't load the Jira connection.");
+}
+
+export function createJiraConnectLink(folderId: number): Promise<{ url: string; expires_in_minutes: number }> {
+  return jiraRequest(folderId, "/connect-link", { method: "POST" }, "We couldn't start the Jira connection.");
+}
+
+export function setJiraDefaultProject(folderId: number, key: string | null): Promise<{ ok: boolean; default_project: string | null }> {
+  return jiraRequest(folderId, "/default-project", { method: "PUT", body: JSON.stringify({ key }) }, "We couldn't save the default project.");
+}
+
+export function disconnectJira(folderId: number): Promise<{ ok: boolean; message: string }> {
+  return jiraRequest(folderId, "", { method: "DELETE" }, "We couldn't disconnect Jira.");
+}
+
 export async function fetchSitePreviewLink(draftId: number | string): Promise<{ url: string; status: string; site_url?: string | null }> {
   const res = await fetch(`${API_BASE}/api/site-drafts/${encodeURIComponent(String(draftId))}/preview-link`, {
     headers: getAuthHeaders(),

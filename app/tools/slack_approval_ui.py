@@ -16,6 +16,8 @@ def build_approval_card_blocks(
         return _build_publish_website_card(approval_id, tool_args)
     if tool_name == "update_website":
         return _build_update_website_card(approval_id, tool_args)
+    if tool_name.startswith("jira_"):
+        return _build_jira_card(approval_id, tool_name, tool_args)
 
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
@@ -140,6 +142,9 @@ def build_approved_card_blocks(
     Mutates the approval card in-place to remove action buttons and display
     a permanent audit badge with execution results.
     """
+    if tool_name.startswith("jira_"):
+        return _jira_result_blocks(approval_id, tool_name, tool_args, f"Approved by <@{approved_by}>" if approved_by else "Approved",
+                                   execution_result)
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
     full_repo = f"{owner}/{repo}" if (owner and repo) else default_repo
@@ -204,6 +209,8 @@ def build_rejected_card_blocks(
     Mutates the approval card in-place to remove action buttons and display
     a cancelled audit badge.
     """
+    if tool_name.startswith("jira_"):
+        return _jira_result_blocks(approval_id, tool_name, tool_args, f"Rejected by <@{rejected_by}>. Nothing was changed in Jira.", "")
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
     full_repo = f"{owner}/{repo}" if (owner and repo) else default_repo
@@ -485,4 +492,74 @@ def _build_update_website_card(approval_id: str, tool_args: Dict[str, Any]) -> L
             }],
         },
     ])
+    return blocks
+
+
+_JIRA_TITLES = {
+    "jira_create_issue": "Create a Jira issue",
+    "jira_update_issue": "Update a Jira issue",
+    "jira_add_comment": "Comment on a Jira issue",
+    "jira_transition_issue": "Move a Jira issue",
+}
+
+
+def jira_summary_lines(tool_name: str, a: Dict[str, Any]) -> str:
+    """Plain-text description of a Jira change (used by the Slack card and the dashboard preview)."""
+    lines: List[str] = []
+    if a.get("project"):
+        lines.append(f"Project: {a['project']}")
+    if a.get("issue_key"):
+        lines.append(f"Issue: {a['issue_key']}")
+    if tool_name == "jira_transition_issue":
+        lines.append(f"Move to: {a.get('status', '')}")
+    if a.get("issue_type"):
+        lines.append(f"Type: {a['issue_type']}")
+    if a.get("summary"):
+        lines.append(f"Summary: {a['summary']}")
+    if a.get("priority"):
+        lines.append(f"Priority: {a['priority']}")
+    if a.get("labels"):
+        lines.append("Labels: " + ", ".join(a["labels"]))
+    if a.get("description"):
+        lines.append(f"Description:\n{a['description']}")
+    if a.get("comment"):
+        lines.append(f"Comment:\n{a['comment']}")
+    return "\n".join(lines)
+
+
+def _jira_body(tool_name: str, a: Dict[str, Any]) -> List[Dict[str, Any]]:
+    text = jira_summary_lines(tool_name, a)
+    if len(text) > 900:
+        text = text[:900] + "\n..."
+    return [{"type": "section", "text": {"type": "mrkdwn", "text": f"```{text}```"}}]
+
+
+def _build_jira_card(approval_id: str, tool_name: str, tool_args: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [
+        {"type": "header", "text": {"type": "plain_text", "text": _JIRA_TITLES.get(tool_name, "Jira change"), "emoji": False}},
+        *_jira_body(tool_name, tool_args),
+        {"type": "divider"},
+        {
+            "type": "actions",
+            "block_id": f"approval_actions_{approval_id}",
+            "elements": [
+                {"type": "button", "text": {"type": "plain_text", "text": "Approve & Apply", "emoji": False},
+                 "style": "primary", "action_id": "approve_github_action", "value": approval_id},
+                {"type": "button", "text": {"type": "plain_text", "text": "Reject", "emoji": False},
+                 "style": "danger", "action_id": "reject_github_action", "value": approval_id},
+            ],
+        },
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"Proposal ID: `{approval_id}` - Requires human confirmation before changing Jira"}]},
+    ]
+
+
+def _jira_result_blocks(approval_id: str, tool_name: str, tool_args: Dict[str, Any], status: str, result: str) -> List[Dict[str, Any]]:
+    blocks: List[Dict[str, Any]] = [
+        {"type": "header", "text": {"type": "plain_text", "text": _JIRA_TITLES.get(tool_name, "Jira change"), "emoji": False}},
+        *_jira_body(tool_name, tool_args),
+        {"type": "section", "text": {"type": "mrkdwn", "text": status}},
+    ]
+    if result:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Result:*\n```{result[:500]}```"}})
+    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Proposal ID: `{approval_id}`"}]})
     return blocks

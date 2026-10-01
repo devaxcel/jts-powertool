@@ -51,7 +51,7 @@ def _resolve_name(name: str) -> str:
     if not slug:
         raise HTTPException(status_code=400, detail="Give the key a name, e.g. OPENAI_API_KEY.")
     if slug in _RESERVED or slug.startswith("github"):
-        raise HTTPException(status_code=400, detail="GitHub is connected with the GitHub card, not with a key.")
+        raise HTTPException(status_code=400, detail="GitHub and Jira are connected with their own cards above, not with a key.")
     if len(slug) > MAX_NAME_LEN:
         raise HTTPException(status_code=400, detail=f"Keep the key name under {MAX_NAME_LEN} characters.")
     return slug
@@ -175,7 +175,7 @@ def delete_client_key(provider: str, request: Request, folder_id: Optional[int] 
     sc = _scope(request, folder_id, write=True)
     provider = provider.strip().lower()
     if provider in _RESERVED:
-        raise HTTPException(status_code=400, detail="GitHub is managed with the GitHub card.")
+        raise HTTPException(status_code=400, detail="GitHub and Jira are managed with their own cards.")
     if not delete_folder_api_key(sc["folder_id"], provider):
         raise HTTPException(status_code=404, detail="That key wasn't found.")
     actor = sc["ctx"].get("username") or "admin"

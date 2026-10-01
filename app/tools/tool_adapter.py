@@ -12,6 +12,8 @@ from app.db.repositories import (
 )
 from app.tools.slack_approval_ui import build_approval_card_blocks
 
+from app.services.jira_service import JIRA_READ_TOOLS, JIRA_WRITE_TOOLS
+
 logger = logging.getLogger(__name__)
 
 # Tools handled inside JTS PowerTool (no GitHub call, no approval)
@@ -22,6 +24,9 @@ SITE_TOOLS = {
     "list_my_websites", "start_site_edit", "propose_site_changes", "set_site_stack", "ask_site_stack",
     "discard_site_draft",
 }
+
+# Jira tools (the client's own Jira Cloud site, connected with one click). Reads run directly, changes need approval.
+JIRA_TOOLS = {"connect_jira"} | JIRA_READ_TOOLS | JIRA_WRITE_TOOLS
 
 # Allowed Read Tools
 ALLOWED_READ_TOOLS = {
@@ -328,6 +333,91 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
 ]
 
 
+JIRA_CONNECT_SCHEMA = {
+    "name": "connect_jira",
+    "description": (
+        "Posts a one-click 'Connect Jira' button in this Slack conversation so the user can link their own Jira Cloud "
+        "site. Use when the user asks to connect/link/add Jira, or when a Jira action fails because this client hasn't "
+        "connected Jira yet. Never ask the user for a Jira API token or password."
+    ),
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+JIRA_TOOL_SCHEMAS = [
+    {
+        "name": "jira_search_issues",
+        "description": "Jira: search the client's issues with JQL, e.g. 'project = ABC AND status != Done ORDER BY updated DESC'. Read-only.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "jql": {"type": "string", "description": "JQL query"},
+                "max_results": {"type": "integer", "description": "1-30, default 15"},
+            },
+            "required": ["jql"],
+        },
+    },
+    {
+        "name": "jira_get_issue",
+        "description": "Jira: read one issue (details, description, latest comments) by key like ABC-123. Read-only.",
+        "input_schema": {"type": "object", "properties": {"issue_key": {"type": "string"}}, "required": ["issue_key"]},
+    },
+    {
+        "name": "jira_list_projects",
+        "description": "Jira: list the projects (key and name) the connection can see. Read-only.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "jira_create_issue",
+        "description": "Jira: create an issue. Sent to a human for approval first. Use jira_list_projects if the project key is unknown.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "Project key like ABC (optional if the client has a default project)"},
+                "summary": {"type": "string"},
+                "description": {"type": "string"},
+                "issue_type": {"type": "string", "description": "Task, Bug, Story... (default Task)"},
+                "priority": {"type": "string"},
+                "labels": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["summary"],
+        },
+    },
+    {
+        "name": "jira_update_issue",
+        "description": "Jira: change an issue's summary, description, priority or labels. Sent to a human for approval first.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "issue_key": {"type": "string"},
+                "summary": {"type": "string"},
+                "description": {"type": "string"},
+                "priority": {"type": "string"},
+                "labels": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["issue_key"],
+        },
+    },
+    {
+        "name": "jira_add_comment",
+        "description": "Jira: add a comment to an issue. Sent to a human for approval first.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"issue_key": {"type": "string"}, "comment": {"type": "string"}},
+            "required": ["issue_key", "comment"],
+        },
+    },
+    {
+        "name": "jira_transition_issue",
+        "description": "Jira: move an issue to another status (e.g. In Progress, Done). Sent to a human for approval first.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"issue_key": {"type": "string"}, "status": {"type": "string", "description": "Target status name"}},
+            "required": ["issue_key", "status"],
+        },
+    },
+]
+
+
 SITE_TOOL_SCHEMAS = [
     {
         "name": "discard_site_draft",
@@ -492,6 +582,39 @@ class ControlledToolAdapter:
         self.slack_token = slack_token or get_secret("SLACK_BOT_TOKEN", "")
         self.require_approval_for_writes = require_approval_for_writes
         self.approval_card_posted: bool = False
+        self._jira_conn: Optional[Dict[str, Any]] = None
+        self._jira_loaded = False
+
+    def jira_connection(self) -> Optional[Dict[str, Any]]:
+        """The client's active Jira connection for this channel (loaded once per request), or None."""
+        if not self._jira_loaded:
+            self._jira_loaded = True
+            try:
+                from app.services import jira_service
+                from app.services.channel_secrets_service import get_folder_id_for_channel
+
+                conn = jira_service.get_connection(get_folder_id_for_channel(self.channel_id)) if self.channel_id else None
+                self._jira_conn = conn if conn and conn.get("status") == "active" else None
+            except Exception as e:
+                logger.warning(f"[JIRA] Could not load the Jira connection for {self.channel_id}: {e}")
+        return self._jira_conn
+
+    async def _run_jira_tool(self, tool_name: str, args: Dict[str, Any]) -> Tuple[str, bool]:
+        from app.services import jira_service as jira
+
+        if tool_name == "connect_jira":
+            return await self._post_connect_button("jira")
+        if not self.jira_connection():
+            return ("This client hasn't connected Jira yet. Call connect_jira to post a Connect Jira button, and tell the user to click it.", True)
+        if tool_name in JIRA_READ_TOOLS:
+            return await jira.run_read_tool(self.channel_id, tool_name, args)
+        try:
+            effective = jira.clean_write_args(tool_name, args, self.jira_connection().get("default_project"))
+        except jira.JiraError as e:
+            return (f"Error: {e}", True)
+        if not self.require_approval_for_writes:
+            return await jira.execute_write(self.channel_id, tool_name, effective)
+        return await self._submit_for_approval(tool_name, effective)
 
     async def _submit_for_approval(self, tool_name: str, effective_args: Dict[str, Any]) -> Tuple[str, bool]:
         """Stores a pending approval and posts the interactive approval card in Slack."""
@@ -535,7 +658,8 @@ class ControlledToolAdapter:
                         json={
                             "channel": self.channel_id,
                             "thread_ts": target_thread,
-                            "text": f"🛡️ GitHub Write Permission Request: `{tool_name}`",
+                            "text": (f"🛡️ Jira approval needed: `{tool_name}`" if tool_name in JIRA_WRITE_TOOLS
+                                     else f"🛡️ GitHub Write Permission Request: `{tool_name}`"),
                             "blocks": blocks,
                         }
                     )
@@ -561,6 +685,12 @@ class ControlledToolAdapter:
             except Exception as e:
                 logger.error(f"[DEBUG_SLACK] Exception posting approval card: {e}", exc_info=True)
 
+        if tool_name in JIRA_WRITE_TOOLS:
+            return (
+                "The Jira change was sent for human approval; an approval card was posted in this Slack conversation. "
+                "It is applied only after someone approves it. Tell the user that.",
+                False,
+            )
         return (
             f"Action proposal for '{tool_name}' has been prepared and submitted for human approval. "
             "An interactive approval card has been posted to this Slack conversation with [Approve & Apply], [View Full Diff], and [Reject] buttons. "
@@ -721,21 +851,34 @@ class ControlledToolAdapter:
         return (f"Unknown website tool '{tool_name}'.", True)
 
     async def _post_connect_github_button(self) -> Tuple[str, bool]:
-        """Posts a single-use 'Connect GitHub' button for this channel's client."""
+        return await self._post_connect_button("github")
+
+    async def _post_connect_button(self, service: str) -> Tuple[str, bool]:
+        """Posts a single-use 'Connect GitHub' / 'Connect Jira' button for this channel's client."""
         from app.services import github_app_service as gh
+        from app.services import jira_service as jira_svc
         from app.services.channel_secrets_service import get_folder_id_for_channel
 
+        is_jira = service == "jira"
+        name = "Jira" if is_jira else "GitHub"
+        svc, svc_error = (jira_svc, jira_svc.JiraError) if is_jira else (gh, gh.GitHubAppError)
         folder_id = get_folder_id_for_channel(self.channel_id)
         if not folder_id:
             return (
-                "This Slack channel isn't linked to a client yet, so GitHub can't be connected here. "
+                f"This Slack channel isn't linked to a client yet, so {name} can't be connected here. "
                 "Tell the user to ask their JTS administrator to add this channel to their client first.",
                 True,
             )
         try:
-            url = gh.create_connect_link(folder_id, channel_id=self.channel_id, slack_user=self.user_id)
-        except gh.GitHubAppError as e:
+            url = svc.create_connect_link(folder_id, channel_id=self.channel_id, slack_user=self.user_id)
+        except svc_error as e:
             return (str(e), True)
+        steps = (
+            "Click the button, sign in to Atlassian, choose your Jira site and click *Accept*. "
+            if is_jira
+            else "Click the button, choose your GitHub account or organization and which "
+            "repositories JTS PowerTool may use, then click *Install* and *Authorize*. "
+        )
 
         if not (self.channel_id and self.slack_token):
             return (f"Share this one-time link with the user (valid 15 minutes): {url}", False)
@@ -751,9 +894,8 @@ class ControlledToolAdapter:
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        "*Connect your GitHub*\n"
-                        "Click the button, choose your GitHub account or organization and which "
-                        "repositories JTS PowerTool may use, then click *Install* and *Authorize*. "
+                        f"*Connect your {name}*\n"
+                        f"{steps}"
                         "No tokens or passwords needed. The link works once, for 15 minutes."
                     ),
                 },
@@ -763,10 +905,10 @@ class ControlledToolAdapter:
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "Connect GitHub"},
+                        "text": {"type": "plain_text", "text": f"Connect {name}"},
                         "url": url,
                         "style": "primary",
-                        "action_id": "github_connect_link",
+                        "action_id": "jira_connect_link" if is_jira else "github_connect_link",
                     }
                 ],
             },
@@ -776,17 +918,16 @@ class ControlledToolAdapter:
                 resp = await client.post(
                     "https://slack.com/api/chat.postMessage",
                     headers={"Authorization": f"Bearer {self.slack_token}"},
-                    json={"channel": self.channel_id, "thread_ts": target_thread, "text": "Connect your GitHub", "blocks": blocks},
+                    json={"channel": self.channel_id, "thread_ts": target_thread, "text": f"Connect your {name}", "blocks": blocks},
                 )
             if not resp.json().get("ok"):
                 raise RuntimeError(resp.json().get("error"))
         except Exception as e:
-            logger.warning(f"[GITHUB_APP] Could not post Connect GitHub button: {e}")
+            logger.warning(f"[{name.upper()}] Could not post Connect {name} button: {e}")
             return (f"Share this one-time link with the user (valid 15 minutes): {url}", False)
         return (
-            "A 'Connect GitHub' button was posted in the conversation. Tell the user briefly to click it, pick their "
-            "account and repositories, then Install and Authorize; you'll confirm here when it's connected. "
-            "Do not repeat the link.",
+            f"A 'Connect {name}' button was posted in the conversation. Tell the user briefly to click it and follow "
+            "the steps; you'll confirm here when it's connected. Do not repeat the link.",
             False,
         )
 
@@ -828,6 +969,9 @@ class ControlledToolAdapter:
 
         if self.build_mode:
             tools.extend(copy.deepcopy(SITE_TOOL_SCHEMAS))
+        tools.append(copy.deepcopy(JIRA_CONNECT_SCHEMA))
+        if self.jira_connection():
+            tools.extend(copy.deepcopy(JIRA_TOOL_SCHEMAS))
         return tools
 
     def is_tool_allowed(self, tool_name: str) -> bool:
@@ -838,6 +982,10 @@ class ControlledToolAdapter:
             return False
         if tool_name in SITE_TOOLS:
             return self.build_mode
+        if tool_name == "connect_jira":
+            return True
+        if tool_name in JIRA_TOOLS:
+            return bool(self.jira_connection())
         return (tool_name in ALLOWED_READ_TOOLS) or (tool_name in ALLOWED_WRITE_TOOLS)
 
     def _inject_default_repo(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -908,6 +1056,9 @@ class ControlledToolAdapter:
 
         if tool_name == "connect_github":
             return await self._post_connect_github_button()
+
+        if tool_name in JIRA_TOOLS:
+            return await self._run_jira_tool(tool_name, arguments or {})
 
         if tool_name in SITE_TOOLS:
             return await self._run_site_tool(tool_name, arguments or {})
