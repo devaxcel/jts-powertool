@@ -20,6 +20,7 @@ import {
   ChevronDown,
   Building2,
   UserPlus,
+  Plug,
 } from "lucide-react";
 import { useMobileNav } from "@/components/DashboardShell";
 
@@ -40,6 +41,7 @@ const NAV_SECTIONS: Array<{ title: string; items: NavItem[] }> = [
       { label: "Approvals", href: "/approvals", icon: ShieldCheck, roles: ["jts_admin", "client_admin", "client_standard"], hint: "Review GitHub changes proposed by the bot" },
       { label: "Usage & Billing", href: "/billing", icon: Receipt, roles: ["jts_admin", "client_admin"] },
       { label: "Clients & Channels", href: "/folders", icon: Folder, roles: ["jts_admin", "client_admin"] },
+      { label: "Keys & Connections", href: "/client-keys", icon: Plug, roles: ["jts_admin", "client_admin", "client_standard"], hint: "Your own API keys and GitHub connection" },
     ],
   },
   {

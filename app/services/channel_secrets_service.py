@@ -306,8 +306,10 @@ def get_channel_secret_value(
             cur.execute("""
                 SELECT aws_secret_name, status
                 FROM channel_secret_mappings
-                WHERE channel_id = %s AND provider = %s;
-            """, (channel_id, provider))
+                WHERE UPPER(channel_id) = ANY(%s) AND provider = %s
+                ORDER BY (status = 'active') DESC
+                LIMIT 1;
+            """, (channel_id_variants(channel_id), provider))
             row = cur.fetchone()
             if row and row.get("status") == "active":
                 aws_secret_name = row.get("aws_secret_name")
@@ -2144,6 +2146,35 @@ def resolve_anthropic_key(
     return None, "jts", None
 
 
+INTERNAL_FOLDER_PROVIDERS = {"github_user"}  # managed by the GitHub connection, never shown or edited as a key
 
 
+def list_folder_api_keys(folder_id: int) -> List[Dict[str, Any]]:
+    """Safe metadata for every key a client stored for itself (no values)."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            _ensure_folder_keys_table(cur)
+            conn.commit()
+            cur.execute(
+                """
+                SELECT provider, key_hint, updated_by, created_at, updated_at, last_error, last_error_at
+                FROM folder_api_keys WHERE folder_id = %s ORDER BY provider;
+                """,
+                (folder_id,),
+            )
+            rows = cur.fetchall() or []
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        if r["provider"] in INTERNAL_FOLDER_PROVIDERS:
+            continue
+        rec = dict(r)
+        for k in ("created_at", "updated_at", "last_error_at"):
+            if rec.get(k) is not None and hasattr(rec[k], "isoformat"):
+                rec[k] = rec[k].isoformat()
+        rec["status"] = "failing" if rec.get("last_error") else "ok"
+        out.append(rec)
+    return out
 

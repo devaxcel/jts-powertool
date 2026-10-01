@@ -17,6 +17,7 @@ from app.usage_router import usage_router
 from app.invoice_router import invoice_router
 from app.github_router import github_public_router, github_folder_router
 from app.site_router import site_preview_router, site_drafts_router, websites_router
+from app.client_keys_router import client_keys_router
 from app.organizations_router import organizations_router
 from app.global_settings_router import global_settings_router
 
@@ -151,5 +152,6 @@ app.include_router(github_folder_router)
 app.include_router(site_preview_router)
 app.include_router(site_drafts_router)
 app.include_router(websites_router)
+app.include_router(client_keys_router)
 app.include_router(organizations_router)
 app.include_router(global_settings_router)

@@ -1379,3 +1379,72 @@ export async function fetchWebsites(folderId?: number): Promise<ClientWebsite[]>
   if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load the websites."));
   return data.websites || [];
 }
+
+/* ------------------------------ Keys & Connections (per client) ------------------------------ */
+
+export interface ClientKeyProvider {
+  id: string;
+  label: string;
+  group: string;
+  used_by_bot: boolean;
+  hint: string;
+}
+
+export interface ClientKeyItem {
+  provider: string;
+  label: string;
+  scope: "client" | "channel";
+  key_hint?: string | null;
+  updated_by?: string | null;
+  updated_at?: string | null;
+  status: "ok" | "failing";
+  last_error?: string | null;
+}
+
+export interface ClientKeysData {
+  folder: { id: number; name: string };
+  can_edit: boolean;
+  providers: ClientKeyProvider[];
+  client_keys: ClientKeyItem[];
+  channels: Array<{ channel_id: string; channel_name: string; keys: ClientKeyItem[] }>;
+}
+
+async function clientKeysRequest<T>(path: string, init: RequestInit = {}, fallback = "Something went wrong."): Promise<T> {
+  const res = await fetch(`${API_BASE}/api/client-keys${path}`, {
+    ...init,
+    headers: getAuthHeaders(init.body ? { "Content-Type": "application/json" } : {}),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, fallback));
+  return data as T;
+}
+
+export function fetchClientKeys(folderId?: number): Promise<ClientKeysData> {
+  return clientKeysRequest(folderId ? `?folder_id=${folderId}` : "", {}, "We couldn't load the keys.");
+}
+
+type SaveKeyBody = { folder_id?: number; provider: string; custom_name?: string; value: string };
+
+export function saveClientKey(body: SaveKeyBody): Promise<{ ok: boolean; message: string }> {
+  return clientKeysRequest("/client", { method: "PUT", body: JSON.stringify(body) }, "We couldn't save the key.");
+}
+
+export function deleteClientKey(provider: string, folderId?: number): Promise<{ ok: boolean; message: string }> {
+  const q = folderId ? `?folder_id=${folderId}` : "";
+  return clientKeysRequest(`/client/${encodeURIComponent(provider)}${q}`, { method: "DELETE" }, "We couldn't remove the key.");
+}
+
+export function saveChannelKey(body: SaveKeyBody & { channel_id: string }): Promise<{ ok: boolean; message: string }> {
+  return clientKeysRequest("/channel", { method: "PUT", body: JSON.stringify(body) }, "We couldn't save the key.");
+}
+
+export function deleteChannelKey(channelId: string, provider: string, folderId?: number): Promise<{ ok: boolean; message: string }> {
+  const q = folderId ? `?folder_id=${folderId}` : "";
+  return clientKeysRequest(
+    `/channel/${encodeURIComponent(channelId)}/${encodeURIComponent(provider)}${q}`,
+    { method: "DELETE" },
+    "We couldn't remove the key."
+  );
+}
+
