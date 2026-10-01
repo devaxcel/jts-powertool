@@ -341,6 +341,12 @@ def get_folder_channel_ids(client_folder_id: Optional[int]) -> List[str]:
                             result.add(f"#{bare.lower()}")
                             result.add(f"@{bare}")
                             result.add(f"@{bare.lower()}")
+            # Include legacy mistyped/real ID pairs so Slack's real ID matches the stored one.
+            from app.services.channel_secrets_service import LEGACY_CHANNEL_ALIASES
+            for item in list(result):
+                alias = LEGACY_CHANNEL_ALIASES.get(item.upper())
+                if alias:
+                    result.update({alias, alias.lower()})
             return list(result)
     except Exception as e:
         logger.warning(f"Error fetching channel IDs for folder #{client_folder_id}: {e}")

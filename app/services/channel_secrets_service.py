@@ -2077,6 +2077,25 @@ def get_folder_api_key_value(folder_id: int, provider: str = "anthropic") -> Opt
     return key_val
 
 
+# Some early channels were stored with a mistyped ID ('8' instead of 'B'). Slack sends the real ID, so treat
+# each pair as the same channel when looking up its client.
+LEGACY_CHANNEL_ALIASES: Dict[str, str] = {
+    "C0BV6S5UJ0P": "C08V6S5UJ0P",
+    "C0BMV3EM9PY": "C08MV3EM9PY",
+    "D0BSLP9LXUZ": "D08SLP9LXUZ",
+}
+LEGACY_CHANNEL_ALIASES.update({v: k for k, v in list(LEGACY_CHANNEL_ALIASES.items())})
+
+
+def channel_id_variants(channel_id: str) -> List[str]:
+    """The channel ID plus its legacy alias (upper-case), if it has one."""
+    cid = (channel_id or "").strip().upper()
+    if not cid:
+        return []
+    alias = LEGACY_CHANNEL_ALIASES.get(cid)
+    return [cid, alias] if alias else [cid]
+
+
 def get_folder_id_for_channel(channel_id: str) -> Optional[int]:
     if not channel_id:
         return None
@@ -2084,8 +2103,8 @@ def get_folder_id_for_channel(channel_id: str) -> Optional[int]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT folder_id FROM channel_metadata WHERE UPPER(channel_id) = UPPER(%s) AND folder_id IS NOT NULL LIMIT 1;",
-                (channel_id.strip(),),
+                "SELECT folder_id FROM channel_metadata WHERE UPPER(channel_id) = ANY(%s) AND folder_id IS NOT NULL LIMIT 1;",
+                (channel_id_variants(channel_id),),
             )
             row = cur.fetchone()
             return int(row["folder_id"]) if row else None
