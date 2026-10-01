@@ -41,12 +41,12 @@ export default function LogsPage() {
         const u = JSON.parse(rawUser || "{}");
         const savedSim = sessionStorage.getItem("jts_simulated_role");
         activeRole = savedSim || u.role || "jts_admin";
-        clientFolderId = u.client_folder_id || 2;
+        clientFolderId = u.client_folder_id || -1; // -1 = not linked to a client (matches nothing)
       }
 
       if (activeRole === "client_admin" || activeRole === "client_standard") {
         // CLIENT ADMIN TOKEN & BILLING (Strictly scoped to channels inside client folder)
-        const targetFolderId = clientFolderId || 2;
+        const targetFolderId = clientFolderId || -1;
         let folderChannels: any[] = [];
         try {
           const folderRes = await fetchFolder(targetFolderId);

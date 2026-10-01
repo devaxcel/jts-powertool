@@ -1301,3 +1301,50 @@ export async function resetGlobalSettings(): Promise<GlobalSettingsData> {
 
 
 
+
+/* ------------------------------ GitHub connection (per client) ------------------------------ */
+
+export interface GithubConnectionStatus {
+  configured: boolean;
+  connected: boolean;
+  connection: {
+    account_login: string;
+    account_type: string;
+    repository_selection: string;
+    repo_count: number | null;
+    default_repo: string | null;
+    connected_by: string | null;
+    status: string;
+    created_at?: string;
+    updated_at?: string;
+  } | null;
+  repos: Array<{ full_name: string; private: boolean; default_branch: string }>;
+  error: string | null;
+}
+
+async function githubRequest<T>(folderId: number, path: string, init: RequestInit = {}, fallback = "Something went wrong."): Promise<T> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/github${path}`, {
+    ...init,
+    headers: getAuthHeaders(init.body ? { "Content-Type": "application/json" } : {}),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, fallback));
+  return data as T;
+}
+
+export function fetchGithubStatus(folderId: number): Promise<GithubConnectionStatus> {
+  return githubRequest(folderId, "", {}, "We couldn't load the GitHub connection.");
+}
+
+export function createGithubConnectLink(folderId: number): Promise<{ url: string; expires_in_minutes: number }> {
+  return githubRequest(folderId, "/connect-link", { method: "POST" }, "We couldn't start the GitHub connection.");
+}
+
+export function setGithubDefaultRepo(folderId: number, fullName: string | null): Promise<{ ok: boolean; default_repo: string | null }> {
+  return githubRequest(folderId, "/default-repo", { method: "PUT", body: JSON.stringify({ full_name: fullName }) }, "We couldn't save the default repository.");
+}
+
+export function disconnectGithub(folderId: number): Promise<{ ok: boolean; message: string }> {
+  return githubRequest(folderId, "", { method: "DELETE" }, "We couldn't disconnect GitHub.");
+}

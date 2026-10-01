@@ -45,44 +45,30 @@ channel_secrets_router = APIRouter(prefix="/api/channels", tags=["Channel API Ke
 
 
 # --- RBAC Dependency ---
-def require_jts_admin(
-    request: Request,
-    x_jts_role: Optional[str] = Header(None, alias="X-JTS-Role"),
-    x_jts_admin_token: Optional[str] = Header(None, alias="X-JTS-Admin-Token"),
-    authorization: Optional[str] = Header(None, alias="Authorization"),
-) -> str:
+def require_jts_admin(request: Request) -> str:
     """
-    Enforces JTS Admin RBAC based on the user's actual authenticated role (ignoring preview simulation mode).
+    Signed-in JTS Admin only, based on the real login (a JTS admin previewing a client role still counts as admin).
+    Role headers and shared admin tokens are never accepted.
     """
     user_ctx = get_user_context(request, ignore_simulation=True)
     actual_role = user_ctx.get("actual_role") or user_ctx.get("role")
-
-    if actual_role in ("client_admin", "client_standard"):
+    has_session = bool(user_ctx.get("username")) and _has_valid_session(request)
+    if not has_session or actual_role != "jts_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: JTS Admin RBAC permission required.",
+            detail="Only JTS admins can do this.",
         )
+    return user_ctx.get("username") or "admin"
 
-    admin_token = get_secret("JTS_ADMIN_TOKEN", "jts-admin-secret").strip()
 
-    is_admin = False
-    if actual_role == "jts_admin":
-        is_admin = True
-    elif x_jts_admin_token and x_jts_admin_token.strip() == admin_token:
-        is_admin = True
-    elif authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1].strip()
-        if token == admin_token:
-            is_admin = True
-    elif x_jts_role and x_jts_role.strip().lower() == "admin":
-        is_admin = True
-
-    if not is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: JTS Admin RBAC permission required.",
-        )
-    return "admin"
+def _has_valid_session(request: Request) -> bool:
+    token = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+    return bool(token and verify_session_token(token))
 
 
 # --- Request/Response Models ---
@@ -118,7 +104,7 @@ class CreateSlackChannelRequest(BaseModel):
 
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
-from app.auth_router import get_user_context, get_folder_channel_ids
+from app.auth_router import get_user_context, get_folder_channel_ids, verify_session_token, SESSION_COOKIE_NAME
 
 
 # --- Endpoints ---
@@ -312,15 +298,8 @@ def set_channel_folder_endpoint(
     request: Request,
 ):
     """Assigns or unassigns a channel to a folder."""
-    user_ctx = get_user_context(request)
-    role = user_ctx.get("role")
-    client_folder_id = user_ctx.get("client_folder_id")
-
-    if role in ("client_admin", "client_standard"):
-        if payload.folder_id is not None and payload.folder_id != client_folder_id:
-            raise HTTPException(status_code=403, detail="Access denied: You can only assign channels to your assigned folder.")
-    elif role not in ("jts_admin", "admin"):
-        raise HTTPException(status_code=403, detail="Access denied: Requires admin privileges.")
+    # Moving a channel moves its conversations, billing and approvals, so only JTS admins may do it.
+    require_jts_admin(request)
 
     try:
         result = set_channel_folder(channel_id=channel_id, folder_id=payload.folder_id)
@@ -371,10 +350,7 @@ def get_unassigned_channels_endpoint(_: str = Depends(require_jts_admin)):
 def get_channels(request: Request):
     """Lists all active and configured channels (1 channel = 1 project)."""
     user_ctx = get_user_context(request)
-    admin_token = get_secret("JTS_ADMIN_TOKEN", "jts-admin-secret").strip()
-    x_admin_token = request.headers.get("X-JTS-Admin-Token", "").strip()
-    is_admin_token = bool(x_admin_token and x_admin_token == admin_token)
-    if not user_ctx.get("role") and not is_admin_token:
+    if not user_ctx.get("role") or not _has_valid_session(request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: JTS Admin RBAC permission required.",
@@ -685,8 +661,7 @@ def get_channel_messages_endpoint(channel_id: str, request: Request, limit: int 
 def save_channel_secret_endpoint(
     channel_id: str,
     payload: SaveSecretRequest,
-    x_jts_user_id: Optional[str] = Header("admin", alias="X-JTS-User-Id"),
-    _: str = Depends(require_jts_admin),
+    admin_user: str = Depends(require_jts_admin),
 ):
     """
     Securely stores an API key in AWS Secrets Manager and creates/updates the PostgreSQL mapping.
@@ -698,7 +673,7 @@ def save_channel_secret_endpoint(
             provider=payload.provider,
             api_key=payload.api_key,
             channel_name=payload.channel_name,
-            updated_by=x_jts_user_id or "admin",
+            updated_by=admin_user,
         )
         return {
             "status": "success",
@@ -716,14 +691,13 @@ def save_channel_secret_endpoint(
 def delete_channel_secret_endpoint(
     channel_id: str,
     provider: str,
-    x_jts_user_id: Optional[str] = Header("admin", alias="X-JTS-User-Id"),
-    _: str = Depends(require_jts_admin),
+    admin_user: str = Depends(require_jts_admin),
 ):
     """
     Deletes the secret from AWS Secrets Manager and removes the PostgreSQL mapping.
     """
     try:
-        success = delete_channel_secret(channel_id, provider, updated_by=x_jts_user_id or "admin")
+        success = delete_channel_secret(channel_id, provider, updated_by=admin_user)
         return {
             "status": "success" if success else "not_found",
             "message": f"Secret for provider '{provider}' in channel '{channel_id}' has been deleted.",

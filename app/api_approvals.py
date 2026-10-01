@@ -21,7 +21,7 @@ from app.db.repositories import (
     expire_stale_approvals,
     get_system_stats,
 )
-from app.tools.mcp_client import GitHubMCPClient
+from app.services.github_app_service import GitHubAppError, github_client_for_channel, resolve_github_token
 from app.tools.secrets_manager import get_secret
 from app.slack_router import build_approved_card_blocks, build_rejected_card_blocks
 from app.auth_router import (
@@ -143,17 +143,17 @@ _file_cache: Dict[str, Tuple[float, Optional[str]]] = {}
 _FILE_CACHE_TTL = 60.0
 
 
-async def _fetch_github_file(owner: str, repo: str, path: str, ref: str) -> Tuple[bool, Optional[str]]:
+async def _fetch_github_file(owner: str, repo: str, path: str, ref: str, token: Optional[str] = None) -> Tuple[bool, Optional[str]]:
     """
     Returns (ok, content). ok=False means GitHub could not be reached or refused;
     (True, None) means the file does not exist yet on that branch.
     """
-    cache_key = f"{owner}/{repo}@{ref}:{path}"
+    cache_key = f"{owner}/{repo}@{ref}:{path}:{hash(token or 'jts')}"
     cached = _file_cache.get(cache_key)
     if cached and time.time() - cached[0] < _FILE_CACHE_TTL:
         return True, cached[1]
 
-    token = get_secret("GITHUB_PERSONAL_ACCESS_TOKEN", "").strip()
+    token = (token or get_secret("GITHUB_PERSONAL_ACCESS_TOKEN", "") or "").strip()
     if not token:
         return False, None
     url = f"https://api.github.com/repos/{quote(owner)}/{quote(repo)}/contents/{quote(path)}"
@@ -193,9 +193,9 @@ def _repo_parts(args: dict) -> Tuple[str, str]:
     return owner, repo
 
 
-async def _file_diff(owner: str, repo: str, branch: str, path: str, new_content: str) -> Tuple[str, str]:
+async def _file_diff(owner: str, repo: str, branch: str, path: str, new_content: str, token: Optional[str] = None) -> Tuple[str, str]:
     """Returns (diff_text, kind) where kind is 'diff', 'new' or 'full' (compare unavailable)."""
-    ok, current = await _fetch_github_file(owner, repo, path, branch)
+    ok, current = await _fetch_github_file(owner, repo, path, branch, token)
     if not ok:
         return _full_file_preview(path, new_content), "full"
     if current is None:
@@ -213,7 +213,7 @@ async def _file_diff(owner: str, repo: str, branch: str, path: str, new_content:
     return "\n".join(diff), "diff"
 
 
-async def build_real_diff(tool_name: str, tool_args: dict) -> Tuple[str, str]:
+async def build_real_diff(tool_name: str, tool_args: dict, token: Optional[str] = None) -> Tuple[str, str]:
     """
     Compares proposed file content against what is on GitHub now.
     Returns (preview, kind): kind is 'diff' (real comparison), 'full' (GitHub unreachable,
@@ -233,7 +233,7 @@ async def build_real_diff(tool_name: str, tool_args: dict) -> Tuple[str, str]:
 
     chunks, kinds = [], set()
     for f in files:
-        text, kind = await _file_diff(owner, repo, branch, f.get("path", "file"), f.get("content", ""))
+        text, kind = await _file_diff(owner, repo, branch, f.get("path", "file"), f.get("content", ""), token)
         chunks.append(text)
         kinds.add(kind)
     return "\n\n".join(chunks), ("full" if "full" in kinds else "diff")
@@ -372,7 +372,8 @@ async def get_approval_details(approval_id: str, request: Request):
         raise HTTPException(status_code=404, detail="This approval request was not found.")
 
     await enrich_approval_user_names([record])
-    preview, kind = await build_real_diff(record.get("tool_name", ""), record.get("tool_arguments") or {})
+    gh_ctx = await resolve_github_token(record.get("channel_id") or "")
+    preview, kind = await build_real_diff(record.get("tool_name", ""), record.get("tool_arguments") or {}, gh_ctx.get("token"))
     record["diff_preview"] = preview
     record["diff_kind"] = kind
     return JSONResponse(content={"approval": serialize_data(record)})
@@ -404,6 +405,12 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
     default_repo = get_secret("GITHUB_DEFAULT_REPO", DEFAULT_REPO_FALLBACK)
 
     if action == "approve":
+        # Resolve the client's GitHub access BEFORE claiming, so a missing connection doesn't burn the approval.
+        try:
+            mcp_client = await github_client_for_channel(existing.get("channel_id") or "")
+        except GitHubAppError as e:
+            return JSONResponse(status_code=409, content={"ok": False, "status": "github_not_connected", "message": str(e)})
+
         claim_result, claimed_record = claim_approval_for_execution(approval_id, user_id=user_display)
         if claim_result != "claimed" or not claimed_record:
             messages = {
@@ -429,7 +436,6 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
             if not str(exec_tool_args.get("branch") or "").strip():
                 exec_tool_args["branch"] = "main"
 
-        mcp_client = GitHubMCPClient()
         try:
             output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
             is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))

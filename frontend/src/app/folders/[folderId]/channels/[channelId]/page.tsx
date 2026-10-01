@@ -17,13 +17,6 @@ import {
   DollarSign,
   Clock,
   X,
-  GitBranch,
-  KeyRound,
-  ShieldCheck,
-  Eye,
-  EyeOff,
-  Check,
-  CheckCircle2,
 } from "lucide-react";
 import { fetchChannelMessages, fetchFolder, fetchBillingSummary, canonicalChannelId } from "@/lib/api";
 import { ConversationMessage, FolderDetails, formatLocalDateTime, isClientKeyMessage } from "@/lib/types";
@@ -51,18 +44,9 @@ export default function ChannelMessagesPage() {
     total_cost_usd: number;
   } | null>(null);
 
-  // RBAC state: Only Master Admin can configure GitHub per channel
-  const [userRole, setUserRole] = useState<string>("jts_admin");
-  const isMasterAdmin = !userRole || userRole === "admin" || userRole === "jts_admin";
+  // Role of the signed-in user (clients are redirected to their own client folder)
+  const [, setUserRole] = useState<string>("jts_admin");
 
-  // GitHub Channel Configuration Modal State
-  const [showGithubModal, setShowGithubModal] = useState(false);
-  const [githubToken, setGithubToken] = useState("");
-  const [githubRepo, setGithubRepo] = useState("");
-  const [showGithubToken, setShowGithubToken] = useState(false);
-  const [savingGithub, setSavingGithub] = useState(false);
-  const [githubFeedback, setGithubFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [isGithubConfigured, setIsGithubConfigured] = useState(false);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -160,52 +144,12 @@ export default function ChannelMessagesPage() {
           }
         }
 
-        // Load channel GitHub config
-        const savedGh = localStorage.getItem(`jts_channel_gh_${channelId}`);
-        if (savedGh) {
-          const parsed = JSON.parse(savedGh);
-          setGithubToken(parsed.token || "");
-          setGithubRepo(parsed.repo || "");
-          setIsGithubConfigured(Boolean(parsed.token || parsed.repo));
-        }
+        // GitHub now connects per client on the server; remove any token an old version stored in this browser.
+        localStorage.removeItem(`jts_channel_gh_${channelId}`);
       } catch {}
     }
     loadChannelData();
   }, [loadChannelData, folderId, channelId]);
-
-  const handleSaveGithub = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingGithub(true);
-    try {
-      const cleanRepo = githubRepo.trim();
-      const cleanToken = githubToken.trim();
-      if (!cleanRepo && !cleanToken) {
-        localStorage.removeItem(`jts_channel_gh_${channelId}`);
-        setIsGithubConfigured(false);
-        setGithubFeedback({ type: "success", message: "Channel GitHub configuration cleared." });
-      } else {
-        localStorage.setItem(`jts_channel_gh_${channelId}`, JSON.stringify({ token: cleanToken, repo: cleanRepo }));
-        setIsGithubConfigured(true);
-        setGithubFeedback({
-          type: "success",
-          message: `GitHub configuration saved for ${displayChannelName}! Repository: ${cleanRepo || "Default"}`,
-        });
-      }
-    } catch (err: any) {
-      setGithubFeedback({ type: "error", message: err?.message || "Failed to save configuration" });
-    } finally {
-      setSavingGithub(false);
-    }
-  };
-
-  const handleRemoveGithub = () => {
-    if (!confirm("Are you sure you want to remove the custom GitHub settings for this channel?")) return;
-    setGithubToken("");
-    setGithubRepo("");
-    setIsGithubConfigured(false);
-    localStorage.removeItem(`jts_channel_gh_${channelId}`);
-    setGithubFeedback({ type: "success", message: "GitHub settings removed. Channel will use system defaults." });
-  };
 
   // Auto scroll to bottom when initial loading finishes
   useEffect(() => {
@@ -574,174 +518,6 @@ export default function ChannelMessagesPage() {
         </div>
       )}
 
-      {/* GitHub Channel Configuration Modal (Admin Only) */}
-      {isMasterAdmin && showGithubModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white border border-gray-200 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
-            {/* Modal Header */}
-            <div className="px-6 py-4.5 bg-gradient-to-r from-gray-900 via-slate-900 to-gray-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-[#088ADA]">
-                  <GitBranch className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-sm text-white">GitHub Integration</h3>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-[#088ADA]/20 text-[#088ADA] border border-[#088ADA]/40">
-                      Admin Only
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-400 font-mono mt-0.5">
-                    {displayChannelName} ({channelId})
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowGithubModal(false)}
-                className="h-8 w-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <form onSubmit={handleSaveGithub} className="p-6 space-y-4">
-              {/* Informational Box */}
-              <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-blue-900">
-                <ShieldCheck className="h-4 w-4 text-[#088ADA] shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="font-semibold text-blue-950">Fine-Grained Permission Enforcement</p>
-                  <p className="text-blue-800 text-[11px] leading-relaxed">
-                    Permissions (<strong>Read-Only</strong> or <strong>Read &amp; Write</strong>) are configured when generating your Personal Access Token on GitHub. The bot will strictly adhere to whatever access scopes are granted on that token.
-                  </p>
-                </div>
-              </div>
-
-              {/* Feedback Banner */}
-              {githubFeedback && (
-                <div
-                  className={`flex items-center justify-between p-3 rounded-xl border text-xs ${
-                    githubFeedback.type === "success"
-                      ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-                      : "bg-rose-50 border-rose-200 text-rose-700"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    {githubFeedback.type === "success" ? (
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                    ) : (
-                      <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
-                    )}
-                    <span>{githubFeedback.message}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setGithubFeedback(null)}
-                    className="p-1 rounded hover:bg-black/5 text-gray-500"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
-
-              {/* Field 1: GitHub Personal Access Token */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-800 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <KeyRound className="h-3.5 w-3.5 text-[#088ADA]" />
-                    GitHub Personal Access Token (PAT)
-                  </span>
-                  <span className="text-[10px] text-gray-400 font-normal">Secret Key</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showGithubToken ? "text" : "password"}
-                    value={githubToken}
-                    onChange={(e) => setGithubToken(e.target.value)}
-                    placeholder="github_pat_11ABCD... or ghp_..."
-                    className="w-full pl-3 pr-10 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#088ADA] focus:bg-white transition"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowGithubToken(!showGithubToken)}
-                    className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600 p-0.5 rounded transition"
-                    title={showGithubToken ? "Hide token" : "Show token"}
-                  >
-                    {showGithubToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <p className="text-[10px] text-gray-500">
-                  Generate under <em>GitHub &rarr; Settings &rarr; Developer Settings &rarr; Personal Access Tokens</em>.
-                </p>
-              </div>
-
-              {/* Field 2: Target Repository */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-800 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <GitBranch className="h-3.5 w-3.5 text-[#088ADA]" />
-                    Target Repository
-                  </span>
-                  <span className="text-[10px] text-gray-400 font-normal">owner/repo</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={githubRepo}
-                    onChange={(e) => setGithubRepo(e.target.value)}
-                    placeholder="e.g. your-organization/repository-name"
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#088ADA] focus:bg-white transition"
-                  />
-                </div>
-                <p className="text-[10px] text-gray-500">
-                  The specific GitHub repository that developers in this Slack channel can interact with.
-                </p>
-              </div>
-
-              {/* Modal Footer Controls */}
-              <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
-                <div>
-                  {isGithubConfigured && (
-                    <button
-                      type="button"
-                      onClick={handleRemoveGithub}
-                      className="px-3 py-1.5 rounded-lg text-rose-600 hover:bg-rose-50 text-xs font-semibold transition"
-                    >
-                      Remove Config
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowGithubModal(false)}
-                    className="px-3.5 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold transition cursor-pointer"
-                  >
-                    Close
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={savingGithub}
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-[#088ADA] hover:bg-[#0779bf] text-white text-xs font-bold shadow-sm transition disabled:opacity-50 cursor-pointer"
-                  >
-                    {savingGithub ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Saving...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Check className="h-3.5 w-3.5" />
-                        <span>Save Settings</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

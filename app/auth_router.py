@@ -36,6 +36,8 @@ _SECRET_KEY = get_secret(
 ).encode("utf-8")
 
 SESSION_COOKIE_NAME = "jts_session"
+# Folder id used for client logins that aren't linked to a client yet (no folder has this id).
+UNASSIGNED_CLIENT_FOLDER = -1
 SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60  # 7 days
 
 
@@ -223,7 +225,9 @@ def get_user_context(request: Request, ignore_simulation: bool = False) -> dict:
                 "username": user,
                 "role": actual_role,
                 "actual_role": actual_role,
-                "client_folder_id": client_folder_id or (2 if actual_role in ("client_admin", "client_standard") else None),
+                # A client login without an assigned client gets a folder id that matches nothing,
+                # so every "filter to my folder" check returns no data instead of another client's.
+                "client_folder_id": client_folder_id or (UNASSIGNED_CLIENT_FOLDER if actual_role in ("client_admin", "client_standard") else None),
             }
 
     role_hdr = request.headers.get("X-JTS-Role", "").strip().lower()

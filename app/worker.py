@@ -483,10 +483,12 @@ async def process_job(job: dict):
         )
         is_billable = key_source == "jts"
         client_key_fallback_reason = None
-        channel_github_token = get_channel_secret_value(
-            channel_id, "github",
-            workspace_id=team_id, workspace_name=workspace_name, channel_name=channel_name,
+        # GitHub: channel's own token (legacy) -> client's GitHub App connection (1-hour token) -> JTS default
+        from app.services.github_app_service import resolve_github_token
+        github_ctx = await resolve_github_token(
+            channel_id, workspace_id=team_id, workspace_name=workspace_name, channel_name=channel_name,
         )
+        channel_github_token = github_ctx.get("token")
 
         accumulated_text = ""
         accumulated_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
@@ -501,6 +503,7 @@ async def process_job(job: dict):
             workspace_id=team_id,
             workspace_name=workspace_name,
             channel_name=channel_name,
+            github_context=github_ctx,
         )
 
         async def on_tool_event(action: str, tool_name: str, tool_args: dict, output: str, is_error: bool):

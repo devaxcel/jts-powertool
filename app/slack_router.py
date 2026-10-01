@@ -1264,9 +1264,10 @@ async def slack_interactive(request: Request):
                     },
                 )
 
-                # Execute tool via GitHub MCP using the verified stored payload
-                mcp_client = GitHubMCPClient()
+                # Execute tool via GitHub MCP using the verified stored payload, with the client's own GitHub access
                 try:
+                    from app.services.github_app_service import github_client_for_channel
+                    mcp_client = await github_client_for_channel((claimed_record or {}).get("channel_id") or channel_id or "")
                     output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
                     is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))
                 except Exception as mcp_err:

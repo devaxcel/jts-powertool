@@ -15,6 +15,7 @@ from app.channel_secrets_router import channel_secrets_router, vault_router
 from app.auth_router import auth_router, users_router, verify_session_token, SESSION_COOKIE_NAME
 from app.usage_router import usage_router
 from app.invoice_router import invoice_router
+from app.github_router import github_public_router, github_folder_router
 from app.organizations_router import organizations_router
 from app.global_settings_router import global_settings_router
 
@@ -42,6 +43,10 @@ PUBLIC_EXEMPT_PREFIXES = (
     "/api/auth/set-password",
     "/api/slack",
     "/api/teams",
+    # GitHub App install flow + webhooks: protected by single-use state / HMAC signature instead of a login
+    "/api/github/connect",
+    "/api/github/callback",
+    "/api/github/webhook",
     "/docs",
     "/openapi.json",
 )
@@ -68,12 +73,8 @@ async def enforce_dashboard_authentication(request: Request, call_next):
     if not token:
         token = request.cookies.get(SESSION_COOKIE_NAME)
             
-    # 3. Validate session token or admin role headers
-    role_hdr = request.headers.get("X-JTS-Role", "").strip().lower()
-    sim_role = request.headers.get("X-JTS-Simulated-Role", "").strip().lower()
-    is_admin_header = (role_hdr == "admin" or sim_role in ("jts_admin", "admin", "client_admin", "client_standard"))
-
-    if (not token or not verify_session_token(token)) and not is_admin_header:
+    # 3. Require a valid signed session token. Role headers alone never grant access.
+    if not token or not verify_session_token(token):
         return JSONResponse(
             status_code=401,
             content={"detail": "Authentication required. Please log in to access JTS Console."}
@@ -142,5 +143,7 @@ app.include_router(auth_router, prefix="/api/auth")
 app.include_router(users_router)
 app.include_router(usage_router)
 app.include_router(invoice_router)
+app.include_router(github_public_router)
+app.include_router(github_folder_router)
 app.include_router(organizations_router)
 app.include_router(global_settings_router)

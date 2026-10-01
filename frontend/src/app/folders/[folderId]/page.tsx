@@ -36,6 +36,7 @@ import {
 } from "@/lib/api";
 import { FolderDetails, ChannelProject } from "@/lib/types";
 import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
+import { GithubConnectionCard } from "@/components/GithubConnectionCard";
 import { PageHeader, Alert, EmptyState, LoadingState, SectionTitle, ComingSoonBadge, btn } from "@/components/ui";
 
 interface ToolDefinition {
@@ -354,6 +355,11 @@ export default function FolderDetailPage() {
       {/* Client's own Anthropic key vs. billed JTS key */}
       {folderId && (
         <ClientApiKeyCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
+      )}
+
+      {/* Client's own GitHub (GitHub App connection) */}
+      {folderId && (
+        <GithubConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
       )}
 
       {/* Content Area */}

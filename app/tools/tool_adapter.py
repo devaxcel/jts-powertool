@@ -14,8 +14,12 @@ from app.tools.slack_approval_ui import build_approval_card_blocks
 
 logger = logging.getLogger(__name__)
 
+# Tools handled inside JTS PowerTool (no GitHub call, no approval)
+LOCAL_TOOLS = {"connect_github"}
+
 # Allowed Read Tools
 ALLOWED_READ_TOOLS = {
+    "connect_github",
     "get_file_contents",
     "list_issues",
     "get_issue",
@@ -306,6 +310,15 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "required": ["query"],
         },
     },
+    {
+        "name": "connect_github",
+        "description": (
+            "Posts a one-click 'Connect GitHub' button in this Slack conversation so the user can link their own GitHub "
+            "account or organization. Use when the user asks to connect/link/add their GitHub, or when a GitHub action "
+            "fails because this client hasn't connected GitHub yet. Never ask the user for a GitHub token or password."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
 ]
 
 
@@ -326,10 +339,16 @@ class ControlledToolAdapter:
         workspace_id: str = "",
         workspace_name: str = "",
         channel_name: str = "",
+        github_context: Optional[Dict[str, Any]] = None,
     ):
         from app.services.channel_secrets_service import canonical_channel_id
         self.mcp_client = mcp_client or GitHubMCPClient()
-        self.default_repo = get_secret("GITHUB_DEFAULT_REPO", "devaxcel/jts-powertool")
+        self.github_context = github_context or {}
+        if self.github_context.get("source") == "client_app":
+            # The client's own GitHub: only their chosen default repo (may be none -> the user must name one).
+            self.default_repo = self.github_context.get("default_repo") or ""
+        else:
+            self.default_repo = get_secret("GITHUB_DEFAULT_REPO", "devaxcel/jts-powertool")
         self.workspace_id = workspace_id
         self.workspace_name = workspace_name
         self.channel_name = channel_name
@@ -344,6 +363,76 @@ class ControlledToolAdapter:
         self.slack_token = slack_token or get_secret("SLACK_BOT_TOKEN", "")
         self.require_approval_for_writes = require_approval_for_writes
         self.approval_card_posted: bool = False
+
+    async def _post_connect_github_button(self) -> Tuple[str, bool]:
+        """Posts a single-use 'Connect GitHub' button for this channel's client."""
+        from app.services import github_app_service as gh
+        from app.services.channel_secrets_service import get_folder_id_for_channel
+
+        folder_id = get_folder_id_for_channel(self.channel_id)
+        if not folder_id:
+            return (
+                "This Slack channel isn't linked to a client yet, so GitHub can't be connected here. "
+                "Tell the user to ask their JTS administrator to add this channel to their client first.",
+                True,
+            )
+        try:
+            url = gh.create_connect_link(folder_id, channel_id=self.channel_id, slack_user=self.user_id)
+        except gh.GitHubAppError as e:
+            return (str(e), True)
+
+        if not (self.channel_id and self.slack_token):
+            return (f"Share this one-time link with the user (valid 15 minutes): {url}", False)
+
+        target_thread = (
+            self.thread_ts
+            if (self.thread_ts and not self.thread_ts.startswith("channel_") and not self.thread_ts.startswith("dm_"))
+            else None
+        )
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Connect your GitHub*\n"
+                        "Click the button, choose your GitHub account or organization and which "
+                        "repositories JTS PowerTool may use, then click *Install* and *Authorize*. "
+                        "No tokens or passwords needed. The link works once, for 15 minutes."
+                    ),
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Connect GitHub"},
+                        "url": url,
+                        "style": "primary",
+                        "action_id": "github_connect_link",
+                    }
+                ],
+            },
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "https://slack.com/api/chat.postMessage",
+                    headers={"Authorization": f"Bearer {self.slack_token}"},
+                    json={"channel": self.channel_id, "thread_ts": target_thread, "text": "Connect your GitHub", "blocks": blocks},
+                )
+            if not resp.json().get("ok"):
+                raise RuntimeError(resp.json().get("error"))
+        except Exception as e:
+            logger.warning(f"[GITHUB_APP] Could not post Connect GitHub button: {e}")
+            return (f"Share this one-time link with the user (valid 15 minutes): {url}", False)
+        return (
+            "A 'Connect GitHub' button was posted in the conversation. Tell the user briefly to click it, pick their "
+            "account and repositories, then Install and Authorize; you'll confirm here when it's connected. "
+            "Do not repeat the link.",
+            False,
+        )
 
     def get_allowed_tools(self) -> List[Dict[str, Any]]:
         """
@@ -456,6 +545,24 @@ class ControlledToolAdapter:
             except Exception as e:
                 logger.error(f"Error in search_web: {e}", exc_info=True)
                 return (f"Error executing web search: {str(e)}", True)
+
+        if tool_name == "connect_github":
+            return await self._post_connect_github_button()
+
+        # 1.6. Client GitHub connection policy
+        gh_ctx = self.github_context
+        if gh_ctx.get("error"):
+            return (f"{gh_ctx['error']} Call connect_github to post a new Connect GitHub button.", True)
+        if (
+            gh_ctx.get("folder_id")
+            and gh_ctx.get("source") == "none"
+            and str(get_secret("GITHUB_REQUIRE_CLIENT_CONNECTION", "false")).strip().lower() in ("1", "true", "yes")
+        ):
+            return (
+                "This client hasn't connected their GitHub yet. Call connect_github to post a Connect GitHub button, "
+                "and tell the user to click it.",
+                True,
+            )
 
         # 2. Check configuration
         if not self.mcp_client.is_configured():
