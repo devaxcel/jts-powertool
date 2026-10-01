@@ -69,7 +69,7 @@ BLOCKED_WRITE_TOOLS = BLOCKED_DESTRUCTIVE_TOOLS
 DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "list_issues",
-        "description": "List issues in a GitHub repository with filtering options. Default to the configured repository if owner/repo are not specified.",
+        "description": "List issues in a GitHub repository with filtering options. GitHub repositories only, NOT Jira (for Jira projects/keys like KAN use jira_search_issues). Default to the configured repository if owner/repo are not specified.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -95,7 +95,7 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
     },
     {
         "name": "get_issue",
-        "description": "Get detailed information about a specific issue in a GitHub repository.",
+        "description": "Get detailed information about a specific issue in a GitHub repository. GitHub only, NOT Jira (for keys like KAN-1 use jira_get_issue).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -346,7 +346,7 @@ JIRA_CONNECT_SCHEMA = {
 JIRA_TOOL_SCHEMAS = [
     {
         "name": "jira_search_issues",
-        "description": "Jira: search the client's issues with JQL, e.g. 'project = ABC AND status != Done ORDER BY updated DESC'. Read-only.",
+        "description": "Jira: search the client's Jira issues/tickets with JQL. Use for ANY request about Jira, tickets, backlog, or issues in a Jira project key like KAN or WEB (e.g. 'open issues in KAN' -> project = KAN AND statusCategory != Done ORDER BY updated DESC). Read-only.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -358,7 +358,7 @@ JIRA_TOOL_SCHEMAS = [
     },
     {
         "name": "jira_get_issue",
-        "description": "Jira: read one issue (details, description, latest comments) by key like ABC-123. Read-only.",
+        "description": "Jira: read one Jira issue (details, description, latest comments) by key like KAN-123. Use whenever the user gives a key like ABC-123. Read-only.",
         "input_schema": {"type": "object", "properties": {"issue_key": {"type": "string"}}, "required": ["issue_key"]},
     },
     {
@@ -972,6 +972,7 @@ class ControlledToolAdapter:
         tools.append(copy.deepcopy(JIRA_CONNECT_SCHEMA))
         if self.jira_connection():
             tools.extend(copy.deepcopy(JIRA_TOOL_SCHEMAS))
+        logger.info(f"[JIRA] Tools for channel={self.channel_id}: jira_connected={bool(self.jira_connection())}")
         return tools
 
     def is_tool_allowed(self, tool_name: str) -> bool:

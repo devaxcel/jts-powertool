@@ -313,6 +313,16 @@ def get_system_prompt(user_prompt: str = "", user_profile: Optional[dict] = None
             "Include a friendly message in your response confirming you have created and attached the file. The system will automatically compile and upload the file to Slack."
         )
 
+    # Jira guidance (always short): stops "issues in KAN" from going to the GitHub tools
+    prompt += (
+        "\n\nJIRA vs GITHUB:\n"
+        "If tools starting with `jira_` are available, this client uses Jira. Requests about Jira, tickets, backlog, sprints, a Jira "
+        "project key (e.g. KAN, WEB) or an issue key (e.g. KAN-12) MUST use the `jira_*` tools, NEVER the GitHub issue tools. "
+        "'Issues in <PROJECT KEY>' means Jira. Use the GitHub issue tools only when the user clearly means a GitHub repository "
+        "(they name a repo/owner, or say GitHub, PR, commit or branch). "
+        "If the user asks to connect Jira, call `connect_jira`. Never ask for Jira passwords or API tokens."
+    )
+
     return prompt
 
 
