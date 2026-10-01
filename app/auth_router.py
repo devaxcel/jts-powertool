@@ -288,7 +288,17 @@ def client_channel_scope(ctx: dict) -> Optional[set]:
     folder_id = ctx.get("client_folder_id")
     if not folder_id:
         return set()
-    return {_norm_channel_key(c) for c in get_folder_channel_ids(folder_id) if _norm_channel_key(c)}
+    from app.services.channel_secrets_service import channel_id_variants
+
+    scope = set()
+    for c in get_folder_channel_ids(folder_id):
+        if _norm_channel_key(c):
+            scope.add(_norm_channel_key(c))
+        # Slack's real ID can differ from a mistyped stored one (see LEGACY_CHANNEL_ALIASES): accept both.
+        for v in channel_id_variants(c):
+            if _norm_channel_key(v):
+                scope.add(_norm_channel_key(v))
+    return scope
 
 
 def channel_in_scope(scope: Optional[set], *values: Any) -> bool:
