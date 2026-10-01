@@ -148,7 +148,7 @@ BUILD_INTENT_PATTERNS = [
     r"\b(web ?site|landing ?page)\b.{0,40}\b(for (me|my|our|us)|builder)\b",
     r"\b(build|create|make|develop|generate)\b.{0,60}\b(wordpress|php|laravel|react|vue|svelte|astro|next\.?js)\b",
     # editing a site the bot already published
-    r"\b(update|change|edit|modify|add|remove|replace|redesign|tweak)\b.{0,60}\b(web ?site|site|landing ?page|homepage|home page)\b",
+    r"\b(update|change|edit|modify|add|remove|replace|redesign|tweak|rename|move)\b.{0,140}\b(web ?site|site|landing ?page|homepage|home page)\b",
     r"\b(web ?site|site)\b.{0,40}\b(colou?rs?|logo|menu|footer|header|gallery|contact (page|form)|pricing)\b",
 ]
 
@@ -380,6 +380,30 @@ def touch_draft(draft_id: int) -> None:
         cur.execute("UPDATE site_drafts SET updated_at = CURRENT_TIMESTAMP WHERE id = %s;", (draft_id,))
 
     _db(run)
+
+
+_GENERIC_NAME_WORDS = {"site", "website", "web", "page", "app", "www", "the", "and", "of", "for"}
+
+
+def mentions_known_website(text: str, folder_id: Optional[int]) -> bool:
+    """True if the message names one of this client's published websites, e.g. 'Bright Smile' for bright-smile-dental-site."""
+    if not folder_id or not text:
+        return False
+    t = " " + re.sub(r"[^a-z0-9]+", " ", text.lower()) + " "
+    try:
+        sites = list_websites(folder_id)
+    except Exception:
+        return False
+    for w in sites:
+        repo = w["repo_full_name"].split("/", 1)[-1].lower()
+        if f" {re.sub(r'[^a-z0-9]+', ' ', repo).strip()} " in t:
+            return True
+        tokens = [x for x in re.split(r"[^a-z0-9]+", repo) if x and x not in _GENERIC_NAME_WORDS]
+        if len(tokens) >= 2 and any(f" {a} {b} " in t for a, b in zip(tokens, tokens[1:])):
+            return True
+        if len(tokens) == 1 and f" {tokens[0]} " in t and re.search(r"\b(web ?site|site|page)\b", t):
+            return True
+    return False
 
 
 def detect_build_intent(text: str) -> bool:

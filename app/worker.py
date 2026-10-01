@@ -487,6 +487,12 @@ async def process_job(job: dict):
         from app.services import site_builder_service as site_builder
         draft_key = thread_ts or f"channel_{channel_id}"
         build_intent = site_builder.detect_build_intent(cleaned_prompt)
+        if not build_intent:
+            try:
+                from app.services.channel_secrets_service import get_folder_id_for_channel as _folder_for
+                build_intent = site_builder.mentions_known_website(cleaned_prompt, _folder_for(channel_id))
+            except Exception as known_err:
+                logger.debug(f"[SITE_BUILDER] known-website check skipped: {known_err}")
         build_mode = build_intent or site_builder.has_open_draft(channel_id, draft_key)
         if build_mode:
             # Open (or refresh) the draft now, so a short follow-up like "1" (the stack choice) stays in build mode.

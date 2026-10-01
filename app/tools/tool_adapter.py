@@ -1015,6 +1015,19 @@ class ControlledToolAdapter:
                     True,
                 )
 
+        # 3.9. With a client's own GitHub connected, writes may only target that account's repositories
+        #      (stops guessed owners such as a person's name).
+        account = (self.github_context.get("account_login") or "").strip()
+        if tool_name in ALLOWED_WRITE_TOOLS and self.github_context.get("source") == "client_app" and account:
+            target_owner = str(effective_args.get("owner") or "").strip()
+            if target_owner.lower() != account.lower():
+                return (
+                    f"Changes can only be made in repositories of the connected GitHub account '{account}', not "
+                    f"'{target_owner or 'unknown'}'. Use owner '{account}' (check the repository name), or for this "
+                    "client's websites use list_my_websites / start_site_edit.",
+                    True,
+                )
+
         # 4. Human-in-the-loop approval interception for write actions
         if self.require_approval_for_writes and tool_name in ALLOWED_WRITE_TOOLS:
             return await self._submit_for_approval(tool_name, effective_args)
