@@ -42,9 +42,13 @@ def app_config() -> Dict[str, str]:
     # Keys stored in env/Secrets Manager often have escaped newlines.
     if "\\n" in key and "\n" not in key:
         key = key.replace("\\n", "\n")
+    # Accept either the slug ("jts-powertool") or the app's full public URL ("https://github.com/apps/jts-powertool").
+    slug = (get_secret("GITHUB_APP_SLUG", "") or "").strip().rstrip("/")
+    if "/" in slug:
+        slug = slug.rsplit("/", 1)[-1]
     return {
         "app_id": (get_secret("GITHUB_APP_ID", "") or "").strip(),
-        "slug": (get_secret("GITHUB_APP_SLUG", "") or "").strip(),
+        "slug": slug,
         "private_key": key.strip(),
         "client_id": (get_secret("GITHUB_APP_CLIENT_ID", "") or "").strip(),
         "client_secret": (get_secret("GITHUB_APP_CLIENT_SECRET", "") or "").strip(),
