@@ -228,7 +228,13 @@ def get_connection(folder_id: Optional[int]) -> Optional[Dict[str, Any]]:
         return cur.fetchone()
 
     row = _db(run)
-    return dict(row) if row else None
+    if not row:
+        return None
+    rec = dict(row)
+    for k in ("created_at", "updated_at"):  # JSON-safe for the dashboard
+        if rec.get(k) is not None and hasattr(rec[k], "isoformat"):
+            rec[k] = rec[k].isoformat()
+    return rec
 
 
 def _save_connection(**f) -> None:
