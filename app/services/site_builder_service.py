@@ -159,8 +159,10 @@ BUILD_MODE_INSTRUCTIONS = (
 You build complete websites and publish them to the client's own GitHub.
 
 STEP 1 - ALWAYS ASK FOR THE STACK FIRST (no default, never choose for the user):
-Before writing any file for a NEW website, ask the user which stack they want, showing this numbered list exactly,
-plus at most one short question about pages/style if needed:
+For every NEW website, call ask_site_stack and show the user its numbered list exactly (plus at most one short
+question about pages/style), then END your reply and wait. Ask again for every new website, even if a stack was
+mentioned earlier in the chat or in their request; earlier answers don't count. If ask_site_stack reports an
+unfinished draft, ask whether to continue it or start a new website (then discard_site_draft). The options are:
 """
     + stack_choices_text()
     + """
@@ -238,6 +240,7 @@ def _ensure_tables(cur) -> None:
         ALTER TABLE site_drafts ADD COLUMN IF NOT EXISTS base_branch VARCHAR(255);
         ALTER TABLE site_drafts ADD COLUMN IF NOT EXISTS base_sha VARCHAR(64);
         ALTER TABLE site_drafts ADD COLUMN IF NOT EXISTS stack VARCHAR(30);
+        ALTER TABLE site_drafts ADD COLUMN IF NOT EXISTS stack_asked_at TIMESTAMP WITH TIME ZONE;
         CREATE TABLE IF NOT EXISTS site_draft_base_files (
             draft_id INTEGER NOT NULL REFERENCES site_drafts(id) ON DELETE CASCADE,
             path VARCHAR(255) NOT NULL,
@@ -410,6 +413,27 @@ def normalize_path(path: str, stack: Optional[str] = None) -> str:
             "Images must be linked from the web for now (binary files can't be written)."
         )
     return p
+
+
+def mark_stack_asked(draft_id: int) -> None:
+    def run(cur):
+        cur.execute(
+            "UPDATE site_drafts SET stack_asked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = %s;",
+            (draft_id,),
+        )
+
+    _db(run)
+
+
+def stack_question_answerable(draft: Dict[str, Any], request_started_at: float) -> bool:
+    """True only if the stack question was asked for this draft in an EARLIER message than the current one."""
+    asked = draft.get("stack_asked_at")
+    if not asked:
+        return False
+    try:
+        return asked.timestamp() < request_started_at
+    except AttributeError:
+        return False
 
 
 def set_draft_stack(draft_id: int, stack: str) -> str:

@@ -19,7 +19,8 @@ LOCAL_TOOLS = {"connect_github"}
 # Website builder tools (offered only in build mode). draft_* never touch GitHub; publish_website needs approval.
 SITE_TOOLS = {
     "draft_write_file", "draft_read_file", "draft_list_files", "draft_delete_file", "publish_website",
-    "list_my_websites", "start_site_edit", "propose_site_changes", "set_site_stack",
+    "list_my_websites", "start_site_edit", "propose_site_changes", "set_site_stack", "ask_site_stack",
+    "discard_site_draft",
 }
 
 # Allowed Read Tools
@@ -329,10 +330,27 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
 
 SITE_TOOL_SCHEMAS = [
     {
+        "name": "discard_site_draft",
+        "description": (
+            "Website builder: close the unfinished website draft in this conversation (nothing on GitHub changes). Use only "
+            "when the user says they want to start a different/new website or abandon the current draft."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "ask_site_stack",
+        "description": (
+            "Website builder: call this FIRST for every new website. Returns the numbered list of stacks to show the user. "
+            "Show it exactly, then end your reply and wait for the user's choice."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "set_site_stack",
         "description": (
-            "Website builder: record the stack the USER chose for a new website, after you asked them. Never call it "
-            "before the user answered. Values: static, react, vue, svelte, astro, nextjs, php, laravel, wordpress."
+            "Website builder: record the stack the USER chose, in their reply to the list from ask_site_stack. Only works "
+            "after ask_site_stack was shown in an earlier message. Values: static, react, vue, svelte, astro, nextjs, php, "
+            "laravel, wordpress."
         ),
         "input_schema": {
             "type": "object",
@@ -453,6 +471,8 @@ class ControlledToolAdapter:
         self.mcp_client = mcp_client or GitHubMCPClient()
         self.github_context = github_context or {}
         self.build_mode = build_mode
+        import time as _time
+        self.request_started_at = _time.time()  # the stack answer must come in a later message than the question
         if self.github_context.get("source") == "client_app":
             # The client's own GitHub: only their chosen default repo (may be none -> the user must name one).
             self.default_repo = self.github_context.get("default_repo") or ""
@@ -599,10 +619,36 @@ class ControlledToolAdapter:
                     )
                 return (out, is_err)
 
+            if tool_name == "ask_site_stack":
+                draft = sb.get_or_create_draft(self.channel_id, thread_key, folder_id, self.user_id)
+                if (draft.get("kind") or "create") == "edit":
+                    return ("This conversation is editing an existing website; its stack is already set.", True)
+                existing_files = sb.list_files(draft["id"])
+                if draft.get("stack") or existing_files:
+                    label = sb.stack_info(draft.get("stack"))["label"] if draft.get("stack") else "no stack yet"
+                    return (
+                        f"There's already an unfinished website draft here ({label}, {len(existing_files)} files, status "
+                        f"{draft['status']}). Ask the user whether to CONTINUE it or START A NEW website. If they want a new "
+                        "one, call discard_site_draft, then ask_site_stack again.",
+                        False,
+                    )
+                sb.mark_stack_asked(draft["id"])
+                return (
+                    "Show the user this list exactly and ask them to reply with a number. Then END your reply; don't call "
+                    "set_site_stack or write files until they answer.\n" + sb.stack_choices_text(),
+                    False,
+                )
+
             if tool_name == "set_site_stack":
                 draft = sb.get_or_create_draft(self.channel_id, thread_key, folder_id, self.user_id)
                 if (draft.get("kind") or "create") == "edit":
                     return ("This conversation is editing an existing website; its stack can't be changed.", True)
+                if not draft.get("stack") and not sb.stack_question_answerable(draft, self.request_started_at):
+                    return (
+                        "You must ask first: call ask_site_stack, show the list, and wait for the user's reply in their next "
+                        "message. Earlier answers in the chat don't count.",
+                        True,
+                    )
                 if sb.list_files(draft["id"]) and draft.get("stack") and draft["stack"] != str(args.get("stack", "")).lower():
                     return ("Files were already written for another stack. Ask the user to start a new conversation for a different stack.", True)
                 key = sb.set_draft_stack(draft["id"], str(args.get("stack", "")))
@@ -613,8 +659,8 @@ class ControlledToolAdapter:
                 draft = sb.get_or_create_draft(self.channel_id, thread_key, folder_id, self.user_id)
                 if not draft.get("stack") and (draft.get("kind") or "create") != "edit":
                     return (
-                        "No stack chosen yet. Ask the user which stack they want (show the numbered list), wait for their "
-                        "answer, then call set_site_stack before writing files.",
+                        "No stack chosen yet. Call ask_site_stack, show the list, and wait for the user's answer; then call "
+                        "set_site_stack before writing files.",
                         True,
                     )
                 res = sb.write_file(draft["id"], args.get("path", ""), args.get("content"), draft.get("stack") or "static")
@@ -626,7 +672,11 @@ class ControlledToolAdapter:
 
             draft = sb.get_open_draft(self.channel_id, thread_key)
             if not draft:
-                return ("There's no website draft in this conversation yet. Start with draft_write_file('index.html', ...).", True)
+                return ("There's no website draft in this conversation yet. Start with ask_site_stack.", True)
+
+            if tool_name == "discard_site_draft":
+                sb.set_status(draft["id"], "discarded")
+                return ("The unfinished draft was closed. Nothing on GitHub changed. For a new website, call ask_site_stack.", False)
 
             if tool_name == "draft_list_files":
                 files = sb.list_files(draft["id"])
