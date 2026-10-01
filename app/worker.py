@@ -483,6 +483,24 @@ async def process_job(job: dict):
         )
         is_billable = key_source == "jts"
         client_key_fallback_reason = None
+        # Website builder: stronger model, more steps and a cost cap when building a site (or continuing a draft)
+        from app.services import site_builder_service as site_builder
+        build_mode = site_builder.detect_build_intent(cleaned_prompt) or site_builder.has_open_draft(
+            channel_id, thread_ts or f"channel_{channel_id}"
+        )
+        active_model = MODEL
+        stream_limits = {}
+        if build_mode:
+            active_model = (get_secret("ANTHROPIC_BUILD_MODEL", "claude-sonnet-5-5") or "claude-sonnet-5-5").strip()
+            stream_limits = {
+                "max_agent_turns_override": int(get_secret("BUILD_MAX_AGENT_TURNS", "40") or 40),
+                "max_tokens_override": int(get_secret("BUILD_MAX_TOKENS", "32000") or 32000),
+                "cost_cap_usd": float(get_secret("BUILD_COST_CAP_USD", "2.0") or 2.0),
+                "request_timeout": 300.0,
+            }
+            active_system_prompt = f"{active_system_prompt}\n\n{site_builder.BUILD_MODE_INSTRUCTIONS}"
+            logger.info(f"[SITE_BUILDER] Build mode on for channel={channel_id} thread={thread_ts} model={active_model}")
+
         # GitHub: channel's own token (legacy) -> client's GitHub App connection (1-hour token) -> JTS default
         from app.services.github_app_service import resolve_github_token
         github_ctx = await resolve_github_token(
@@ -504,6 +522,7 @@ async def process_job(job: dict):
             workspace_name=workspace_name,
             channel_name=channel_name,
             github_context=github_ctx,
+            build_mode=build_mode,
         )
 
         async def on_tool_event(action: str, tool_name: str, tool_args: dict, output: str, is_error: bool):
@@ -528,7 +547,7 @@ async def process_job(job: dict):
             user_message=user_message_to_send,
             system_prompt=active_system_prompt,
             session_id=existing_session_id,
-            model=MODEL,
+            model=active_model,
             context_messages=history_messages,
             tool_adapter=tool_adapter,
             tool_callback=on_tool_event,
@@ -539,6 +558,7 @@ async def process_job(job: dict):
             user_id=user_id,
             workspace_id=team_id,
             workspace_name=workspace_name,
+            **stream_limits,
         ):
             if hasattr(message, "role"):
                 if message.role == "system" and isinstance(message.content, dict):
@@ -623,7 +643,7 @@ async def process_job(job: dict):
                     user_id=user_id,
                     user_name=user_display,
                     session_id=real_session_id or existing_session_id or "",
-                    model=MODEL,
+                    model=active_model,
                     prompt_text=cleaned_prompt,
                     system_prompt=SYSTEM_PROMPT,
                     messages_sent=formatted_chain,

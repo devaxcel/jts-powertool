@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 # Tools handled inside JTS PowerTool (no GitHub call, no approval)
 LOCAL_TOOLS = {"connect_github"}
+# Website builder tools (offered only in build mode). draft_* never touch GitHub; publish_website needs approval.
+SITE_TOOLS = {"draft_write_file", "draft_read_file", "draft_list_files", "draft_delete_file", "publish_website"}
 
 # Allowed Read Tools
 ALLOWED_READ_TOOLS = {
@@ -322,6 +324,58 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
 ]
 
 
+SITE_TOOL_SCHEMAS = [
+    {
+        "name": "draft_write_file",
+        "description": (
+            "Website builder: create or replace ONE file in this conversation's private website draft (nothing goes to "
+            "GitHub). Give the complete file content. Paths are relative, e.g. 'index.html', 'css/styles.css', "
+            "'js/main.js'. Allowed: .html .css .js .json .svg .txt .md .xml .webmanifest."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Relative file path, e.g. 'about.html'"},
+                "content": {"type": "string", "description": "The complete file content"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "draft_read_file",
+        "description": "Website builder: read one file from this conversation's website draft.",
+        "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+    },
+    {
+        "name": "draft_list_files",
+        "description": "Website builder: list the files (and sizes) in this conversation's website draft.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "draft_delete_file",
+        "description": "Website builder: remove one file from this conversation's website draft.",
+        "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+    },
+    {
+        "name": "publish_website",
+        "description": (
+            "Website builder: when the draft is complete (has index.html), propose publishing it. This posts ONE approval "
+            "card with a preview link. After a human approves, a new repository is created in the client's own GitHub, "
+            "all files are committed, and GitHub Pages hosting is turned on. Call it once; don't say the site is live yet."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo_name": {"type": "string", "description": "New repository name, lowercase-with-dashes, e.g. 'sunrise-bakery-site'"},
+                "description": {"type": "string", "description": "One-line description of the website"},
+                "private": {"type": "boolean", "description": "Private repository (GitHub Pages then needs a paid plan). Default false."},
+            },
+            "required": ["repo_name"],
+        },
+    },
+]
+
+
 class ControlledToolAdapter:
     """
     Safety gate between Claude Agent and external GitHub MCP Server.
@@ -340,10 +394,12 @@ class ControlledToolAdapter:
         workspace_name: str = "",
         channel_name: str = "",
         github_context: Optional[Dict[str, Any]] = None,
+        build_mode: bool = False,
     ):
         from app.services.channel_secrets_service import canonical_channel_id
         self.mcp_client = mcp_client or GitHubMCPClient()
         self.github_context = github_context or {}
+        self.build_mode = build_mode
         if self.github_context.get("source") == "client_app":
             # The client's own GitHub: only their chosen default repo (may be none -> the user must name one).
             self.default_repo = self.github_context.get("default_repo") or ""
@@ -363,6 +419,146 @@ class ControlledToolAdapter:
         self.slack_token = slack_token or get_secret("SLACK_BOT_TOKEN", "")
         self.require_approval_for_writes = require_approval_for_writes
         self.approval_card_posted: bool = False
+
+    async def _submit_for_approval(self, tool_name: str, effective_args: Dict[str, Any]) -> Tuple[str, bool]:
+        """Stores a pending approval and posts the interactive approval card in Slack."""
+        approval_id = f"appr_{uuid.uuid4().hex[:12]}"
+        create_pending_approval(
+            approval_id=approval_id,
+            channel_id=self.channel_id,
+            thread_ts=self.thread_ts,
+            user_id=self.user_id,
+            tool_name=tool_name,
+            tool_arguments=effective_args,
+            channel_name=self.channel_name,
+        )
+        logger.info(
+            f"[DEBUG_TOOL] Pending approval created in DB: approval_id='{approval_id}', tool='{tool_name}', "
+            f"channel='{self.channel_id}', channel_name='{self.channel_name}', user='{self.user_id}'"
+        )
+
+        # Post Block Kit Approval Card to Slack if Slack context is present
+        if self.channel_id and self.slack_token:
+            try:
+                blocks = build_approval_card_blocks(
+                    approval_id=approval_id,
+                    tool_name=tool_name,
+                    tool_args=effective_args,
+                    default_repo=self.default_repo,
+                )
+                target_thread = (
+                    self.thread_ts
+                    if (self.thread_ts and not self.thread_ts.startswith("channel_") and not self.thread_ts.startswith("dm_"))
+                    else None
+                )
+                logger.info(
+                    f"[DEBUG_SLACK] Posting approval card to Slack: channel='{self.channel_id}', "
+                    f"thread='{target_thread}', approval_id='{approval_id}', total_blocks={len(blocks)}"
+                )
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        "https://slack.com/api/chat.postMessage",
+                        headers={"Authorization": f"Bearer {self.slack_token}"},
+                        json={
+                            "channel": self.channel_id,
+                            "thread_ts": target_thread,
+                            "text": f"🛡️ GitHub Write Permission Request: `{tool_name}`",
+                            "blocks": blocks,
+                        }
+                    )
+                    resp_data = resp.json()
+                    resp_ok = resp_data.get("ok", False)
+                    resp_err = resp_data.get("error")
+                    card_ts = resp_data.get("ts", "")
+                    logger.info(
+                        f"[DEBUG_SLACK] chat.postMessage response: ok={resp_ok}, error={resp_err}, "
+                        f"card_ts='{card_ts}', status_code={resp.status_code}"
+                    )
+                    if resp_ok:
+                        self.approval_card_posted = True
+                        update_pending_approval_message_ts(approval_id, card_ts)
+                        logger.info(
+                            f"[DEBUG_SLACK] approval_card_posted set to True for approval_id='{approval_id}'"
+                        )
+                    else:
+                        logger.error(
+                            f"[DEBUG_SLACK] FAILED to post approval card to Slack: error='{resp_err}', "
+                            f"approval_id='{approval_id}'"
+                        )
+            except Exception as e:
+                logger.error(f"[DEBUG_SLACK] Exception posting approval card: {e}", exc_info=True)
+
+        return (
+            f"Action proposal for '{tool_name}' has been prepared and submitted for human approval. "
+            "An interactive approval card has been posted to this Slack conversation with [Approve & Apply], [View Full Diff], and [Reject] buttons. "
+            "The changes will be applied to GitHub immediately upon user approval.",
+            False,
+        )
+
+    async def _run_site_tool(self, tool_name: str, args: Dict[str, Any]) -> Tuple[str, bool]:
+        """Website builder tools. Drafts live in the database; only publish_website (after approval) touches GitHub."""
+        from app.services import site_builder_service as sb
+        from app.services.channel_secrets_service import get_folder_id_for_channel
+
+        folder_id = get_folder_id_for_channel(self.channel_id)
+        if not folder_id:
+            return (
+                "Websites can only be built in a channel that belongs to a client. Tell the user to ask their JTS "
+                "administrator to add this channel to their client.",
+                True,
+            )
+        thread_key = self.thread_ts or f"channel_{self.channel_id}"
+        try:
+            if tool_name == "draft_write_file":
+                draft = sb.get_or_create_draft(self.channel_id, thread_key, folder_id, self.user_id)
+                res = sb.write_file(draft["id"], args.get("path", ""), args.get("content"))
+                return (
+                    f"Saved {res['path']} ({res['size_bytes']:,} bytes). Draft now has {res['file_count']} files "
+                    f"({res['total_bytes']:,} bytes).",
+                    False,
+                )
+
+            draft = sb.get_open_draft(self.channel_id, thread_key)
+            if not draft:
+                return ("There's no website draft in this conversation yet. Start with draft_write_file('index.html', ...).", True)
+
+            if tool_name == "draft_list_files":
+                files = sb.list_files(draft["id"])
+                if not files:
+                    return ("The draft is empty.", False)
+                lines = "\n".join(f"- {f['path']} ({f['size_bytes']:,} bytes)" for f in files)
+                return (f"Draft files ({len(files)}):\n{lines}", False)
+
+            if tool_name == "draft_read_file":
+                content = sb.read_file(draft["id"], args.get("path", ""))
+                return (content, False) if content is not None else (f"'{args.get('path')}' isn't in the draft.", True)
+
+            if tool_name == "draft_delete_file":
+                removed = sb.delete_file(draft["id"], args.get("path", ""))
+                return ("Removed." if removed else f"'{args.get('path')}' wasn't in the draft.", not removed)
+
+            if tool_name == "publish_website":
+                proposal = sb.build_publish_proposal(
+                    draft,
+                    str(args.get("repo_name", "")).strip(),
+                    str(args.get("description", "") or ""),
+                    bool(args.get("private", False)),
+                )
+                out, is_err = await self._submit_for_approval("publish_website", proposal)
+                if not is_err:
+                    sb.set_status(draft["id"], "pending_approval")
+                    out = (
+                        f"Publishing was proposed: repository {proposal['owner']}/{proposal['repo']} with "
+                        f"{proposal['file_count']} files. An approval card with a 'Preview site' button was posted. "
+                        "Tell the user to check the preview and approve; the live link is shared after approval."
+                    )
+                return (out, is_err)
+        except sb.SiteBuilderError as e:
+            return (str(e), True)
+        except Exception as e:
+            logger.error(f"[SITE_BUILDER] Tool {tool_name} failed: {e}", exc_info=True)
+            return (f"The website draft couldn't be updated ({e}). Try again.", True)
+        return (f"Unknown website tool '{tool_name}'.", True)
 
     async def _post_connect_github_button(self) -> Tuple[str, bool]:
         """Posts a single-use 'Connect GitHub' button for this channel's client."""
@@ -470,6 +666,8 @@ class ControlledToolAdapter:
 
             tools.append(tool_copy)
 
+        if self.build_mode:
+            tools.extend(copy.deepcopy(SITE_TOOL_SCHEMAS))
         return tools
 
     def is_tool_allowed(self, tool_name: str) -> bool:
@@ -478,6 +676,8 @@ class ControlledToolAdapter:
         """
         if tool_name in BLOCKED_DESTRUCTIVE_TOOLS:
             return False
+        if tool_name in SITE_TOOLS:
+            return self.build_mode
         return (tool_name in ALLOWED_READ_TOOLS) or (tool_name in ALLOWED_WRITE_TOOLS)
 
     def _inject_default_repo(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -548,6 +748,9 @@ class ControlledToolAdapter:
 
         if tool_name == "connect_github":
             return await self._post_connect_github_button()
+
+        if tool_name in SITE_TOOLS:
+            return await self._run_site_tool(tool_name, arguments or {})
 
         # 1.6. Client GitHub connection policy
         gh_ctx = self.github_context
@@ -654,78 +857,7 @@ class ControlledToolAdapter:
 
         # 4. Human-in-the-loop approval interception for write actions
         if self.require_approval_for_writes and tool_name in ALLOWED_WRITE_TOOLS:
-            approval_id = f"appr_{uuid.uuid4().hex[:12]}"
-            create_pending_approval(
-                approval_id=approval_id,
-                channel_id=self.channel_id,
-                thread_ts=self.thread_ts,
-                user_id=self.user_id,
-                tool_name=tool_name,
-                tool_arguments=effective_args,
-                channel_name=self.channel_name,
-            )
-            logger.info(
-                f"[DEBUG_TOOL] Pending approval created in DB: approval_id='{approval_id}', tool='{tool_name}', "
-                f"channel='{self.channel_id}', channel_name='{self.channel_name}', user='{self.user_id}'"
-            )
-
-            # Post Block Kit Approval Card to Slack if Slack context is present
-            if self.channel_id and self.slack_token:
-                try:
-                    blocks = build_approval_card_blocks(
-                        approval_id=approval_id,
-                        tool_name=tool_name,
-                        tool_args=effective_args,
-                        default_repo=self.default_repo,
-                    )
-                    target_thread = (
-                        self.thread_ts
-                        if (self.thread_ts and not self.thread_ts.startswith("channel_") and not self.thread_ts.startswith("dm_"))
-                        else None
-                    )
-                    logger.info(
-                        f"[DEBUG_SLACK] Posting approval card to Slack: channel='{self.channel_id}', "
-                        f"thread='{target_thread}', approval_id='{approval_id}', total_blocks={len(blocks)}"
-                    )
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        resp = await client.post(
-                            "https://slack.com/api/chat.postMessage",
-                            headers={"Authorization": f"Bearer {self.slack_token}"},
-                            json={
-                                "channel": self.channel_id,
-                                "thread_ts": target_thread,
-                                "text": f"🛡️ GitHub Write Permission Request: `{tool_name}`",
-                                "blocks": blocks,
-                            }
-                        )
-                        resp_data = resp.json()
-                        resp_ok = resp_data.get("ok", False)
-                        resp_err = resp_data.get("error")
-                        card_ts = resp_data.get("ts", "")
-                        logger.info(
-                            f"[DEBUG_SLACK] chat.postMessage response: ok={resp_ok}, error={resp_err}, "
-                            f"card_ts='{card_ts}', status_code={resp.status_code}"
-                        )
-                        if resp_ok:
-                            self.approval_card_posted = True
-                            update_pending_approval_message_ts(approval_id, card_ts)
-                            logger.info(
-                                f"[DEBUG_SLACK] approval_card_posted set to True for approval_id='{approval_id}'"
-                            )
-                        else:
-                            logger.error(
-                                f"[DEBUG_SLACK] FAILED to post approval card to Slack: error='{resp_err}', "
-                                f"approval_id='{approval_id}'"
-                            )
-                except Exception as e:
-                    logger.error(f"[DEBUG_SLACK] Exception posting approval card: {e}", exc_info=True)
-
-            return (
-                f"Action proposal for '{tool_name}' has been prepared and submitted for human approval. "
-                "An interactive approval card has been posted to this Slack conversation with [Approve & Apply], [View Full Diff], and [Reject] buttons. "
-                "The changes will be applied to GitHub immediately upon user approval.",
-                False,
-            )
+            return await self._submit_for_approval(tool_name, effective_args)
 
         # 5. Autonomous execution for read actions
         try:

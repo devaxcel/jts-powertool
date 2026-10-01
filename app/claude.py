@@ -17,7 +17,7 @@ import httpx
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from app.tools.secrets_manager import get_secret
-from app.services.usage_service import record_api_usage
+from app.services.usage_service import record_api_usage, calculate_token_cost
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -197,6 +197,12 @@ def should_force_tool_calling(user_message: Union[str, List[Dict[str, Any]]]) ->
     return any(re.search(p, text) for p in patterns)
 
 
+def supports_forced_tool_choice(model: str) -> bool:
+    """Newer models (Sonnet 5.x, Opus 5.x, Fable, Mythos) reject tool_choice "any"/"tool" with a 400."""
+    m = (model or "").lower()
+    return not any(k in m for k in ("sonnet-5", "opus-5", "fable", "mythos"))
+
+
 async def stream(
     *,
     user_message: Union[str, List[Dict[str, Any]]],
@@ -214,6 +220,10 @@ async def stream(
     workspace_id: Optional[str] = None,
     workspace_name: Optional[str] = None,
     key_source: str = "jts",
+    max_agent_turns_override: Optional[int] = None,
+    max_tokens_override: Optional[int] = None,
+    cost_cap_usd: Optional[float] = None,
+    request_timeout: float = 90.0,
 ) -> AsyncIterator[Message]:
     from app.services.channel_secrets_service import canonical_channel_id
     if channel_id:
@@ -271,6 +281,8 @@ async def stream(
         max_tokens = max(raw_max_tokens, 8192)
     except Exception:
         max_tokens = 8192
+    if max_tokens_override:
+        max_tokens = int(max_tokens_override)
 
     # Retrieve allowed tools from Controlled Tool Adapter if present
     allowed_tools = tool_adapter.get_allowed_tools() if tool_adapter else []
@@ -278,12 +290,14 @@ async def stream(
     # If tools are configured, run the Agentic Tool Calling Loop
     if allowed_tools:
         current_messages = list(trimmed_messages)
-        max_agent_turns = int(os.getenv("MAX_AGENT_TURNS", "5"))
+        max_agent_turns = int(max_agent_turns_override or os.getenv("MAX_AGENT_TURNS", "5"))
         turn_count = 0
         full_assistant_reply = ""
+        spent_usd = 0.0  # cost of this request so far (for the optional cap)
+        stopped_for_cost = False
 
         try:
-            async with httpx.AsyncClient(timeout=90.0) as client:
+            async with httpx.AsyncClient(timeout=request_timeout) as client:
                 while turn_count < max_agent_turns:
                     turn_count += 1
                     logger.info(f"[DEBUG_CLAUDE] Starting agent turn {turn_count}/{max_agent_turns} (model={model})")
@@ -294,7 +308,7 @@ async def stream(
                         "messages": current_messages,
                         "tools": allowed_tools,
                     }
-                    if turn_count == 1 and should_force_tool_calling(user_message):
+                    if turn_count == 1 and supports_forced_tool_choice(model) and should_force_tool_calling(user_message):
                         payload["tool_choice"] = {"type": "any"}
                         logger.info(f"[DEBUG_CLAUDE] Turn 1 forced tool_choice: type=any")
 
@@ -393,6 +407,8 @@ async def stream(
                     except Exception as usage_err:
                         logger.warning(f"[USAGE] Failed to record usage log: {usage_err}")
 
+                    spent_usd += calculate_token_cost(model, in_toks, out_toks)
+
                     tool_use_blocks = [b for b in content_blocks if b.get("type") == "tool_use"]
                     text_blocks = [b for b in content_blocks if b.get("type") == "text"]
 
@@ -467,6 +483,14 @@ async def stream(
                             )
                             break
 
+                        # Stop before another (paid) turn once the request's cost cap is reached
+                        if cost_cap_usd and spent_usd >= cost_cap_usd:
+                            stopped_for_cost = True
+                            logger.warning(
+                                f"[DEBUG_CLAUDE] Cost cap reached (${spent_usd:.4f} >= ${cost_cap_usd:.2f}) at turn {turn_count}. Stopping."
+                            )
+                            break
+
                         # Continue agent loop to next turn
                     else:
                         # Final text output turn
@@ -481,6 +505,14 @@ async def stream(
                         )
                         break
 
+                if (stopped_for_cost or turn_count >= max_agent_turns) and not full_assistant_reply and not getattr(tool_adapter, "approval_card_posted", False):
+                    note = (
+                        f"I paused because this request reached its cost limit (${cost_cap_usd:.2f}). "
+                        if stopped_for_cost
+                        else "I paused because this request reached its step limit. "
+                    ) + "My work so far is saved. Reply \"continue\" and I'll pick up where I left off."
+                    full_assistant_reply = note
+                    yield Message(role="assistant", content=note)
                 if turn_count >= max_agent_turns and not full_assistant_reply:
                     logger.warning(
                         f"[DEBUG_CLAUDE] Loop EXHAUSTED max_agent_turns ({max_agent_turns}) without producing text response! "

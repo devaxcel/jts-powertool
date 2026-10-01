@@ -18,8 +18,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  Globe,
+  ExternalLink,
 } from "lucide-react";
-import { fetchApprovalsWithAccess, fetchApproval, submitApprovalAction } from "@/lib/api";
+import { fetchApprovalsWithAccess, fetchApproval, submitApprovalAction, fetchSitePreviewLink } from "@/lib/api";
 import { Approval, formatLocalDateTime } from "@/lib/types";
 import {
   PageHeader,
@@ -105,6 +107,18 @@ function describeApproval(a: Approval): Summary {
         headline: `Issue #${args.issue_number ?? "?"}${args.title ? `: ${args.title}` : ""}`,
         details: withRepo([args.state && `Set state to: ${args.state}`]),
       };
+    case "publish_website": {
+      const files: any[] = args.files || [];
+      return {
+        icon: Globe,
+        action: "Publish a website",
+        headline: `${args.owner || ""}/${args.repo || ""}`,
+        details: [
+          `${files.length} file${files.length === 1 ? "" : "s"} · ${args.private ? "private" : "public"} repository · hosted on GitHub Pages`,
+          "Approving creates the repository in the client's own GitHub and publishes the site.",
+        ],
+      };
+    }
     case "add_issue_comment":
       return {
         icon: MessageSquare,
@@ -160,6 +174,34 @@ function DiffView({ text, kind }: { text: string; kind?: Approval["diff_kind"] }
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function SitePreviewButton({ appr }: { appr: Approval }) {
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const draftId = appr.tool_arguments?.draft_id;
+  if (!draftId) return null;
+  async function open() {
+    setOpening(true);
+    setError(null);
+    try {
+      const { url } = await fetchSitePreviewLink(draftId);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setOpening(false);
+    }
+  }
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <button type="button" onClick={open} disabled={opening} className={btn.secondary}>
+        {opening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+        Open preview
+      </button>
+      {error && <span className="text-xs text-rose-600">{error}</span>}
     </div>
   );
 }
@@ -491,6 +533,7 @@ export default function ApprovalsPage() {
                   </div>
                 )}
 
+                {appr.tool_name === "publish_website" && appr.status === "pending" && <SitePreviewButton appr={appr} />}
                 <ChangesPanel appr={appr} />
               </Card>
             );
@@ -550,7 +593,9 @@ export default function ApprovalsPage() {
               </p>
             ))}
             <p className="text-xs">
-              {confirming.action === "approve"
+              {confirming.action === "approve" && confirming.appr.tool_name === "publish_website"
+                ? "This creates the repository in the client's GitHub, uploads all files and turns on GitHub Pages. The live link is posted in Slack."
+                : confirming.action === "approve"
                 ? "This runs on GitHub straight away and updates the request in Slack."
                 : "Nothing will be changed on GitHub. The request in Slack will be marked as rejected."}
             </p>

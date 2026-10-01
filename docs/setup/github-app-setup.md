@@ -84,3 +84,27 @@ sudo systemctl restart jts-powertool jts-worker
 ## Optional: require every client to connect their own GitHub
 
 By default, a client that hasn't connected GitHub keeps using JTS's own token (`GITHUB_PERSONAL_ACCESS_TOKEN`), so nothing breaks during rollout. Once your clients have connected, add `GITHUB_REQUIRE_CLIENT_CONNECTION` = `true` to the secret. Clients without a connection then get the Connect GitHub button instead of JTS's token.
+
+## Website builder (optional settings)
+
+Ask the bot in a client's channel, e.g. `@bot build a website for my bakery with a menu and contact page`.
+It switches to **build mode**, writes the site into a private draft, then posts **one** approval card with
+**Preview site**. Approving creates the repository in the client's GitHub, uploads all files in one commit and turns
+on GitHub Pages; the live link is posted in Slack.
+
+These secrets are optional (defaults shown):
+
+| Secret | Default | Meaning |
+|---|---|---|
+| `ANTHROPIC_BUILD_MODEL` | `claude-sonnet-5-5` | Model used only for website building (chat stays on `ANTHROPIC_MODEL`) |
+| `BUILD_COST_CAP_USD` | `2.0` | Most one build request may spend before pausing ("continue" resumes) |
+| `BUILD_MAX_AGENT_TURNS` | `40` | Max steps per build request |
+| `BUILD_MAX_TOKENS` | `32000` | Max output per step |
+| `SITE_PREVIEW_SECRET` | (derived) | Extra secret mixed into preview-link signatures |
+
+Notes:
+- Building needs the client's GitHub connected (the bot posts the Connect button if not).
+- If the client installed the app on **selected repositories**, GitHub may not let the app write to a brand-new
+  repository. The bot then says so; choose **All repositories** for that account, or add the new repo, and publish again.
+- GitHub Pages is free for **public** repositories; private-repository sites need a paid GitHub plan.
+

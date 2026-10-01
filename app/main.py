@@ -16,6 +16,7 @@ from app.auth_router import auth_router, users_router, verify_session_token, SES
 from app.usage_router import usage_router
 from app.invoice_router import invoice_router
 from app.github_router import github_public_router, github_folder_router
+from app.site_router import site_preview_router, site_drafts_router
 from app.organizations_router import organizations_router
 from app.global_settings_router import global_settings_router
 
@@ -47,6 +48,8 @@ PUBLIC_EXEMPT_PREFIXES = (
     "/api/github/connect",
     "/api/github/callback",
     "/api/github/webhook",
+    # Website draft previews: each URL carries a signed, expiring token for one draft
+    "/api/site-preview/",
     "/docs",
     "/openapi.json",
 )
@@ -145,5 +148,7 @@ app.include_router(usage_router)
 app.include_router(invoice_router)
 app.include_router(github_public_router)
 app.include_router(github_folder_router)
+app.include_router(site_preview_router)
+app.include_router(site_drafts_router)
 app.include_router(organizations_router)
 app.include_router(global_settings_router)

@@ -22,6 +22,7 @@ from app.db.repositories import (
     get_system_stats,
 )
 from app.services.github_app_service import GitHubAppError, github_client_for_channel, resolve_github_token
+from app.services.site_builder_service import check_can_publish, execute_publish_approval
 from app.tools.secrets_manager import get_secret
 from app.slack_router import build_approved_card_blocks, build_rejected_card_blocks
 from app.auth_router import (
@@ -135,6 +136,16 @@ def format_diff_preview(tool_name: str, tool_args: dict) -> str:
 
     if tool_name == "create_branch":
         return f"Create branch '{args.get('branch', '?')}' from '{args.get('from_branch') or 'the default branch'}'"
+
+    if tool_name == "publish_website":
+        files = args.get("files") or []
+        lines = [
+            f"New repository: {args.get('owner', '')}/{args.get('repo', '')} ({'private' if args.get('private') else 'public'})",
+            "Hosting: GitHub Pages",
+            f"Files ({len(files)}):",
+        ]
+        lines.extend(f"  {f.get('path')}  ({int(f.get('size_bytes', 0)) / 1000:.1f} KB)" for f in files)
+        return "\n".join(lines)
 
     return json.dumps(args, indent=2)
 
@@ -302,6 +313,8 @@ def _describe_action(tool_name: str, args: dict) -> str:
         return f"open pull request \"{args.get('title', '')}\""
     if tool_name == "create_branch":
         return f"create branch `{args.get('branch', '?')}`"
+    if tool_name == "publish_website":
+        return f"publish the website `{args.get('owner', '')}/{args.get('repo', '')}`"
     return f"run `{tool_name}`"
 
 
@@ -407,7 +420,11 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
     if action == "approve":
         # Resolve the client's GitHub access BEFORE claiming, so a missing connection doesn't burn the approval.
         try:
-            mcp_client = await github_client_for_channel(existing.get("channel_id") or "")
+            if existing.get("tool_name") == "publish_website":
+                check_can_publish(existing.get("channel_id") or "")
+                mcp_client = None
+            else:
+                mcp_client = await github_client_for_channel(existing.get("channel_id") or "")
         except GitHubAppError as e:
             return JSONResponse(status_code=409, content={"ok": False, "status": "github_not_connected", "message": str(e)})
 
@@ -437,8 +454,11 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
                 exec_tool_args["branch"] = "main"
 
         try:
-            output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
-            is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))
+            if exec_tool_name == "publish_website":
+                output, is_error = await execute_publish_approval(exec_tool_args, claimed_record.get("channel_id") or "")
+            else:
+                output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
+                is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))
         except Exception as e:
             output = f"Error executing tool: {str(e)}"
             is_error = True

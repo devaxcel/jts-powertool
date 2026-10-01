@@ -1348,3 +1348,13 @@ export function setGithubDefaultRepo(folderId: number, fullName: string | null):
 export function disconnectGithub(folderId: number): Promise<{ ok: boolean; message: string }> {
   return githubRequest(folderId, "", { method: "DELETE" }, "We couldn't disconnect GitHub.");
 }
+
+export async function fetchSitePreviewLink(draftId: number | string): Promise<{ url: string; status: string; site_url?: string | null }> {
+  const res = await fetch(`${API_BASE}/api/site-drafts/${encodeURIComponent(String(draftId))}/preview-link`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't open the preview."));
+  return data;
+}

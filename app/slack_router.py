@@ -1266,10 +1266,15 @@ async def slack_interactive(request: Request):
 
                 # Execute tool via GitHub MCP using the verified stored payload, with the client's own GitHub access
                 try:
-                    from app.services.github_app_service import github_client_for_channel
-                    mcp_client = await github_client_for_channel((claimed_record or {}).get("channel_id") or channel_id or "")
-                    output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
-                    is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))
+                    exec_channel = (claimed_record or {}).get("channel_id") or channel_id or ""
+                    if exec_tool_name == "publish_website":
+                        from app.services.site_builder_service import execute_publish_approval
+                        output, is_error = await execute_publish_approval(exec_tool_args, exec_channel)
+                    else:
+                        from app.services.github_app_service import github_client_for_channel
+                        mcp_client = await github_client_for_channel(exec_channel)
+                        output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
+                        is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))
                 except Exception as mcp_err:
                     def _unwrap_exc(err: Exception) -> str:
                         if hasattr(err, "exceptions") and err.exceptions:
@@ -1312,7 +1317,13 @@ async def slack_interactive(request: Request):
                     if (thread_ts and not thread_ts.startswith("channel_") and not thread_ts.startswith("dm_"))
                     else None
                 )
-                if not is_error:
+                if exec_tool_name == "publish_website":
+                    confirm_text = (
+                        f":globe_with_meridians: <@{user_id}> approved publishing. {output}"
+                        if not is_error
+                        else f"<@{user_id}> approved publishing, but it failed: {output.replace('[Publish Error]: ', '')} Nothing was published."
+                    )
+                elif not is_error:
                     confirm_text = f"<@{user_id}> approved `{exec_tool_name}`. Changes have been committed to GitHub successfully!\n\n> *Next Step:* If your task has remaining steps (e.g. creating files or code structure), reply to continue with the next step."
                 else:
                     confirm_text = f"<@{user_id}> approved `{exec_tool_name}`, but execution on GitHub failed: `{output}`"

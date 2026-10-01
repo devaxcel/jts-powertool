@@ -12,6 +12,9 @@ def build_approval_card_blocks(
     Constructs an interactive Slack Block Kit card requesting human approval
     before executing a GitHub write/update action.
     """
+    if tool_name == "publish_website":
+        return _build_publish_website_card(approval_id, tool_args)
+
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
     full_repo = f"{owner}/{repo}" if (owner and repo) else default_repo
@@ -369,3 +372,59 @@ def build_diff_modal_view(
             },
         ],
     }
+
+
+def _build_publish_website_card(approval_id: str, tool_args: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Approval card for publishing a website draft: repo, visibility, file list, preview button."""
+    files = tool_args.get("files") or []
+    listed = "\n".join(f"• `{f.get('path')}` ({int(f.get('size_bytes', 0)) / 1000:.1f} KB)" for f in files[:15])
+    if len(files) > 15:
+        listed += f"\n… and {len(files) - 15} more"
+    repo = f"{tool_args.get('owner', '')}/{tool_args.get('repo', '')}"
+    visibility = "Private" if tool_args.get("private") else "Public"
+    elements: List[Dict[str, Any]] = []
+    if tool_args.get("preview_url"):
+        elements.append({
+            "type": "button",
+            "text": {"type": "plain_text", "text": "Preview site", "emoji": False},
+            "url": tool_args["preview_url"],
+            "action_id": "preview_website_draft",
+        })
+    elements.extend([
+        {
+            "type": "button",
+            "text": {"type": "plain_text", "text": "Approve & Publish", "emoji": False},
+            "style": "primary",
+            "action_id": "approve_github_action",
+            "value": approval_id,
+        },
+        {
+            "type": "button",
+            "text": {"type": "plain_text", "text": "Reject", "emoji": False},
+            "style": "danger",
+            "action_id": "reject_github_action",
+            "value": approval_id,
+        },
+    ])
+    return [
+        {"type": "header", "text": {"type": "plain_text", "text": "Publish a website", "emoji": False}},
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*New repository:*\n`{repo}`"},
+                {"type": "mrkdwn", "text": f"*Visibility:*\n{visibility}"},
+                {"type": "mrkdwn", "text": f"*Files:*\n{tool_args.get('file_count', len(files))} ({int(tool_args.get('total_bytes', 0)) / 1000:.0f} KB)"},
+                {"type": "mrkdwn", "text": "*Hosting:*\nGitHub Pages"},
+            ],
+        },
+        {"type": "section", "text": {"type": "mrkdwn", "text": listed or "_No files_"}},
+        {"type": "divider"},
+        {"type": "actions", "block_id": f"approval_actions_{approval_id}", "elements": elements},
+        {
+            "type": "context",
+            "elements": [{
+                "type": "mrkdwn",
+                "text": f"Proposal ID: `{approval_id}` · Approving creates the repository in the client's GitHub and publishes the site.",
+            }],
+        },
+    ]
