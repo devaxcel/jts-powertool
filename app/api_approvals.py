@@ -390,7 +390,14 @@ async def list_approvals(request: Request, status: Optional[str] = None, limit: 
     scope = _channel_scope(ctx)
     # Clients need a wider fetch because other clients' rows are filtered out afterwards.
     fetch_limit = limit if scope is None else MAX_LIST_LIMIT
-    approvals = [a for a in get_all_approvals(status=status, limit=fetch_limit) if _is_visible(a, scope)][:limit]
+    fetched = get_all_approvals(status=status, limit=fetch_limit)
+    approvals = [a for a in fetched if _is_visible(a, scope)][:limit]
+    if scope is not None:
+        hidden = [f"{a.get('channel_id')}/{a.get('channel_name')}" for a in fetched if not _is_visible(a, scope)][:5]
+        logger.info(
+            f"[APPROVALS_SCOPE] user={ctx.get('username')} role={ctx.get('role')} folder={ctx.get('client_folder_id')} "
+            f"scope_size={len(scope)} fetched={len(fetched)} visible={len(approvals)} status={status} hidden_sample={hidden}"
+        )
 
     await enrich_approval_user_names(approvals)
     for a in approvals:
