@@ -194,6 +194,12 @@ def should_force_tool_calling(user_message: Union[str, List[Dict[str, Any]]]) ->
     ) or re.search(r"\b[A-Z][A-Z0-9]{1,9}-\d+\b", raw):
         return True
 
+    # Saving a key must go to the secure-form tool, not be answered in prose. Pasted key-like strings count too.
+    if re.search(r"\b(save|add|store|set|update|replace|change)\b.*\b(api[ -]?keys?|secrets?|tokens?|credentials?)\b", text) or re.search(
+        r"\b(sk-[a-z0-9_-]{16,}|ghp_[a-z0-9]{20,}|xox[bp]-[a-z0-9-]{10,})", text
+    ):
+        return True
+
     if "http://" in text or "https://" in text or "www." in text:
         return True
 

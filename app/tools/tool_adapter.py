@@ -25,6 +25,9 @@ SITE_TOOLS = {
     "discard_site_draft",
 }
 
+# Local tool: posts a button that opens the dashboard's secure "add key" form (keys are never typed in chat)
+ADD_KEY_TOOL = "add_api_key"
+
 # Jira tools (the client's own Jira Cloud site, connected with one click). Reads run directly, changes need approval.
 JIRA_TOOLS = {"connect_jira"} | JIRA_READ_TOOLS | JIRA_WRITE_TOOLS
 
@@ -333,6 +336,23 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
 ]
 
 
+ADD_KEY_SCHEMA = {
+    "name": ADD_KEY_TOOL,
+    "description": (
+        "Posts a button that opens the dashboard's SECURE form for adding or replacing an API key for this client. Use when the "
+        "user asks how to add/save a key or prefers a form. (A message that is only `KEY_NAME = value` is saved by the system "
+        "automatically and deleted.) NEVER repeat, save or use a key shown in chat. Pass the key's name if given; never the value."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Key name, e.g. OPENAI_API_KEY (optional). Name an Anthropic key ANTHROPIC_API_KEY if the assistant should use it for replies."},
+            "only_this_channel": {"type": "boolean", "description": "True if the user wants the key to apply to this channel only"},
+        },
+        "required": [],
+    },
+}
+
 JIRA_CONNECT_SCHEMA = {
     "name": "connect_jira",
     "description": (
@@ -584,6 +604,71 @@ class ControlledToolAdapter:
         self.approval_card_posted: bool = False
         self._jira_conn: Optional[Dict[str, Any]] = None
         self._jira_loaded = False
+
+    async def _post_add_key_button(self, args: Dict[str, Any]) -> Tuple[str, bool]:
+        """Slack button -> dashboard 'Keys & Connections' with the add form prefilled (name / channel). No secrets in the link."""
+        import re as _re
+        from urllib.parse import urlencode
+        from app.services.channel_secrets_service import channel_id_variants, get_channel_folder, get_folder_id_for_channel
+
+        folder_id = get_folder_id_for_channel(self.channel_id)
+        if not folder_id:
+            return (
+                "This Slack channel isn't linked to a client yet, so keys can't be added from here. Tell the user to ask "
+                "their JTS administrator to add this channel to their client first.",
+                True,
+            )
+        params: Dict[str, str] = {"folder": str(folder_id), "add": "1"}
+        name = _re.sub(r"[^A-Za-z0-9_]+", "_", str((args or {}).get("name") or "").strip()).strip("_").upper()[:50]
+        # A pasted key must never be echoed into a link: ignore names that look like a key value.
+        if name and not _re.match(r"^(SK|GHP|GHO|AKIA|XOXB|XOXP)_", name) and len(name) < 50:
+            params["name"] = name
+        if (args or {}).get("only_this_channel"):
+            wanted = set(channel_id_variants(self.channel_id))
+            folder = get_channel_folder(folder_id) or {}
+            stored = next((c["channel_id"] for c in folder.get("channels") or [] if set(channel_id_variants(c.get("channel_id", ""))) & wanted), None)
+            if stored:
+                params["channel"] = stored
+        from app.tools.secrets_manager import get_secret as _gs
+        base = (_gs("PUBLIC_BASE_URL", "https://journeys.pe") or "https://journeys.pe").rstrip("/")
+        url = f"{base}/client-keys?{urlencode(params)}"
+
+        if not (self.channel_id and self.slack_token):
+            return (f"Share this link with the user so they can add the key securely: {url}", False)
+        target_thread = (
+            self.thread_ts
+            if (self.thread_ts and not self.thread_ts.startswith("channel_") and not self.thread_ts.startswith("dm_"))
+            else None
+        )
+        blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": (
+                "*Add a key securely*\n"
+                "Easiest: post a message with just `KEY_NAME = key value` and I'll save it and delete your message. "
+                "Or click the button, sign in as your Client Admin, and paste the key in the dashboard form. "
+                "Keys are stored encrypted and can't be viewed again."
+            )}},
+            {"type": "actions", "elements": [{
+                "type": "button", "text": {"type": "plain_text", "text": "Add key securely"}, "url": url,
+                "style": "primary", "action_id": "add_key_link",
+            }]},
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "https://slack.com/api/chat.postMessage",
+                    headers={"Authorization": f"Bearer {self.slack_token}"},
+                    json={"channel": self.channel_id, "thread_ts": target_thread, "text": "Add a key securely", "blocks": blocks},
+                )
+            if not resp.json().get("ok"):
+                raise RuntimeError(resp.json().get("error"))
+        except Exception as e:
+            logger.warning(f"[CLIENT_KEYS] Could not post the add-key button: {e}")
+            return (f"Share this link with the user so they can add the key securely: {url}", False)
+        return (
+            "An 'Add key securely' button was posted. Tell the user briefly they can click it, or post a message with only "
+            "`KEY_NAME = value` and the system saves it and deletes the message. Do not repeat or use any key shown in chat.",
+            False,
+        )
 
     def jira_connection(self) -> Optional[Dict[str, Any]]:
         """The client's active Jira connection for this channel (loaded once per request), or None."""
@@ -969,6 +1054,7 @@ class ControlledToolAdapter:
 
         if self.build_mode:
             tools.extend(copy.deepcopy(SITE_TOOL_SCHEMAS))
+        tools.append(copy.deepcopy(ADD_KEY_SCHEMA))
         tools.append(copy.deepcopy(JIRA_CONNECT_SCHEMA))
         if self.jira_connection():
             tools.extend(copy.deepcopy(JIRA_TOOL_SCHEMAS))
@@ -983,7 +1069,7 @@ class ControlledToolAdapter:
             return False
         if tool_name in SITE_TOOLS:
             return self.build_mode
-        if tool_name == "connect_jira":
+        if tool_name in ("connect_jira", ADD_KEY_TOOL):
             return True
         if tool_name in JIRA_TOOLS:
             return bool(self.jira_connection())
@@ -1057,6 +1143,9 @@ class ControlledToolAdapter:
 
         if tool_name == "connect_github":
             return await self._post_connect_github_button()
+
+        if tool_name == ADD_KEY_TOOL:
+            return await self._post_add_key_button(arguments or {})
 
         if tool_name in JIRA_TOOLS:
             return await self._run_jira_tool(tool_name, arguments or {})

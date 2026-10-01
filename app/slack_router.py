@@ -324,7 +324,12 @@ def get_system_prompt(user_prompt: str = "", user_profile: Optional[dict] = None
         "(`jira_create_issue`, `jira_update_issue`, `jira_add_comment`, `jira_transition_issue`). NEVER say that something "
         "was 'sent for approval' or that a card was posted unless you really called the tool in this turn; the approval card "
         "is created only by the tool call. If no project is given and the tool says one is needed, ask the user for the project key. "
-        "If the user asks to connect Jira, call `connect_jira`. Never ask for Jira passwords or API tokens."
+        "If the user asks to connect Jira, call `connect_jira`. Never ask for Jira passwords or API tokens.\n\n"
+        "API KEYS: keys are saved by the system itself, never by you. A message that is only `KEY_NAME = value` (one per line; add "
+        "'for this channel only' to limit it to the channel) is saved for the client and the message is deleted automatically. "
+        "If the user asks how to add a key, tell them exactly that format. You must NEVER repeat, store or use a key that appears in "
+        "chat. If they prefer a form, call `add_api_key` (pass only the key's NAME) to post a secure dashboard button. If a key was "
+        "pasted in some other way and is still visible, tell them to delete that message and, if it was real, rotate it."
     )
 
     return prompt
@@ -987,6 +992,35 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks = Non
             except Exception:
                 pass
             channel_id = canonical_channel_id(channel_id, workspace_id=incoming_team_id, workspace_name=workspace_name, channel_name=channel_name)
+
+        # 0. Keys pasted as "KEY_NAME = value": save them, delete the message, and never store/log/send the value anywhere.
+        from app.services import slack_key_capture as skc
+
+        key_msg = skc.parse_key_message(text)
+        if key_msg:
+            from app.services.channel_secrets_service import get_folder_id_for_channel
+
+            try:
+                outcome = await skc.handle_key_message(
+                    parsed=key_msg, channel_id=channel_id, slack_channel_id=event.get("channel") or channel_id,
+                    message_ts=message_ts or "", thread_ts=actual_thread_ts if not is_dm else None, bot_token=token,
+                    folder_id=None if is_dm else get_folder_id_for_channel(channel_id), actor=user_display,
+                )
+            except Exception as key_err:
+                logger.error(f"[SLACK_KEYS] Key message handling failed: {type(key_err).__name__}")
+                outcome = {"names": [n.upper() for n, _ in key_msg["entries"]], "deleted": False, "saved": 0}
+            save_conversation_message(
+                team_id=incoming_team_id, workspace_id=incoming_team_id, workspace_name=workspace_name,
+                channel_id=channel_id, thread_ts=thread_to_pass, user_id=user_id, user_name=user_display, role="user",
+                content=f"[Key(s) {', '.join(outcome['names'])} sent by {user_display}; values hidden]",
+                message_ts=message_ts, input_tokens=0, output_tokens=0, total_tokens=0, cost_usd=0,
+            )
+            emit_telemetry(
+                action="KEY_MESSAGE_HANDLED", category="SECURITY", level="INFO", thread_id=thread_to_pass,
+                event_id=message_id, user_id=user_id, channel_id=channel_id, channel_name=channel_name,
+                message=f"Key message from {user_display}: {outcome['saved']} saved, message deleted={outcome['deleted']} (values never logged).",
+            )
+            return JSONResponse(content={"status": "key_captured", "saved": outcome["saved"], "deleted": outcome["deleted"]})
 
         # 1. Store EVERY incoming message from any team member in PostgreSQL memory
         file_summary = f"[Attached: {', '.join([f['name'] for f in files_data])}]" if files_data else ""

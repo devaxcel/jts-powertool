@@ -38,7 +38,14 @@ export default function LoginPage() {
       if (typeof window !== "undefined") {
         sessionStorage.removeItem("jts_simulated_role");
       }
-      if (res.user?.role === "client_standard") {
+      let next = "";
+      try {
+        next = sessionStorage.getItem("jts_next") || "";
+        sessionStorage.removeItem("jts_next");
+      } catch {}
+      if (next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/login")) {
+        router.push(next);
+      } else if (res.user?.role === "client_standard") {
         router.push("/my-tasks");
       } else {
         router.push("/");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plug, Plus, Trash2, RefreshCw, Loader2, Eye, EyeOff, Lock, KeyRound, ShieldCheck, Building2 } from "lucide-react";
 import {
   ClientKeysData,
@@ -73,10 +73,34 @@ export default function ClientKeysPage() {
     }
   }, [folderId]);
 
+  // Opened from Slack ("Add key securely"): prefill the key name / channel and jump to the form.
+  const [fromSlack, setFromSlack] = useState(false);
+  const valueRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    setAppliesTo("client");
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("add") === "1") {
+      setFromSlack(true);
+      const n = (q.get("name") || "").toUpperCase().replace(/[^A-Z0-9_]+/g, "_").slice(0, 50);
+      if (n) setKeyName(n);
+    }
+  }, []);
+
+  useEffect(() => {
     load();
   }, [load]);
+
+  // Preselect the channel from the Slack link, once the client's channels are known.
+  const channelParamApplied = useRef(false);
+  useEffect(() => {
+    if (!data || channelParamApplied.current) return;
+    channelParamApplied.current = true;
+    const ch = new URLSearchParams(window.location.search).get("channel");
+    setAppliesTo(ch && data.channels.some((c) => c.channel_id === ch) ? ch : "client");
+  }, [data]);
+
+  useEffect(() => {
+    if (fromSlack && data?.can_edit) valueRef.current?.focus();
+  }, [fromSlack, data?.can_edit]);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -169,8 +193,11 @@ export default function ClientKeysPage() {
           <GithubConnectionCard folderId={data.folder.id} canEdit={canEdit} />
           <JiraConnectionCard folderId={data.folder.id} canEdit={canEdit} />
 
+          {fromSlack && !canEdit && (
+            <Alert type="warning">Only your Client Admin can add keys. Ask them to open the link from Slack, or sign in with a Client Admin account.</Alert>
+          )}
           {canEdit ? (
-            <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm space-y-4">
+            <div className={`bg-white border rounded-2xl p-5 shadow-sm space-y-4 ${fromSlack ? "border-[#088ADA] ring-2 ring-[#088ADA]/20" : "border-gray-200"}`}>
               <div className="flex items-center gap-2 pb-3 border-b border-gray-100">
                 <div className="h-8 w-8 rounded-lg bg-[#088ADA]/10 flex items-center justify-center text-[#088ADA]">
                   <Lock className="h-4 w-4" />
@@ -226,6 +253,7 @@ export default function ClientKeysPage() {
                   <div className="relative">
                     <input
                       type={showValue ? "text" : "password"}
+                      ref={valueRef}
                       name="client_key_value_field"
                       autoComplete="new-password"
                       data-lpignore="true"

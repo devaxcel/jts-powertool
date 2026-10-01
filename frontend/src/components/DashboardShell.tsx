@@ -70,6 +70,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
     // Tab-Isolated Session Check: Check current tab's sessionStorage
     if (!user && !token) {
+      // Remember where they were going (e.g. a link from Slack) so login can bring them back.
+      try {
+        const here = window.location.pathname + window.location.search;
+        if (here.startsWith("/") && !here.startsWith("//") && here !== "/") sessionStorage.setItem("jts_next", here);
+      } catch {}
       window.location.href = "/login";
       return;
     }
