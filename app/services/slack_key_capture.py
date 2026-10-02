@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 MAX_KEYS_PER_MESSAGE = 10
 SAVE_TIMEOUT_SECONDS = 25.0
 _MENTION = re.compile(r"<@[A-Z0-9]+>")
-_LEAD = re.compile(r"^\s*(?:please\s+)?(?:save|add|store|set|update|replace)\s+(?:this|the|my|these)?\s*(?:api\s*)?(?:keys?|secrets?|tokens?)?\s*[:\-]?\s*", re.I)
+_LEAD = re.compile(r"^\s*(?:please\s+)?(?:save|add|store|set|update|replace)\s+(?:(?:this|the|my|these)\s+)?(?:api\s+)?(?:(?:keys?|secrets?|tokens?)(?![\w.\-])\s*)?[:\-]?\s*", re.I)
 _CHANNEL_ONLY = re.compile(r"\b(?:only\s+)?(?:for|in)\s+this\s+channel(?:\s+only)?\b|\bchannel\s+only\b", re.I)
 _LINE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_.-]{1,49})\s*[=:]\s*(\S{8,8000})\s*$")
 # The key word may be anywhere in the name as its own word: TEST_API_KEY, KEY_FOR_SHOPIFY, MY-SECRET-1 ...
