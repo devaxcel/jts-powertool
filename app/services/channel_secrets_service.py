@@ -1190,6 +1190,7 @@ def sync_bot_conversations_from_slack() -> Dict[str, Any]:
     """
     from app.tools.secrets_manager import get_secret
 
+    cleanup_invalid_workspaces()
     tokens: List[tuple] = []  # (token, team_id, team_name)
     seen_tokens = set()
     candidates: List[tuple] = []  # (token, stored team_id, stored team_name)
@@ -1200,7 +1201,7 @@ def sync_bot_conversations_from_slack() -> Dict[str, Any]:
         from app.db.repositories import list_slack_workspaces
         for ws in list_slack_workspaces():
             tok = (ws.get("bot_token") or "").strip()
-            if len(tok) > 10:
+            if len(tok) > 10 and tok.startswith("xoxb-"):  # only bot tokens can list the bot's channels
                 candidates.append((tok, ws.get("team_id"), ws.get("team_name")))
     except Exception as ex:
         logger.warning(f"[CHANNEL_SECRETS] Could not list the connected Slack workspaces: {ex}")
@@ -1800,8 +1801,9 @@ def store_vault_secret(*, key_name: str, key_value: str, name: Optional[str] = N
             row = cur.fetchone()
             conn.commit()
 
-            # 5. If this is a Slack bot token, auto-register workspace in slack_workspaces table
-            if "SLACK" in key_name.upper() and ("TOKEN" in key_name.upper() or "BOT" in key_name.upper()):
+            # 5. If this is a Slack BOT token (xoxb-...), auto-register the workspace in slack_workspaces.
+            #    Other Slack secrets (the admin user token, client secret, signing secret...) are not workspaces.
+            if _is_workspace_bot_token(key_name, key_value):
                 try:
                     from app.db.repositories import save_slack_workspace
                     team_suffix = key_name.upper().replace("SLACK_BOT_TOKEN_", "").replace("SLACK_TOKEN_", "").replace("SLACK_BOT_TOKEN", "").strip("_")
@@ -2200,6 +2202,36 @@ def channel_id_variants(channel_id: str) -> List[str]:
     return [cid, alias] if alias else [cid]
 
 
+def _is_workspace_bot_token(key_name: str, key_value: str) -> bool:
+    """True only for a Slack bot token (xoxb-...) saved under a Slack token name."""
+    name = (key_name or "").upper()
+    return "SLACK" in name and "TOKEN" in name and "USER" not in name and str(key_value or "").strip().startswith("xoxb-")
+
+
+def cleanup_invalid_workspaces() -> int:
+    """Removes rows that are not real Slack workspaces (a real team id looks like T0123ABCD; a user token is not a bot token)."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            _ensure_workspace_folder_column(cur)
+            cur.execute("""
+                DELETE FROM slack_workspaces
+                WHERE team_id !~ '^[TE][A-Z0-9]{6,}$' OR bot_token LIKE 'xoxp-%%'
+                RETURNING team_id;
+            """)
+            removed = [r["team_id"] if isinstance(r, dict) else r[0] for r in cur.fetchall() or []]
+            conn.commit()
+        if removed:
+            logger.info(f"[CHANNEL_SECRETS] Removed {len(removed)} invalid Slack workspace row(s): {removed}")
+        return len(removed)
+    except Exception as e:
+        conn.rollback()
+        logger.debug(f"[CHANNEL_SECRETS] Workspace cleanup skipped: {e}")
+        return 0
+    finally:
+        conn.close()
+
+
 def _ensure_workspace_folder_column(cur) -> None:
     """slack_workspaces.folder_id: the client a whole Slack workspace belongs to (NULL = shared workspace)."""
     from app.db.repositories import _ensure_slack_workspaces_table
@@ -2313,6 +2345,7 @@ def list_folder_api_keys(folder_id: int) -> List[Dict[str, Any]]:
 
 def list_workspaces_with_clients() -> List[Dict[str, Any]]:
     """Connected Slack workspaces with the client each is linked to. Never returns tokens."""
+    cleanup_invalid_workspaces()
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
