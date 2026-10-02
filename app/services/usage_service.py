@@ -300,7 +300,9 @@ def record_api_usage(
                 if resolved_cname:
                     with conn.cursor() as cur:
                         from app.services.channel_secrets_service import _save_channel_metadata
-                        _save_channel_metadata(cur, channel_id, resolved_cname, "dm" if channel_id.startswith("D") else "channel")
+                        _save_channel_metadata(cur, channel_id, resolved_cname, "dm" if channel_id.startswith("D") else "channel",
+                                               workspace_id if workspace_id and workspace_id != "UNKNOWN" else None,
+                                               workspace_name if workspace_name and workspace_name != "Unknown Workspace" else None)
                     conn.commit()
             except Exception as c_err:
                 logger.debug(f"[USAGE_SERVICE] Channel name auto-resolution skipped: {c_err}")

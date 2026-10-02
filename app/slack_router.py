@@ -873,7 +873,7 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks = Non
         if join_channel:
             try:
                 from app.services.channel_secrets_service import resolve_slack_channel_name
-                resolved = resolve_slack_channel_name(join_channel)
+                resolved = resolve_slack_channel_name(join_channel, token=get_slack_bot_token(incoming_team_id), team_id=incoming_team_id)
                 logger.info(f"[SLACK_DISCOVERY] Auto-registered channel '{join_channel}' ({resolved}) on member_joined_channel.")
             except Exception as ex:
                 logger.debug(f"Failed to auto-register channel on member_joined_channel: {ex}")

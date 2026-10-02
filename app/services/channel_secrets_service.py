@@ -437,6 +437,23 @@ def list_channel_secrets(channel_id: str) -> List[Dict[str, Any]]:
         conn.close()
 
 
+def _team_name(cur, team_id: Optional[str]) -> Optional[str]:
+    """Friendly workspace name for a Slack team id (from the registered workspaces), or None."""
+    if not team_id:
+        return None
+    for known_id, known_name in AUTHORITATIVE_CHANNEL_WORKSPACES.values():
+        if known_id == team_id:
+            return known_name
+    try:
+        cur.execute("SELECT team_name FROM slack_workspaces WHERE team_id = %s;", (team_id,))
+        row = cur.fetchone()
+        if row:
+            return (row.get("team_name") if isinstance(row, dict) else row[0]) or None
+    except Exception:
+        pass
+    return None
+
+
 def _save_channel_metadata(
     cur,
     channel_id: str,
@@ -489,10 +506,15 @@ def resolve_slack_channel_name(channel_id: str, token: Optional[str] = None, tea
     try:
         with conn.cursor() as cur:
             try:
-                cur.execute("SELECT channel_name FROM channel_metadata WHERE channel_id = %s;", (channel_id,))
+                cur.execute("SELECT channel_name, workspace_id FROM channel_metadata WHERE channel_id = %s;", (channel_id,))
                 row = cur.fetchone()
                 if row and row.get("channel_name") and not row["channel_name"].startswith("#Channel C") and row["channel_name"] not in ("#jts-test", "jts-test"):
                     name = row["channel_name"]
+                    # A channel saved without a workspace is shown under the default one. Slack just told us the real
+                    # workspace, so record it.
+                    if team_id and row.get("workspace_id") != team_id:
+                        _save_channel_metadata(cur, channel_id, name, channel_type, team_id, _team_name(cur, team_id))
+                        conn.commit()
                     _CHANNEL_NAME_CACHE[channel_id] = name
                     return name
             except Exception:
@@ -598,7 +620,7 @@ def resolve_slack_channel_name(channel_id: str, token: Optional[str] = None, tea
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            _save_channel_metadata(cur, channel_id, resolved_name, channel_type)
+            _save_channel_metadata(cur, channel_id, resolved_name, channel_type, team_id, _team_name(cur, team_id))
             conn.commit()
     except Exception as e:
         logger.debug(f"[CHANNEL_SECRETS] Failed to save metadata: {e}")
@@ -1162,16 +1184,62 @@ def create_slack_channel(
 
 def sync_bot_conversations_from_slack() -> Dict[str, Any]:
     """
-    Discovers all channels, groups, and DMs that the bot has joined in Slack.
-    Uses Slack Web API: https://slack.com/api/users.conversations
-    Resolves human-friendly names (#channel-name or @Member Name (DM)),
-    and upserts into PostgreSQL channel_metadata while preserving existing folder_id assignments.
-    Returns summary of synced channels.
+    Discovers the channels and DMs the bot has joined in EVERY connected Slack workspace (the original bot token plus each
+    workspace installed through /api/slack/install) and records which workspace each belongs to.
     """
     from app.tools.secrets_manager import get_secret
-    token = get_secret("SLACK_BOT_TOKEN", "").strip() or os.getenv("SLACK_BOT_TOKEN", "").strip()
-    if not token:
+
+    tokens: List[tuple] = []  # (token, team_id, team_name)
+    seen_tokens = set()
+    default_token = get_secret("SLACK_BOT_TOKEN", "").strip() or os.getenv("SLACK_BOT_TOKEN", "").strip()
+    if default_token:
+        team_id = team_name = None
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                who = client.post("https://slack.com/api/auth.test", headers={"Authorization": f"Bearer {default_token}"}).json()
+            if who.get("ok"):
+                team_id, team_name = who.get("team_id"), who.get("team")
+        except Exception as ex:
+            logger.debug(f"[CHANNEL_SECRETS] auth.test for the default token failed: {ex}")
+        tokens.append((default_token, team_id, team_name))
+        seen_tokens.add(default_token)
+    try:
+        from app.db.repositories import list_slack_workspaces
+        for ws in list_slack_workspaces():
+            tok = (ws.get("bot_token") or "").strip()
+            if len(tok) > 10 and tok not in seen_tokens:
+                tokens.append((tok, ws.get("team_id"), ws.get("team_name")))
+                seen_tokens.add(tok)
+    except Exception as ex:
+        logger.warning(f"[CHANNEL_SECRETS] Could not list the connected Slack workspaces: {ex}")
+
+    if not tokens:
         raise ValueError("SLACK_BOT_TOKEN is not configured. Please set your Slack Bot Token in AWS Secrets Manager or environment variables.")
+
+    all_channels: List[Dict[str, Any]] = []
+    problems: List[str] = []
+    done_teams = set()
+    for i, (tok, tid, tname) in enumerate(tokens):
+        if tid and tid in done_teams:
+            continue
+        try:
+            part = _sync_workspace_conversations(tok, tid, tname)
+            all_channels.extend(part["channels"])
+            if tid:
+                done_teams.add(tid)
+        except Exception as ex:
+            if i == 0 and len(tokens) == 1:
+                raise
+            problems.append(f"{tname or tid or 'a workspace'}: {ex}")
+            logger.warning(f"[CHANNEL_SECRETS] Sync failed for {tname or tid}: {ex}")
+    msg = f"Successfully synced {len(all_channels)} channels and conversations from {len(done_teams) or len(tokens)} workspace(s)."
+    if problems:
+        msg += " Problems: " + "; ".join(problems)
+    return {"status": "success", "message": msg, "synced_count": len(all_channels), "channels": all_channels}
+
+
+def _sync_workspace_conversations(token: str, team_id: Optional[str] = None, team_name: Optional[str] = None) -> Dict[str, Any]:
+    """Syncs one workspace (see sync_bot_conversations_from_slack). Upserts into channel_metadata, keeping folder assignments."""
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -1266,14 +1334,19 @@ def sync_bot_conversations_from_slack() -> Dict[str, Any]:
                     cid = sc["channel_id"]
                     cname = sc["channel_name"]
                     ctype = sc["channel_type"]
+                    ws_id, ws_name = team_id, team_name
+                    if cid.upper() in AUTHORITATIVE_CHANNEL_WORKSPACES:
+                        ws_id, ws_name = AUTHORITATIVE_CHANNEL_WORKSPACES[cid.upper()]
                     cur.execute("""
-                        INSERT INTO channel_metadata (channel_id, channel_name, channel_type, updated_at)
-                        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                        INSERT INTO channel_metadata (channel_id, channel_name, channel_type, workspace_id, workspace_name, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         ON CONFLICT (channel_id) DO UPDATE SET
                             channel_name = EXCLUDED.channel_name,
                             channel_type = EXCLUDED.channel_type,
+                            workspace_id = COALESCE(EXCLUDED.workspace_id, channel_metadata.workspace_id),
+                            workspace_name = COALESCE(EXCLUDED.workspace_name, channel_metadata.workspace_name),
                             updated_at = CURRENT_TIMESTAMP;
-                    """, (cid, cname, ctype))
+                    """, (cid, cname, ctype, ws_id, ws_name))
                     _CHANNEL_NAME_CACHE[cid] = cname
                 conn.commit()
         except Exception as dberr:
