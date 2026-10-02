@@ -448,7 +448,8 @@ def _team_name(cur, team_id: Optional[str]) -> Optional[str]:
         cur.execute("SELECT team_name FROM slack_workspaces WHERE team_id = %s;", (team_id,))
         row = cur.fetchone()
         if row:
-            return (row.get("team_name") if isinstance(row, dict) else row[0]) or None
+            name = (row.get("team_name") if isinstance(row, dict) else row[0]) or None
+            return None if (name and name.strip().upper() == team_id.strip().upper()) else name  # an id is not a name
     except Exception:
         pass
     return None
@@ -1191,27 +1192,39 @@ def sync_bot_conversations_from_slack() -> Dict[str, Any]:
 
     tokens: List[tuple] = []  # (token, team_id, team_name)
     seen_tokens = set()
+    candidates: List[tuple] = []  # (token, stored team_id, stored team_name)
     default_token = get_secret("SLACK_BOT_TOKEN", "").strip() or os.getenv("SLACK_BOT_TOKEN", "").strip()
     if default_token:
-        team_id = team_name = None
-        try:
-            with httpx.Client(timeout=10.0) as client:
-                who = client.post("https://slack.com/api/auth.test", headers={"Authorization": f"Bearer {default_token}"}).json()
-            if who.get("ok"):
-                team_id, team_name = who.get("team_id"), who.get("team")
-        except Exception as ex:
-            logger.debug(f"[CHANNEL_SECRETS] auth.test for the default token failed: {ex}")
-        tokens.append((default_token, team_id, team_name))
-        seen_tokens.add(default_token)
+        candidates.append((default_token, None, None))
     try:
         from app.db.repositories import list_slack_workspaces
         for ws in list_slack_workspaces():
             tok = (ws.get("bot_token") or "").strip()
-            if len(tok) > 10 and tok not in seen_tokens:
-                tokens.append((tok, ws.get("team_id"), ws.get("team_name")))
-                seen_tokens.add(tok)
+            if len(tok) > 10:
+                candidates.append((tok, ws.get("team_id"), ws.get("team_name")))
     except Exception as ex:
         logger.warning(f"[CHANNEL_SECRETS] Could not list the connected Slack workspaces: {ex}")
+
+    for tok, stored_id, stored_name in candidates:
+        if tok in seen_tokens:
+            continue
+        seen_tokens.add(tok)
+        team_id, team_name = stored_id, stored_name
+        try:
+            # Slack knows the real team id and name for this token; use it (and repair a wrong stored name).
+            with httpx.Client(timeout=10.0) as client:
+                who = client.post("https://slack.com/api/auth.test", headers={"Authorization": f"Bearer {tok}"}).json()
+            if who.get("ok"):
+                team_id, team_name = who.get("team_id") or stored_id, who.get("team") or stored_name
+                if team_id and team_name and (stored_name or "").strip() != team_name:
+                    try:
+                        from app.db.repositories import save_slack_workspace
+                        save_slack_workspace(team_id=team_id, team_name=team_name, bot_token=tok)
+                    except Exception as ex:
+                        logger.debug(f"[CHANNEL_SECRETS] Could not repair the workspace name for {team_id}: {ex}")
+        except Exception as ex:
+            logger.debug(f"[CHANNEL_SECRETS] auth.test failed for a workspace token: {ex}")
+        tokens.append((tok, team_id, team_name))
 
     if not tokens:
         raise ValueError("SLACK_BOT_TOKEN is not configured. Please set your Slack Bot Token in AWS Secrets Manager or environment variables.")

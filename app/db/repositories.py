@@ -1129,7 +1129,11 @@ def save_slack_workspace(team_id: str, team_name: str, bot_token: str, bot_user_
                 INSERT INTO slack_workspaces (team_id, team_name, bot_token, bot_user_id, updated_at)
                 VALUES (%s, %s, %s, %s, NOW())
                 ON CONFLICT (team_id) DO UPDATE SET
-                    team_name = COALESCE(NULLIF(EXCLUDED.team_name, ''), slack_workspaces.team_name),
+                    -- never replace a real name with an empty one or with the team id itself (placeholder)
+                    team_name = CASE
+                        WHEN EXCLUDED.team_name IS NULL OR EXCLUDED.team_name = '' OR UPPER(EXCLUDED.team_name) = UPPER(EXCLUDED.team_id)
+                             THEN slack_workspaces.team_name
+                        ELSE EXCLUDED.team_name END,
                     bot_token = CASE WHEN EXCLUDED.bot_token IS NOT NULL AND LENGTH(TRIM(EXCLUDED.bot_token)) > 10 THEN EXCLUDED.bot_token ELSE slack_workspaces.bot_token END,
                     bot_user_id = COALESCE(NULLIF(EXCLUDED.bot_user_id, ''), slack_workspaces.bot_user_id),
                     updated_at = NOW();
