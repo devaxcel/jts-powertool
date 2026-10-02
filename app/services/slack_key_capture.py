@@ -136,7 +136,13 @@ async def delete_message(channel_id: str, ts: str) -> Tuple[bool, str]:
         data = resp.json()
         if data.get("ok"):
             return True, ""
-        return False, str(data.get("error") or "unknown")
+        err = str(data.get("error") or "unknown")
+        # Scope names are not secret: log them so a wrong token is easy to diagnose.
+        logger.warning(
+            f"[SLACK_KEYS] chat.delete refused: error={err} needed={data.get('needed')} provided={data.get('provided')} "
+            f"token_scopes={resp.headers.get('x-oauth-scopes')} token_type={token[:5]}"
+        )
+        return False, err
     except Exception as e:
         return False, type(e).__name__
 
