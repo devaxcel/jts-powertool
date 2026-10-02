@@ -1,3 +1,4 @@
+from app.services.secret_redaction import redact_secrets
 import logging
 import os
 from typing import Dict, List, Optional, Any
@@ -867,6 +868,7 @@ def save_conversation_message(
     """
     if not content or not content.strip():
         return
+    content = redact_secrets(content)  # a key must never be remembered, even if it slipped past the Slack key capture
 
     clean_team_id = (team_id or "").strip()
     if not clean_team_id or clean_team_id in ("slack-workspace", "slack_workspace"):
@@ -1000,6 +1002,19 @@ def save_conversation_message(
 
 
 def get_thread_context_since_last_reply(
+    channel_id: str,
+    thread_ts: str,
+    reply_in_thread: bool = True,
+) -> tuple[List[Dict[str, Any]], Dict]:
+    """Conversation context for Claude, with any key values (also in older stored messages) hidden."""
+    messages, meta = _get_thread_context_raw(channel_id, thread_ts, reply_in_thread)
+    for m in messages:
+        if isinstance(m, dict) and isinstance(m.get("content"), str):
+            m["content"] = redact_secrets(m["content"])
+    return messages, meta
+
+
+def _get_thread_context_raw(
     channel_id: str,
     thread_ts: str,
     reply_in_thread: bool = True,

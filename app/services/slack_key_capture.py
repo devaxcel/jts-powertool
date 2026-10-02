@@ -25,10 +25,8 @@ _MENTION = re.compile(r"<@[A-Z0-9]+>")
 _LEAD = re.compile(r"^\s*(?:please\s+)?(?:save|add|store|set|update|replace)\s+(?:(?:this|the|my|these)\s+)?(?:api\s+)?(?:(?:keys?|secrets?|tokens?)(?![\w.\-])\s*)?[:\-]?\s*", re.I)
 _CHANNEL_ONLY = re.compile(r"\b(?:only\s+)?(?:for|in)\s+this\s+channel(?:\s+only)?\b|\bchannel\s+only\b", re.I)
 _LINE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_.-]{1,49})\s*[=:]\s*(\S{8,8000})\s*$")
-# The key word may be anywhere in the name as its own word: TEST_API_KEY, KEY_FOR_SHOPIFY, MY-SECRET-1 ...
-_NAME_LOOKS_LIKE_KEY = re.compile(r"(?:^|[_.\-])(?:keys?|tokens?|secrets?|passwords?|passwd|credentials?)(?:$|[_.\-]|\d)", re.I)
-# A value that is clearly an API key counts whatever the name is.
-_VALUE_LOOKS_LIKE_KEY = re.compile(r"^(?:sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|shpat_[A-Za-z0-9]{10,})")
+from app.services.secret_redaction import NAME_LOOKS_LIKE_KEY as _NAME_LOOKS_LIKE_KEY  # noqa: E402
+from app.services.secret_redaction import VALUE_LOOKS_LIKE_KEY as _VALUE_LOOKS_LIKE_KEY  # noqa: E402
 
 
 def _clean_value(v: str) -> str:

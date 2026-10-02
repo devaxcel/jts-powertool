@@ -27,6 +27,7 @@ SITE_TOOLS = {
 
 # Local tool: posts a button that opens the dashboard's secure "add key" form (keys are never typed in chat)
 ADD_KEY_TOOL = "add_api_key"
+LIST_KEYS_TOOL = "list_saved_keys"
 
 # Jira tools (the client's own Jira Cloud site, connected with one click). Reads run directly, changes need approval.
 JIRA_TOOLS = {"connect_jira"} | JIRA_READ_TOOLS | JIRA_WRITE_TOOLS
@@ -336,6 +337,16 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
 ]
 
 
+LIST_KEYS_SCHEMA = {
+    "name": LIST_KEYS_TOOL,
+    "description": (
+        "Lists the NAMES of the API keys saved for this client (whole client and this channel) with the last 4 characters, who "
+        "saved them and when. NEVER shows key values; values cannot be retrieved. Use whenever the user asks to list, show or "
+        "check saved keys, or asks for a key's value (then explain values can't be shown). Never answer from conversation memory."
+    ),
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
 ADD_KEY_SCHEMA = {
     "name": ADD_KEY_TOOL,
     "description": (
@@ -604,6 +615,39 @@ class ControlledToolAdapter:
         self.approval_card_posted: bool = False
         self._jira_conn: Optional[Dict[str, Any]] = None
         self._jira_loaded = False
+
+    async def _list_saved_keys(self) -> Tuple[str, bool]:
+        """Names + last 4 characters of the keys saved for this channel's client. Never a value."""
+        from app.client_keys_router import _RESERVED, _label
+        from app.services.channel_secrets_service import (
+            channel_id_variants, get_channel_folder, get_folder_id_for_channel, list_channel_secrets, list_folder_api_keys,
+        )
+
+        folder_id = get_folder_id_for_channel(self.channel_id)
+        if not folder_id:
+            return ("This Slack channel isn't linked to a client yet, so there are no saved keys to list.", True)
+        folder = get_channel_folder(folder_id) or {}
+        lines = []
+        client_keys = list_folder_api_keys(folder_id)
+        for k in client_keys:
+            hint = f" ({k['key_hint']})" if k.get("key_hint") else ""
+            who = f", saved by {k['updated_by']}" if k.get("updated_by") else ""
+            lines.append(f"- {_label(k['provider'])}{hint}: whole client{who}")
+        wanted = set(channel_id_variants(self.channel_id))
+        for ch in folder.get("channels") or []:
+            if not (set(channel_id_variants(ch.get("channel_id", ""))) & wanted):
+                continue
+            for k in list_channel_secrets(ch["channel_id"]):
+                if k.get("status") == "active" and k.get("provider") not in _RESERVED:
+                    who = f", saved by {k['updated_by']}" if k.get("updated_by") else ""
+                    lines.append(f"- {_label(k['provider'])}: this channel only{who}")
+        if not lines:
+            return (f"No keys are saved for client {folder.get('name') or folder_id} yet. A key can be added with `NAME = value`.", False)
+        return (
+            f"Keys saved for client {folder.get('name') or folder_id} (names only; values are never shown and can't be retrieved):\n"
+            + "\n".join(lines),
+            False,
+        )
 
     async def _post_add_key_button(self, args: Dict[str, Any]) -> Tuple[str, bool]:
         """Slack button -> dashboard 'Keys & Connections' with the add form prefilled (name / channel). No secrets in the link."""
@@ -1055,6 +1099,7 @@ class ControlledToolAdapter:
         if self.build_mode:
             tools.extend(copy.deepcopy(SITE_TOOL_SCHEMAS))
         tools.append(copy.deepcopy(ADD_KEY_SCHEMA))
+        tools.append(copy.deepcopy(LIST_KEYS_SCHEMA))
         tools.append(copy.deepcopy(JIRA_CONNECT_SCHEMA))
         if self.jira_connection():
             tools.extend(copy.deepcopy(JIRA_TOOL_SCHEMAS))
@@ -1069,7 +1114,7 @@ class ControlledToolAdapter:
             return False
         if tool_name in SITE_TOOLS:
             return self.build_mode
-        if tool_name in ("connect_jira", ADD_KEY_TOOL):
+        if tool_name in ("connect_jira", ADD_KEY_TOOL, LIST_KEYS_TOOL):
             return True
         if tool_name in JIRA_TOOLS:
             return bool(self.jira_connection())
@@ -1146,6 +1191,9 @@ class ControlledToolAdapter:
 
         if tool_name == ADD_KEY_TOOL:
             return await self._post_add_key_button(arguments or {})
+
+        if tool_name == LIST_KEYS_TOOL:
+            return await self._list_saved_keys()
 
         if tool_name in JIRA_TOOLS:
             return await self._run_jira_tool(tool_name, arguments or {})

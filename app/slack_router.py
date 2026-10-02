@@ -330,7 +330,9 @@ def get_system_prompt(user_prompt: str = "", user_profile: Optional[dict] = None
         "'for this channel only' to limit it to the channel) is saved for the client and the message is deleted automatically. "
         "If the user asks how to add a key, tell them exactly that format. You must NEVER repeat, store or use a key that appears in "
         "chat. If they prefer a form, call `add_api_key` (pass only the key's NAME) to post a secure dashboard button. If a key was "
-        "pasted in some other way and is still visible, tell them to delete that message and, if it was real, rotate it."
+        "pasted in some other way and is still visible, tell them to delete that message and, if it was real, rotate it. "
+        "To list saved keys ALWAYS call `list_saved_keys` (never answer from conversation memory) and never show or guess a value: "
+        "values can't be retrieved by anyone. There is NO slash command for keys; never invent commands or features."
     )
 
     return prompt
