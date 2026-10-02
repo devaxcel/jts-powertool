@@ -25,7 +25,10 @@ _MENTION = re.compile(r"<@[A-Z0-9]+>")
 _LEAD = re.compile(r"^\s*(?:please\s+)?(?:save|add|store|set|update|replace)\s+(?:this|the|my|these)?\s*(?:api\s*)?(?:keys?|secrets?|tokens?)?\s*[:\-]?\s*", re.I)
 _CHANNEL_ONLY = re.compile(r"\b(?:only\s+)?(?:for|in)\s+this\s+channel(?:\s+only)?\b|\bchannel\s+only\b", re.I)
 _LINE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_.-]{1,49})\s*[=:]\s*(\S{8,8000})\s*$")
-_NAME_LOOKS_LIKE_KEY = re.compile(r"(key|token|secret|password|passwd|credential|credentials)s?$", re.I)
+# The key word may be anywhere in the name as its own word: TEST_API_KEY, KEY_FOR_SHOPIFY, MY-SECRET-1 ...
+_NAME_LOOKS_LIKE_KEY = re.compile(r"(?:^|[_.\-])(?:keys?|tokens?|secrets?|passwords?|passwd|credentials?)(?:$|[_.\-]|\d)", re.I)
+# A value that is clearly an API key counts whatever the name is.
+_VALUE_LOOKS_LIKE_KEY = re.compile(r"^(?:sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|shpat_[A-Za-z0-9]{10,})")
 
 
 def _clean_value(v: str) -> str:
@@ -60,7 +63,9 @@ def parse_key_message(text: str) -> Optional[Dict[str, Any]]:
         if not m:
             return None
         name, value = m.group(1), _clean_value(m.group(2))
-        if not _NAME_LOOKS_LIKE_KEY.search(name) or len(value) < 8 or re.search(r"\s", value):
+        if len(value) < 8 or re.search(r"\s", value):
+            return None
+        if not (_NAME_LOOKS_LIKE_KEY.search(name) or _VALUE_LOOKS_LIKE_KEY.match(value)):
             return None
         entries.append((name, value))
     return {"entries": entries, "scope": scope}
