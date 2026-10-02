@@ -1295,6 +1295,8 @@ def _sync_workspace_conversations(token: str, team_id: Optional[str] = None, tea
                     continue
 
                 is_im = bool(c.get("is_im"))
+                if is_im and c.get("user") == "USLACKBOT":
+                    continue  # Slack's built-in chat, never useful
                 is_mpim = bool(c.get("is_mpim"))
                 is_private = bool(c.get("is_private"))
 
@@ -1386,7 +1388,18 @@ def list_unassigned_channels() -> List[Dict[str, Any]]:
     Includes configured secret counts and providers.
     """
     all_channels = list_all_channels()
-    return [ch for ch in all_channels if not ch.get("folder_id")]
+    # Only real channels are offered for assignment: direct messages (including group DMs and Slack's built-in
+    # Slackbot chat) are left out of this list. The bot still works in them.
+    def _is_dm(ch: Dict[str, Any]) -> bool:
+        cid = str(ch.get("channel_id") or "")
+        name = str(ch.get("channel_name") or "")
+        return (
+            ch.get("channel_type") in ("dm", "mpim")
+            or cid.startswith("D")
+            or name.lower().startswith("@slackbot")
+        )
+
+    return [ch for ch in all_channels if not ch.get("folder_id") and not _is_dm(ch)]
 
 
 # --- Generic Secrets Vault Service ---
