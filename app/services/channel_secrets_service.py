@@ -1389,18 +1389,12 @@ def list_unassigned_channels() -> List[Dict[str, Any]]:
     Includes configured secret counts and providers.
     """
     all_channels = list_all_channels()
-    # Only real channels are offered for assignment: direct messages (including group DMs and Slack's built-in
-    # Slackbot chat) are left out of this list. The bot still works in them.
-    def _is_dm(ch: Dict[str, Any]) -> bool:
-        cid = str(ch.get("channel_id") or "")
-        name = str(ch.get("channel_name") or "")
-        return (
-            ch.get("channel_type") in ("dm", "mpim")
-            or cid.startswith("D")
-            or name.lower().startswith("@slackbot")
-        )
+    # Channels AND direct messages are listed so any chat can be assigned to a client. Only Slack's built-in Slackbot
+    # chat is left out (it is never useful).
+    def _is_slackbot(ch: Dict[str, Any]) -> bool:
+        return str(ch.get("channel_name") or "").lower().startswith("@slackbot")
 
-    return [ch for ch in all_channels if not ch.get("folder_id") and not _is_dm(ch)]
+    return [ch for ch in all_channels if not ch.get("folder_id") and not _is_slackbot(ch)]
 
 
 # --- Generic Secrets Vault Service ---
