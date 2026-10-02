@@ -1,20 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import {
-  Users,
-  UserPlus,
-  Trash2,
-  RefreshCw,
-  Shield,
-  Building,
-  Building2,
-  X,
-  Pencil,
-  Mail,
-  GitBranch,
-  CheckSquare,
-} from "lucide-react";
+import { Users, UserPlus, Trash2, RefreshCw, Shield, Building, Building2, X, Pencil, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   fetchUsers,
@@ -28,7 +15,8 @@ import {
 } from "@/lib/api";
 import { DataTable } from "@/components/DataTable";
 import { DashboardUser, ChannelFolder, Organization, formatLocalDateTime } from "@/lib/types";
-import { PageHeader, Alert, ComingSoonBadge, btn } from "@/components/ui";
+import { PageHeader, Alert, btn } from "@/components/ui";
+import { ToolPermissionsBox, ToolPermissions, permissionDefaults } from "@/components/ToolPermissionsBox";
 
 const ROLE_LABELS: Record<string, string> = {
   jts_admin: "JTS Admin",
@@ -56,10 +44,7 @@ export default function UsersPage() {
   const [role, setRole] = useState<"jts_admin" | "client_admin" | "client_standard">("client_admin");
   const [clientFolderId, setClientFolderId] = useState<string>("");
   const [organizationId, setOrganizationId] = useState<string>("");
-  const [githubRead, setGithubRead] = useState(true);
-  const [githubPush, setGithubPush] = useState(true);
-  const [jiraCreate, setJiraCreate] = useState(true);
-  const [jiraClose, setJiraClose] = useState(false);
+  const [perms, setPerms] = useState<ToolPermissions>(permissionDefaults("client_admin"));
 
   // Edit User Form State
   const [editName, setEditName] = useState("");
@@ -69,10 +54,7 @@ export default function UsersPage() {
   const [editRole, setEditRole] = useState<"jts_admin" | "client_admin" | "client_standard">("client_admin");
   const [editClientFolderId, setEditClientFolderId] = useState<string>("");
   const [editOrganizationId, setEditOrganizationId] = useState<string>("");
-  const [editGithubRead, setEditGithubRead] = useState(true);
-  const [editGithubPush, setEditGithubPush] = useState(true);
-  const [editJiraCreate, setEditJiraCreate] = useState(true);
-  const [editJiraClose, setEditJiraClose] = useState(false);
+  const [editPerms, setEditPerms] = useState<ToolPermissions>(permissionDefaults("client_admin"));
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -114,10 +96,7 @@ export default function UsersPage() {
     setRole("client_admin");
     setClientFolderId("");
     setOrganizationId("");
-    setGithubRead(true);
-    setGithubPush(true);
-    setJiraCreate(true);
-    setJiraClose(false);
+    setPerms(permissionDefaults("client_admin"));
     setErrorMsg("");
   };
 
@@ -171,6 +150,7 @@ export default function UsersPage() {
         timezone: defaultTz,
         client_folder_id: clientFolderId ? parseInt(clientFolderId, 10) : null,
         organization_id: organizationId ? parseInt(organizationId, 10) : null,
+        tool_permissions: perms,
       });
       setSuccessMsg(
         res.message ||
@@ -215,10 +195,7 @@ export default function UsersPage() {
     setEditRole(u.role === "jts_admin" || u.role === "client_standard" ? u.role : "client_admin");
     setEditClientFolderId(u.client_folder_id ? String(u.client_folder_id) : "");
     setEditOrganizationId(u.organization_id ? String(u.organization_id) : "");
-    setEditGithubRead(true);
-    setEditGithubPush(u.role === "jts_admin" ? true : false);
-    setEditJiraCreate(true);
-    setEditJiraClose(false);
+    setEditPerms(u.tool_permissions && Object.keys(u.tool_permissions).length ? u.tool_permissions : permissionDefaults(u.role));
     setShowEditModal(true);
   };
 
@@ -261,6 +238,7 @@ export default function UsersPage() {
         role: editRole,
         client_folder_id: editClientFolderId ? parseInt(editClientFolderId, 10) : null,
         organization_id: editOrganizationId ? parseInt(editOrganizationId, 10) : null,
+        tool_permissions: editPerms,
       });
       setSuccessMsg(`User '${cleanName}' updated successfully!`);
       setShowEditModal(false);
@@ -566,7 +544,7 @@ export default function UsersPage() {
                 </label>
                 <select
                   value={role}
-                  onChange={(e: any) => setRole(e.target.value)}
+                  onChange={(e: any) => { setRole(e.target.value); setPerms(permissionDefaults(e.target.value)); }}
                   className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
                 >
                   <option value="client_admin">Client Admin: manages their organization, billing and API key</option>
@@ -575,83 +553,7 @@ export default function UsersPage() {
                 </select>
               </div>
 
-              {/* Tool Access & Permissions */}
-              <div className="pt-2 border-t border-gray-100 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="block text-gray-700 font-bold">Tool permissions</label>
-                  <ComingSoonBadge />
-                </div>
-
-                {/* GitHub Permissions Box */}
-                <div className="p-3 bg-gray-50/80 border border-gray-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between border-b border-gray-200/60 pb-1.5">
-                    <span className="font-semibold text-gray-800 flex items-center gap-1.5 text-[11px]">
-                      <GitBranch className="h-3.5 w-3.5 text-[#088ADA]" />
-                      GitHub Permissions
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-[#088ADA] font-mono font-medium">
-                      Active
-                    </span>
-                  </div>
-
-                  <div className="space-y-1.5 pt-0.5">
-                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
-                      <input
-                        type="checkbox" disabled
-                        checked={githubRead}
-                        onChange={(e) => setGithubRead(e.target.checked)}
-                        className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
-                      />
-                      <span>Can Read Repos</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
-                      <input
-                        type="checkbox" disabled
-                        checked={githubPush}
-                        onChange={(e) => setGithubPush(e.target.checked)}
-                        className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
-                      />
-                      <span>Can Push Code / Merge PRs</span>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Jira Permissions Box (Future) */}
-                <div className="p-3 bg-gray-50/80 border border-gray-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between border-b border-gray-200/60 pb-1.5">
-                    <span className="font-semibold text-gray-800 flex items-center gap-1.5 text-[11px]">
-                      <CheckSquare className="h-3.5 w-3.5 text-purple-600" />
-                      Jira (Future Integration)
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-mono font-medium">
-                      Future
-                    </span>
-                  </div>
-
-                  <div className="space-y-1.5 pt-0.5">
-                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
-                      <input
-                        type="checkbox" disabled
-                        checked={jiraCreate}
-                        onChange={(e) => setJiraCreate(e.target.checked)}
-                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
-                      />
-                      <span>Can Create Tickets</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
-                      <input
-                        type="checkbox" disabled
-                        checked={jiraClose}
-                        onChange={(e) => setJiraClose(e.target.checked)}
-                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
-                      />
-                      <span>Can Close/Delete Tickets</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
+              <ToolPermissionsBox value={perms} onChange={setPerms} role={role} />
 
               {errorMsg && (
                 <div className="p-2.5 rounded-lg bg-rose-50 text-rose-700 text-xs border border-rose-200">
@@ -809,7 +711,7 @@ export default function UsersPage() {
                 </label>
                 <select
                   value={editRole}
-                  onChange={(e: any) => setEditRole(e.target.value)}
+                  onChange={(e: any) => { setEditRole(e.target.value); setEditPerms(permissionDefaults(e.target.value)); }}
                   className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
                 >
                   <option value="client_admin">Client Admin: manages their organization, billing and API key</option>
@@ -818,83 +720,7 @@ export default function UsersPage() {
                 </select>
               </div>
 
-              {/* Tool Access & Permissions */}
-              <div className="pt-2 border-t border-gray-100 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="block text-gray-700 font-bold">Tool permissions</label>
-                  <ComingSoonBadge />
-                </div>
-
-                {/* GitHub Permissions Box */}
-                <div className="p-3 bg-gray-50/80 border border-gray-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between border-b border-gray-200/60 pb-1.5">
-                    <span className="font-semibold text-gray-800 flex items-center gap-1.5 text-[11px]">
-                      <GitBranch className="h-3.5 w-3.5 text-[#088ADA]" />
-                      GitHub Permissions
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-[#088ADA] font-mono font-medium">
-                      Active
-                    </span>
-                  </div>
-
-                  <div className="space-y-1.5 pt-0.5">
-                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
-                      <input
-                        type="checkbox" disabled
-                        checked={editGithubRead}
-                        onChange={(e) => setEditGithubRead(e.target.checked)}
-                        className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
-                      />
-                      <span>Can Read Repos</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
-                      <input
-                        type="checkbox" disabled
-                        checked={editGithubPush}
-                        onChange={(e) => setEditGithubPush(e.target.checked)}
-                        className="rounded border-gray-300 text-[#088ADA] focus:ring-[#088ADA] h-3.5 w-3.5"
-                      />
-                      <span>Can Push Code / Merge PRs</span>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Jira Permissions Box (Future) */}
-                <div className="p-3 bg-gray-50/80 border border-gray-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between border-b border-gray-200/60 pb-1.5">
-                    <span className="font-semibold text-gray-800 flex items-center gap-1.5 text-[11px]">
-                      <CheckSquare className="h-3.5 w-3.5 text-purple-600" />
-                      Jira (Future Integration)
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-mono font-medium">
-                      Future
-                    </span>
-                  </div>
-
-                  <div className="space-y-1.5 pt-0.5">
-                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
-                      <input
-                        type="checkbox" disabled
-                        checked={editJiraCreate}
-                        onChange={(e) => setEditJiraCreate(e.target.checked)}
-                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
-                      />
-                      <span>Can Create Tickets</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 cursor-pointer text-gray-700 select-none">
-                      <input
-                        type="checkbox" disabled
-                        checked={editJiraClose}
-                        onChange={(e) => setEditJiraClose(e.target.checked)}
-                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-600 h-3.5 w-3.5"
-                      />
-                      <span>Can Close/Delete Tickets</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
+              <ToolPermissionsBox value={editPerms} onChange={setEditPerms} role={editRole} />
 
               {errorMsg && (
                 <div className="p-2.5 rounded-lg bg-rose-50 text-rose-700 text-xs border border-rose-200">

@@ -963,6 +963,7 @@ export async function createDashboardUser(payload: {
   timezone?: string | null;
   client_folder_id?: number | null;
   organization_id?: number | null;
+  tool_permissions?: Record<string, boolean>;
 }): Promise<{ status: string; user_id: number; message: string; email_sent?: boolean }> {
   // Generate a temporary secure placeholder password so older/newer backend APIs never fail on empty password
   const placeholderPassword =
@@ -1064,6 +1065,7 @@ export async function updateDashboardUser(
     role: string;
     client_folder_id?: number | null;
     organization_id?: number | null;
+    tool_permissions?: Record<string, boolean>;
   }
 ): Promise<{ status: string; message: string }> {
   let res = await fetch(`${API_BASE}/api/users/${userId}`, {

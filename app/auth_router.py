@@ -5,6 +5,7 @@ Provides multi-tenant Role-Based Access Control (RBAC):
 - Client Admin: Scoped to client folder, manage team members, client billing & approvals
 - Client Standard: Task portal, assigned channels, personal task approvals
 """
+from app.services.tool_permissions import clean_permissions, effective_permissions
 import base64
 import hashlib
 import hmac
@@ -140,6 +141,7 @@ class CreateUserRequest(BaseModel):
     timezone: Optional[str] = Field(default=None, description="Preferred timezone (defaults to global system timezone if omitted)")
     client_folder_id: Optional[int] = None
     organization_id: Optional[int] = None
+    tool_permissions: Optional[Dict[str, bool]] = Field(default=None, description="GitHub / Jira permission checkboxes")
 
 
 class UpdateUserRequest(BaseModel):
@@ -150,6 +152,7 @@ class UpdateUserRequest(BaseModel):
     timezone: Optional[str] = Field(None, description="Preferred timezone")
     client_folder_id: Optional[int] = None
     organization_id: Optional[int] = None
+    tool_permissions: Optional[Dict[str, bool]] = Field(default=None, description="GitHub / Jira permission checkboxes")
 
 
 class UpdateProfileRequest(BaseModel):
@@ -374,11 +377,13 @@ def _ensure_users_columns(conn_or_cur):
                 cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS name VARCHAR(255);")
                 cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;")
                 cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS timezone VARCHAR(100) DEFAULT 'UTC';")
+                cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS tool_permissions JSONB;")
             conn_or_cur.commit()
         else:
             conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS name VARCHAR(255);")
             conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;")
             conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS timezone VARCHAR(100) DEFAULT 'UTC';")
+            conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS tool_permissions JSONB;")
     except Exception as e:
         logger.debug(f"[_ensure_users_columns] DDL note: {e}")
 
@@ -752,7 +757,7 @@ def list_users(request: Request):
                            COALESCE(u.timezone, 'UTC') as timezone,
                            u.client_folder_id, f.name as client_folder_name,
                            u.organization_id, o.name as organization_name,
-                           u.created_at
+                           u.created_at, u.tool_permissions
                     FROM dashboard_users u
                     LEFT JOIN channel_folders f ON u.client_folder_id = f.id
                     LEFT JOIN organizations o ON u.organization_id = o.id
@@ -765,14 +770,20 @@ def list_users(request: Request):
                            COALESCE(u.timezone, 'UTC') as timezone,
                            u.client_folder_id, f.name as client_folder_name,
                            u.organization_id, o.name as organization_name,
-                           u.created_at
+                           u.created_at, u.tool_permissions
                     FROM dashboard_users u
                     LEFT JOIN channel_folders f ON u.client_folder_id = f.id
                     LEFT JOIN organizations o ON u.organization_id = o.id
                     ORDER BY u.id DESC;
                 """)
             rows = cur.fetchall() or []
-            return {"users": [dict(r) for r in rows]}
+            users = []
+            for r in rows:
+                d = dict(r)
+                # The dashboard gets the permissions that are actually in force (role defaults + saved checkboxes).
+                d["tool_permissions"] = effective_permissions(d.get("tool_permissions"), d.get("role"))
+                users.append(d)
+            return {"users": users}
     except Exception as e:
         logger.error(f"Failed to fetch users: {e}", exc_info=True)
         if conn:
@@ -841,6 +852,10 @@ def create_user(req: CreateUserRequest, request: Request):
         raise HTTPException(status_code=400, detail="Please select a Client Folder to assign to this user.")
     if role == "client_admin" and not org_id:
         raise HTTPException(status_code=400, detail="Please select an Organization to assign to this Client Admin.")
+    try:
+        perms = clean_permissions(req.tool_permissions)
+    except ValueError as pe:
+        raise HTTPException(status_code=400, detail=str(pe))
 
     clean_password = (req.password or "").strip() if req.password else ""
     is_placeholder_pwd = (not clean_password) or clean_password.startswith("Temp_")
@@ -866,10 +881,11 @@ def create_user(req: CreateUserRequest, request: Request):
                 raise HTTPException(status_code=400, detail=f"Email '{clean_email}' is already registered to another user.")
 
             cur.execute("""
-                INSERT INTO dashboard_users (name, username, email, password_hash, role, timezone, client_folder_id, organization_id, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                INSERT INTO dashboard_users (name, username, email, password_hash, role, timezone, client_folder_id, organization_id, tool_permissions, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now())
                 RETURNING id;
-            """, (clean_name, clean_username, clean_email, pwd_hash, role, clean_tz, folder_id, org_id))
+            """, (clean_name, clean_username, clean_email, pwd_hash, role, clean_tz, folder_id, org_id,
+                  json.dumps(perms) if perms is not None else None))
             row = cur.fetchone()
             new_id = row["id"] if isinstance(row, dict) else row[0]
 
@@ -1179,6 +1195,10 @@ def update_user(user_id: int, req: UpdateUserRequest, request: Request):
         raise HTTPException(status_code=400, detail="Please select a Client Folder to assign to this user.")
     if role == "client_admin" and not org_id:
         raise HTTPException(status_code=400, detail="Please select an Organization to assign to this Client Admin.")
+    try:
+        perms = clean_permissions(req.tool_permissions)
+    except ValueError as pe:
+        raise HTTPException(status_code=400, detail=str(pe))
 
     conn = None
     try:
@@ -1226,6 +1246,9 @@ def update_user(user_id: int, req: UpdateUserRequest, request: Request):
                         SET name = %s, email = %s, role = %s, client_folder_id = %s, organization_id = %s, updated_at = now()
                         WHERE id = %s;
                     """, (clean_name, clean_email, role, folder_id, org_id, user_id))
+
+            if perms is not None:
+                cur.execute("UPDATE dashboard_users SET tool_permissions = %s::jsonb WHERE id = %s;", (json.dumps(perms), user_id))
 
             conn.commit()
             u_name = user_row.get("username") if isinstance(user_row, dict) else user_row[1]

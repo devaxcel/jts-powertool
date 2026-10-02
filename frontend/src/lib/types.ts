@@ -239,6 +239,8 @@ export interface DashboardUser {
   organization_id?: number | null;
   organization_name?: string | null;
   created_at?: string;
+  /** GitHub / Jira permissions in force for this user (role defaults + saved checkboxes) */
+  tool_permissions?: Record<string, boolean>;
 }
 
 export interface VerifyTokenResponse {

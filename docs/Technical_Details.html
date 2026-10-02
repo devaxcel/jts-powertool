@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>JTS PowerTool - Technical Details</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm;
+          @bottom-center { content: "JTS PowerTool - Technical Details | Page " counter(page); font-size: 8.5pt; color: #6b7280; } }
+  @page :first { @bottom-center { content: ""; } }
+  :root { --brand:#088ADA; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --soft:#f3f8fd; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.5; margin: 0; }
+  h1 { font-size: 26pt; margin: 0 0 4pt; color: var(--brand); letter-spacing: .5px; }
+  h2 { font-size: 16pt; color: var(--brand); border-bottom: 2px solid var(--brand); padding-bottom: 4pt; margin: 0 0 8pt; page-break-after: avoid; }
+  h3 { font-size: 12pt; margin: 14pt 0 4pt; page-break-after: avoid; }
+  p { margin: 4pt 0 6pt; }
+  .page { page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  .cover { text-align: center; padding-top: 70mm; }
+  .cover .sub { font-size: 13pt; color: var(--muted); margin-top: 6pt; }
+  .cover .meta { margin-top: 28mm; font-size: 10pt; color: var(--muted); }
+  .lead { color: var(--muted); margin-bottom: 10pt; }
+  .step { display: flex; gap: 8pt; margin: 8pt 0 2pt; page-break-inside: avoid; }
+  .num { flex: 0 0 22pt; height: 22pt; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 700; text-align: center; line-height: 22pt; font-size: 10pt; }
+  .step h3 { margin: 1pt 0 0; }
+  ul { margin: 2pt 0 6pt 16pt; padding: 0; }
+  li { margin: 1.5pt 0; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.5pt; page-break-inside: auto; }
+  th { background: var(--brand); color: #fff; text-align: left; padding: 5pt 6pt; }
+  td { padding: 5pt 6pt; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:nth-child(even) td { background: #fafafa; }
+  tr { page-break-inside: avoid; }
+  code, .mono { font-family: Consolas, "Courier New", monospace; font-size: 9pt; background: #f3f4f6; padding: 0 3pt; border-radius: 3pt; }
+  pre { font-family: Consolas, "Courier New", monospace; font-size: 8.6pt; background: #f8fafc; border: 1px solid var(--line); padding: 8pt; border-radius: 6pt; white-space: pre; line-height: 1.35; page-break-inside: avoid; }
+  .note { background: var(--soft); border-left: 4px solid var(--brand); padding: 6pt 9pt; margin: 8pt 0; border-radius: 3pt; page-break-inside: avoid; }
+  .warn { background: #fff7ed; border-left: 4px solid #f59e0b; padding: 6pt 9pt; margin: 8pt 0; border-radius: 3pt; page-break-inside: avoid; }
+  .tag { display:inline-block; font-size: 8pt; padding: 0 5pt; border-radius: 8pt; background:#e0f2fe; color:#075985; font-weight:600; }
+  .new { background:#dcfce7; color:#166534; }
+  .small { font-size: 9pt; color: var(--muted); }
+  svg { width: 100%; height: auto; }
+  .footer-note { margin-top: 14pt; font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<!-- ============================== COVER ============================== -->
+<section class="page cover">
+  <h1>JTS PowerTool</h1>
+  <div style="font-size:20pt;font-weight:600;">Technical Details</div>
+  <div class="sub">Project flow, setup, connections, file structure and technology stack</div>
+  <div class="meta">
+    Updated to the current production setup &middot; 2 October 2026<br>
+    Replaces the earlier version of this document (adds Keys &amp; Connections, GitHub App, Jira, website builder,<br>
+    Slack key capture, billing and invoices)
+  </div>
+</section>
+
+<!-- ============================== 1. OVERVIEW ============================== -->
+<section class="page">
+  <h2>1. What the System Does</h2>
+  <p class="lead">JTS PowerTool is a Slack-powered AI assistant with an admin dashboard. Each client company gets its own channels, its own
+  connections (GitHub, Jira, API keys) and its own usage and billing.</p>
+
+  <table>
+    <tr><th style="width:26%">Capability</th><th>What it means</th></tr>
+    <tr><td><b>Chat assistant</b></td><td>Anyone in a client channel mentions the bot (or sends a direct message) and Claude answers using the conversation memory, live web search and the client's connected tools.</td></tr>
+    <tr><td><b>GitHub work</b> <span class="tag new">NEW</span></td><td>Clients connect their <i>own</i> GitHub with one click. The bot reads repositories, and proposes issues, file changes and pull requests that need approval.</td></tr>
+    <tr><td><b>Jira work</b> <span class="tag new">NEW</span></td><td>Clients connect their own Jira Cloud site with one click. The bot searches and reads issues directly; creating, updating, commenting and moving issues need approval.</td></tr>
+    <tr><td><b>Website builder</b> <span class="tag new">NEW</span></td><td>The bot asks for the stack, builds a complete site as a draft, and after one approval creates the repository in the client's GitHub (and publishes it on GitHub Pages where possible). Later edits go through pull requests.</td></tr>
+    <tr><td><b>Client API keys</b> <span class="tag new">NEW</span></td><td>Each client manages its own keys in <i>Keys &amp; Connections</i> or by posting <code>KEY_NAME = value</code> in Slack. The client's Anthropic key is used for its replies so JTS does not bill them.</td></tr>
+    <tr><td><b>Approvals (human in the loop)</b></td><td>Every action that changes something outside the chat (GitHub, Jira, websites) posts an approval card. It is approved in Slack or on the dashboard.</td></tr>
+    <tr><td><b>Usage &amp; billing</b></td><td>Token use and USD cost are logged per message and channel. JTS can generate invoices per client and mark them paid.</td></tr>
+  </table>
+
+  <h3>Who uses what</h3>
+  <table>
+    <tr><th style="width:20%">Role</th><th>Can do</th></tr>
+    <tr><td><b>JTS Admin</b></td><td>Everything: all clients, users, global API keys, system settings, activity log, conversation inspector, database view.</td></tr>
+    <tr><td><b>Client Admin</b></td><td>Their own client only: dashboard, approvals, usage &amp; billing, clients &amp; channels, and managing the client's keys and GitHub / Jira connections.</td></tr>
+    <tr><td><b>Team Member</b></td><td>Their own client only: <i>My Activity</i>, approvals (view / approve as allowed) and a read-only view of Keys &amp; Connections.</td></tr>
+  </table>
+  <div class="note">A client user is always limited to the channels of their own client. A client user who is not yet assigned to a client sees nothing.</div>
+</section>
+
+<!-- ============================== 2. FLOW ============================== -->
+<section class="page">
+  <h2>2. How the Project Works</h2>
+  <p class="lead">Step by step, in simple language.</p>
+
+  <div class="step"><div class="num">1</div><div><h3>Webhook trigger</h3></div></div>
+  <ul>
+    <li>A user mentions the bot, or sends a message, in a Slack channel (or a direct message).</li>
+    <li>Slack immediately sends an HTTP POST to <code>/api/slack/events</code>. Button clicks go to <code>/api/slack/interactive</code>. (A Microsoft Teams webhook also exists in <code>app/teams</code>.)</li>
+  </ul>
+
+  <div class="step"><div class="num">2</div><div><h3>Security and signature check</h3></div></div>
+  <ul>
+    <li>The backend computes an HMAC-SHA256 with <code>SLACK_SIGNING_SECRET</code> and compares it with <code>X-Slack-Signature</code>.</li>
+    <li>Requests older than 5 minutes are rejected (replay protection). A bad signature returns <code>401</code>.</li>
+  </ul>
+
+  <div class="step"><div class="num">3</div><div><h3>Deduplication</h3></div></div>
+  <ul>
+    <li>Slack retries an event when it does not get an answer within about 3 seconds.</li>
+    <li>The backend records each message id (<code>record_processed_activity</code>) and drops repeats, so the bot never answers twice.</li>
+  </ul>
+
+  <div class="step"><div class="num">4</div><div><h3>Key messages are handled first <span class="tag new">NEW</span></h3></div></div>
+  <ul>
+    <li>If the whole message is <code>KEY_NAME = value</code> lines, the system saves the key, deletes the Slack message and replies by name only. The message never reaches the database, the logs or Claude. See section 6.</li>
+    <li>All other messages continue below.</li>
+  </ul>
+
+  <div class="step"><div class="num">5</div><div><h3>Fast answer and queue hand-off</h3></div></div>
+  <ul>
+    <li>The backend returns <code>200 OK</code> within milliseconds and stores a job in the PostgreSQL <code>job_queue</code> table.</li>
+    <li>The separate <code>jts-worker</code> service polls the queue (about once a second), claims a job and does the slow AI work. (The earlier version of this document mentioned Redis; the queue is now PostgreSQL.)</li>
+  </ul>
+
+  <div class="step"><div class="num">6</div><div><h3>Context, history and memory</h3></div></div>
+  <ul>
+    <li>Recent conversation turns for the thread or channel (default rolling window of 6) come from PostgreSQL.</li>
+    <li>Semantic memory uses local embeddings (<code>BAAI/bge-small-en-v1.5</code>, 384 dimensions) to bring back relevant past knowledge.</li>
+    <li>The user's name and timezone are added so times are shown locally.</li>
+    <li>Anything that looks like a key is replaced with <code>[hidden]</code> before it is saved and when old messages are loaded. <span class="tag new">NEW</span></li>
+  </ul>
+
+  <div class="step"><div class="num">7</div><div><h3>Client and key selection <span class="tag new">NEW</span></h3></div></div>
+  <ul>
+    <li>The channel is matched to its client folder (<code>channel_metadata</code>). Slack's real channel id and a stored legacy alias are treated as the same channel.</li>
+    <li>Which Anthropic key answers: the channel's own key, then the client's key, then the JTS key. Only usage on the JTS key is billed to the client.</li>
+    <li>Website building uses a stronger model (default <code>claude-sonnet-5-5</code>) with a cost cap; normal chat uses <code>claude-haiku-4-5</code>.</li>
+  </ul>
+</section>
+
+<section class="page">
+  <div class="step"><div class="num">8</div><div><h3>Permission check and Claude's tools <span class="tag new">NEW</span></h3></div></div>
+  <p>Claude decides which tool to use. The set of tools depends on what the client has connected:</p>
+  <table>
+    <tr><th style="width:27%">Tool group</th><th>Tools</th><th style="width:22%">Runs</th></tr>
+    <tr><td>Web</td><td><code>search_web</code>, <code>fetch_url_content</code></td><td>Directly</td></tr>
+    <tr><td>GitHub (client's own account)</td><td>read issues, files, code, commits, pull requests; write issues, files, branches, pull requests</td><td>Reads directly, writes after approval</td></tr>
+    <tr><td>Connect buttons</td><td><code>connect_github</code>, <code>connect_jira</code></td><td>Posts a one-time button</td></tr>
+    <tr><td>Jira (when connected)</td><td><code>jira_search_issues</code>, <code>jira_get_issue</code>, <code>jira_list_projects</code>; <code>jira_create_issue</code>, <code>jira_update_issue</code>, <code>jira_add_comment</code>, <code>jira_transition_issue</code></td><td>Reads directly, changes after approval</td></tr>
+    <tr><td>Website builder</td><td>ask / set stack, draft files, <code>publish_website</code>, <code>start_site_edit</code>, <code>propose_site_changes</code>, <code>list_my_websites</code></td><td>Drafts in the database, publish after approval</td></tr>
+    <tr><td>Keys</td><td><code>list_saved_keys</code> (names only), <code>add_api_key</code> (opens the secure form)</td><td>Directly</td></tr>
+  </table>
+  <ul>
+    <li>Clear requests (for example "create a Jira task" or "list the keys") force a real tool call, so the bot never only promises to do something.</li>
+    <li>The bot is told to prefer Jira tools for Jira project keys such as <code>KAN-12</code> and GitHub tools only for repositories.</li>
+  </ul>
+
+  <div class="step"><div class="num">9</div><div><h3>Human approval</h3></div></div>
+  <ul>
+    <li>Every change posts an approval card in the Slack conversation with <b>Approve &amp; Apply</b> and <b>Reject</b>. The same request appears on the dashboard <i>Approvals</i> page.</li>
+    <li>A request is valid for 24 hours and can be claimed once, so two people cannot approve it twice.</li>
+    <li>After approval the action runs with the <b>client's own</b> GitHub or Jira connection, never with a shared JTS credential (unless the JTS fallback for GitHub is still allowed).</li>
+  </ul>
+
+  <div class="step"><div class="num">10</div><div><h3>Reply and cost logging</h3></div></div>
+  <ul>
+    <li>The final answer is posted to the Slack thread with <code>chat.postMessage</code>.</li>
+    <li>Telemetry stores input and output tokens and the USD cost per message; this feeds <i>Usage &amp; Billing</i>. Replies made with a client's own Anthropic key are stored with zero billable cost.</li>
+    <li>Security-relevant actions (key saved or removed, connections changed) are written to the activity log. Key values are never logged.</li>
+  </ul>
+
+  <div class="note"><b>Who is asking is checked first.</b> Before a GitHub or Jira tool runs, the bot matches the person's Slack email to a dashboard user and checks the six permission checkboxes on the Users page (section 5). A refused request stops there: no approval card is posted and the bot tells the person why. The approval card is the second safety layer for anything that changes data.</div>
+</section>
+
+<!-- ============================== 3. DIAGRAM ============================== -->
+<section class="page">
+  <h2>3. System Architecture Diagram</h2>
+  <p class="lead">Request, queue, worker, approval and secret flow.</p>
+  <svg viewBox="0 0 900 640" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif" font-size="13">
+    <defs>
+      <marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#475569"/></marker>
+      <style>
+        .b{fill:#fff;stroke:#94a3b8;stroke-width:1.5;rx:8}
+        .k{fill:#e0f2fe;stroke:#088ADA;stroke-width:1.8;rx:8}
+        .g{fill:#ecfdf5;stroke:#059669;stroke-width:1.6;rx:8}
+        .o{fill:#fff7ed;stroke:#f59e0b;stroke-width:1.6;rx:8}
+        .t{fill:#1f2937}.s{fill:#64748b;font-size:11px}
+        .l{stroke:#475569;stroke-width:1.6;fill:none;marker-end:url(#a)}
+        .d{stroke:#475569;stroke-width:1.4;fill:none;stroke-dasharray:5 4;marker-end:url(#a)}
+      </style>
+    </defs>
+
+    <!-- Users -->
+    <rect class="b" x="20" y="20" width="170" height="64"/><text class="t" x="105" y="48" text-anchor="middle" font-weight="600">Slack users</text><text class="s" x="105" y="66" text-anchor="middle">channels &amp; direct messages</text>
+    <rect class="b" x="20" y="520" width="170" height="64"/><text class="t" x="105" y="548" text-anchor="middle" font-weight="600">Dashboard users</text><text class="s" x="105" y="566" text-anchor="middle">JTS / Client Admin / Member</text>
+
+    <!-- Nginx + backend -->
+    <rect class="k" x="250" y="20" width="200" height="64"/><text class="t" x="350" y="48" text-anchor="middle" font-weight="600">Nginx (HTTPS)</text><text class="s" x="350" y="66" text-anchor="middle">journeys.pe</text>
+    <rect class="k" x="250" y="130" width="200" height="110"/><text class="t" x="350" y="156" text-anchor="middle" font-weight="600">FastAPI backend</text>
+    <text class="s" x="350" y="176" text-anchor="middle">jts-powertool (127.0.0.1:8000)</text>
+    <text class="s" x="350" y="194" text-anchor="middle">signature check &#183; dedupe</text>
+    <text class="s" x="350" y="210" text-anchor="middle">Slack key capture &#183; approvals API</text>
+    <text class="s" x="350" y="226" text-anchor="middle">connect / callback pages</text>
+
+    <rect class="k" x="250" y="520" width="200" height="64"/><text class="t" x="350" y="548" text-anchor="middle" font-weight="600">Next.js dashboard</text><text class="s" x="350" y="566" text-anchor="middle">jts-frontend</text>
+
+    <!-- Queue + worker -->
+    <rect class="g" x="520" y="130" width="170" height="64"/><text class="t" x="605" y="158" text-anchor="middle" font-weight="600">PostgreSQL</text><text class="s" x="605" y="176" text-anchor="middle">job_queue &#183; messages &#183; keys meta</text>
+    <rect class="k" x="520" y="250" width="170" height="110"/><text class="t" x="605" y="276" text-anchor="middle" font-weight="600">Worker</text>
+    <text class="s" x="605" y="296" text-anchor="middle">jts-worker</text>
+    <text class="s" x="605" y="314" text-anchor="middle">context &#183; tool loop</text>
+    <text class="s" x="605" y="330" text-anchor="middle">builds sites &#183; billing logs</text>
+
+    <rect class="b" x="740" y="250" width="140" height="64"/><text class="t" x="810" y="278" text-anchor="middle" font-weight="600">Claude API</text><text class="s" x="810" y="296" text-anchor="middle">client or JTS key</text>
+
+    <!-- Integrations -->
+    <rect class="b" x="740" y="370" width="140" height="56"/><text class="t" x="810" y="394" text-anchor="middle" font-weight="600">GitHub</text><text class="s" x="810" y="411" text-anchor="middle">client's own account</text>
+    <rect class="b" x="740" y="440" width="140" height="56"/><text class="t" x="810" y="464" text-anchor="middle" font-weight="600">Jira Cloud</text><text class="s" x="810" y="481" text-anchor="middle">client's own site</text>
+    <rect class="b" x="740" y="510" width="140" height="56"/><text class="t" x="810" y="534" text-anchor="middle" font-weight="600">Web search / URLs</text><text class="s" x="810" y="551" text-anchor="middle">public pages only</text>
+
+    <!-- Approvals + secrets -->
+    <rect class="o" x="520" y="400" width="170" height="80"/><text class="t" x="605" y="428" text-anchor="middle" font-weight="600">Human approval</text><text class="s" x="605" y="446" text-anchor="middle">card in Slack and</text><text class="s" x="605" y="462" text-anchor="middle">dashboard Approvals page</text>
+    <rect class="g" x="20" y="300" width="190" height="76"/><text class="t" x="115" y="326" text-anchor="middle" font-weight="600">AWS Secrets Manager</text><text class="s" x="115" y="345" text-anchor="middle">keys &amp; tokens (encrypted)</text><text class="s" x="115" y="361" text-anchor="middle">read when needed</text>
+
+    <!-- Arrows -->
+    <path class="l" d="M190,52 L250,52"/>
+    <path class="l" d="M350,84 L350,130"/>
+    <path class="l" d="M450,170 L520,165"/>
+    <path class="l" d="M605,194 L605,250"/>
+    <path class="l" d="M690,285 L740,282"/>
+    <path class="l" d="M690,330 C720,350 720,390 740,398"/>
+    <path class="l" d="M690,345 C715,380 715,460 740,466"/>
+    <path class="l" d="M690,355 C705,420 715,520 740,538"/>
+    <path class="d" d="M605,360 L605,400"/>
+    <path class="d" d="M520,440 C470,420 440,300 400,240"/>
+    <path class="l" d="M190,552 L250,552"/>
+    <path class="l" d="M350,520 C350,420 350,300 350,240"/>
+    <path class="d" d="M250,200 C160,200 115,250 115,300"/>
+    <path class="d" d="M520,345 C400,420 230,420 150,376"/>
+    <text class="s" x="460" y="150">enqueue</text>
+    <text class="s" x="612" y="224">claim job</text>
+    <text class="s" x="535" y="385">proposes change</text>
+    <text class="s" x="402" y="462">approve / reject</text>
+  </svg>
+  <div class="small">Solid arrows: main request path. Dashed arrows: approvals and secret reads. Slack buttons also reach the backend through Nginx.</div>
+</section>
+
+<!-- ============================== 4. SLACK SETUP ============================== -->
+<section class="page">
+  <h2>4. Slack Setup</h2>
+  <p class="lead">Connect Slack to the backend.</p>
+
+  <h3>01 Install the app in a workspace</h3>
+  <ul>
+    <li>Open <code>https://journeys.pe/api/slack/install</code> and choose the workspace from the top-right dropdown in Slack. Click <b>Allow</b>.</li>
+    <li>The backend receives the workspace id, team name and bot token and stores them in <code>slack_workspaces</code> and the secrets vault.</li>
+    <li>In the channel, invite the bot (for example <code>@jpt</code> / "JTS Powertool Agent"). It then answers when mentioned.</li>
+  </ul>
+
+  <h3>02 Slack app settings (api.slack.com/apps)</h3>
+  <table>
+    <tr><th style="width:30%">Setting</th><th>Value</th></tr>
+    <tr><td>Event Subscriptions URL</td><td><code>https://journeys.pe/api/slack/events</code></td></tr>
+    <tr><td>Interactivity URL</td><td><code>https://journeys.pe/api/slack/interactive</code></td></tr>
+    <tr><td>OAuth redirect URL</td><td><code>https://journeys.pe/api/slack/oauth/callback</code></td></tr>
+    <tr><td>Bot token scopes</td><td><code>app_mentions:read, channels:history, channels:read, chat:write, files:read, files:write, groups:history, groups:read, im:history, im:read, mpim:history, mpim:read, users:read</code> (the app also has <code>users:read.email</code>)</td></tr>
+    <tr><td>User token scope <span class="tag new">NEW</span></td><td><code>chat:write</code> under <b>User Token Scopes</b>, used only so the bot can delete a message that contains a key</td></tr>
+  </table>
+
+  <h3>03 Let the bot delete key messages <span class="tag new">NEW</span></h3>
+  <ul>
+    <li>A bot can only delete its own messages. To delete the person's message, JTS uses the user token of a workspace <b>Owner or Admin</b>.</li>
+    <li>In the Slack app: <b>OAuth &amp; Permissions &rarr; User Token Scopes &rarr; Add <code>chat:write</code></b>, then <b>Reinstall to Workspace</b> signed in as an Owner/Admin. Copy the <b>User OAuth Token</b> (<code>xoxp-</code>).</li>
+    <li>On the dashboard <b>API Keys</b> page save it as <code>SLACK_USER_TOKEN</code>, then restart <code>jts-powertool</code> and <code>jts-worker</code>.</li>
+    <li>Make sure Slack's <i>Message editing &amp; deletion</i> setting lets Owners/Admins delete other people's messages.</li>
+    <li>If this is missing, keys are still saved and the bot asks the person to delete their own message.</li>
+  </ul>
+  <div class="note">Re-running <code>/api/slack/install</code> installs the bot scopes only. The user token is created from the app's own OAuth page. Each Slack workspace (Axcel World, JTS Team) is installed separately.</div>
+</section>
+
+<!-- ============================== 5. CLIENT SETUP ============================== -->
+<section class="page">
+  <h2>5. Setting Up a Client</h2>
+  <p class="lead">Every client follows the same short path. Do this once per client.</p>
+
+  <table>
+    <tr><th style="width:6%">#</th><th style="width:34%">Step</th><th>Where / how</th></tr>
+    <tr><td>1</td><td>Create the client folder</td><td><b>Clients &amp; Channels &rarr; New client folder</b>. A client folder is one company.</td></tr>
+    <tr><td>2</td><td>Move its Slack channels into the folder</td><td><b>Clients &amp; Channels</b>, "Channels not in a folder yet": pick the client for each channel. Only JTS Admin can move channels. A channel that is not in a client cannot use GitHub, Jira or client keys.</td></tr>
+    <tr><td>3</td><td>Create the client's users</td><td><b>Users &amp; Organizations &rarr; Add user</b>. Choose the role (Client Admin or Team Member) and the client folder.</td></tr>
+    <tr><td>4</td><td>The Client Admin connects the tools</td><td><b>Keys &amp; Connections</b>, or in Slack: <code>@bot connect my github</code>, <code>@bot connect my jira</code>. No tokens are typed.</td></tr>
+    <tr><td>5</td><td>The Client Admin adds API keys</td><td><b>Keys &amp; Connections</b>, or in Slack with <code>KEY_NAME = value</code>. Name the Anthropic key <code>ANTHROPIC_API_KEY</code> to use the client's own Claude account.</td></tr>
+  </table>
+  <div class="note"><b>Each client has its own connections.</b> Connecting GitHub or Jira for one client does not connect it for another. Test from a channel that belongs to the client that was connected.</div>
+
+  <h3>Tool permissions (GitHub and Jira checkboxes) <span class="tag new">NEW</span></h3>
+  <p>On <b>Users &rarr; Add / Edit user</b>, a JTS Admin sets what each person may ask the assistant to do in Slack:</p>
+  <table>
+    <tr><th style="width:18%">Group</th><th style="width:30%">Checkbox</th><th>Allows</th></tr>
+    <tr><td>GitHub</td><td>Can read repositories</td><td>Read issues, files, code, commits and pull requests</td></tr>
+    <tr><td>GitHub</td><td>Can make changes</td><td>Create issues, push files, open pull requests, publish and edit websites</td></tr>
+    <tr><td>Jira</td><td>Can read tickets</td><td>Search tickets and read their details</td></tr>
+    <tr><td>Jira</td><td>Can create tickets</td><td>Create new tickets</td></tr>
+    <tr><td>Jira</td><td>Can edit and comment</td><td>Change title, description, priority, labels; add comments</td></tr>
+    <tr><td>Jira</td><td>Can move or close tickets</td><td>Change a ticket's status</td></tr>
+  </table>
+  <ul>
+    <li><b>Defaults:</b> JTS Admin and Client Admin start with everything ticked; a Team Member starts with the two "read" boxes only. Changing the role in the form resets the boxes to that role's defaults.</li>
+    <li><b>JTS Admins</b> always have every permission and cannot be restricted. Client users can only act in channels of their own client.</li>
+    <li><b>How the person is found:</b> the bot reads the person's Slack email and matches it (ignoring upper/lower case) to the email on the Users page. The two emails must be the same.</li>
+    <li><b>Someone who can't be matched</b> (their Slack email is not on the Users page) can read but not make changes, and is told to ask an administrator to add them. Two optional secrets change this: <code>TOOL_PERMISSIONS_UNMATCHED=allow</code> lets them change things; <code>TOOL_PERMISSIONS_ENFORCE=false</code> switches the checks off.</li>
+    <li>If the database check itself fails, changes are refused (reads still work) rather than silently allowed. Refusals are written to the activity log as <code>TOOL_PERMISSION_DENIED</code>.</li>
+    <li>These boxes decide who may <i>ask</i>. They do not change who may <i>approve</i>; approving is still done by an approver in Slack or on the dashboard.</li>
+  </ul>
+
+  <h3>Approvals visible to a Client Admin</h3>
+  <p>A client user sees only approvals from the channels of their own client. If the Approvals page is empty for a client admin, check in <b>Users</b> that the user's client is the one that owns the channel. The server log line <code>[APPROVALS_SCOPE]</code> explains exactly what was hidden and why.</p>
+</section>
+
+<!-- ============================== 6. CONNECTIONS & KEYS ============================== -->
+<section class="page">
+  <h2>6. Connections and Keys</h2>
+
+  <h3>A. GitHub (one-click, client's own account) <span class="tag new">NEW</span></h3>
+  <ul>
+    <li><b>One-time JTS setup:</b> register one GitHub App (guide: <code>docs/setup/github-app-setup.md</code>) and save <code>GITHUB_APP_ID</code>, <code>GITHUB_APP_SLUG</code>, <code>GITHUB_APP_PRIVATE_KEY</code>, <code>GITHUB_APP_CLIENT_ID</code>, <code>GITHUB_APP_CLIENT_SECRET</code>, <code>GITHUB_APP_WEBHOOK_SECRET</code> on the <b>API Keys</b> page.</li>
+    <li><b>Per client:</b> anyone in the client channel types <code>@bot connect my github</code> (or the Client Admin clicks <b>Connect GitHub</b>). A single-use 15-minute link opens GitHub; they choose the account and repositories, then Install and Authorize.</li>
+    <li>JTS stores only the installation id in <code>github_connections</code>. For every action it mints a 1-hour installation token. The installing user's refresh token is kept in AWS (hidden provider <code>github_user</code>) for actions that need a user token, such as creating repositories on personal accounts.</li>
+    <li>The Client Admin can pick a default repository and disconnect. <code>GITHUB_REQUIRE_CLIENT_CONNECTION=true</code> stops the bot falling back to JTS's own GitHub token.</li>
+  </ul>
+
+  <h3>B. Jira (one-click, client's own site) <span class="tag new">NEW</span></h3>
+  <ul>
+    <li><b>One-time JTS setup:</b> create one Atlassian OAuth 2.0 (3LO) app (guide: <code>docs/setup/jira-app-setup.md</code>). Scopes <code>read:jira-work</code>, <code>write:jira-work</code>, <code>read:jira-user</code>; callback URL <code>https://journeys.pe/api/jira/callback</code>; Distribution set to <b>Sharing</b> so other companies can connect. Save <code>JIRA_OAUTH_CLIENT_ID</code> and <code>JIRA_OAUTH_CLIENT_SECRET</code>.</li>
+    <li><b>Per client:</b> <code>@bot connect my jira</code> or <b>Connect Jira</b> on the card. The user signs in to Atlassian and clicks Accept. The Atlassian account must have a Jira Cloud site.</li>
+    <li>JTS stores the site in <code>jira_connections</code> and the rotating refresh token in AWS (hidden provider <code>jira_oauth</code>). Access tokens last 1 hour. A connection unused for 90 days expires and the card shows "Needs reconnecting".</li>
+    <li>The Client Admin can choose a default project for new issues. If a person offers several Jira sites the first is used until they reconnect.</li>
+  </ul>
+
+  <h3>C. Client API keys (Keys &amp; Connections) <span class="tag new">NEW</span></h3>
+  <ul>
+    <li>Form: <b>Key Name</b> (free text) + <b>Key Value</b> + <b>Applies to</b> (whole client or one channel). Saving the same name replaces the key.</li>
+    <li>The value goes straight to AWS Secrets Manager and is never shown again; the table shows the name, scope, last 4 characters, who saved it and when.</li>
+    <li>Only the key named <code>ANTHROPIC_API_KEY</code> is used by the assistant today (it is checked with Anthropic before saving). Other keys are stored securely for the client.</li>
+    <li>Client Admin edits; Team Members see the list only; JTS Admin can open any client.</li>
+  </ul>
+
+  <h3>D. Saving keys from Slack <span class="tag new">NEW</span></h3>
+  <p>Post a message that contains only key lines, for example:</p>
+  <pre>OPENAI_API_KEY = sk-proj-abc123xyz987
+please save my key SHOPIFY_TOKEN: shpat_abcdef0123456789
+MY_TOKEN = abc12345xyz789 for this channel only</pre>
+  <ul>
+    <li>The system saves each key for the channel's client, deletes your message, and replies by name only. Values are never stored in the database, logs or conversation memory and are never sent to Claude.</li>
+    <li><b>What counts as a key:</b> every line is <code>NAME = value</code> or <code>NAME: value</code>; the name has no spaces and contains <i>key, token, secret, password</i> or <i>credential</i> as its own word (or the value looks like a provider key such as <code>sk-</code>, <code>ghp_</code>, <code>xoxb-</code>, <code>AKIA</code>); the value is one piece of 8+ characters. Allowed extras: an <code>@bot</code> mention, a lead-in like "please save my key", and "for this channel only".</li>
+    <li>Anything else is normal chat and is not touched. Direct messages and channels without a client do not save keys (the message is still deleted).</li>
+    <li>A value starting <code>sk-ant-</code> under a name that contains "anthropic" is stored as <code>ANTHROPIC_API_KEY</code>.</li>
+    <li><code>@bot list the keys</code> shows names, scope and last 4 characters. Values cannot be retrieved by anyone.</li>
+    <li>Every save is written to the activity log as <code>SLACK_KEY_SAVED</code> with the person's name. This path trusts everyone in the client's channel.</li>
+  </ul>
+
+  <h3>E. JTS global keys (API Keys page)</h3>
+  <ul>
+    <li>JTS Admin adds global secrets such as <code>ANTHROPIC_API_KEY</code>, <code>SLACK_BOT_TOKEN</code>, <code>SLACK_SIGNING_SECRET</code>, <code>SLACK_USER_TOKEN</code>, GitHub App and Jira app secrets. The key name is upper-cased automatically.</li>
+    <li>Each is stored in AWS Secrets Manager as <code>jts-powertool/vault/&lt;name&gt;</code>; the database keeps only the name and who added it.</li>
+    <li>Lookup order when the code needs a secret: the shared bundle (<code>AWS_SECRET_NAME</code>), then the individual vault secret, then an environment variable.</li>
+  </ul>
+</section>
+
+<!-- ============================== 7. WEBSITE BUILDER ============================== -->
+<section class="page">
+  <h2>7. Website Builder <span class="tag new">NEW</span></h2>
+  <p class="lead">Ask in Slack: "build a website for a dental clinic". The bot always asks for the stack first; there is no default.</p>
+  <ol>
+    <li><b>Stack question.</b> The bot lists the options and waits for the answer in a later message.</li>
+    <li><b>Draft.</b> It writes all files into a draft stored in the database (<code>site_drafts</code>, <code>site_draft_files</code>). Nothing touches GitHub yet. A private preview link is available for static sites.</li>
+    <li><b>Publish with one approval.</b> The approval card shows the repository name, visibility, files and stack. After approval the repository is created in the client's own GitHub and the code is committed.</li>
+    <li><b>Edits.</b> Later changes are made on a branch, opened as a pull request, and merged only after approval. A conflict check runs first.</li>
+  </ol>
+  <table>
+    <tr><th style="width:24%">Stack</th><th style="width:26%">Kind</th><th>Result</th></tr>
+    <tr><td>Static HTML/CSS/JS</td><td>static</td><td>Published on GitHub Pages (live)</td></tr>
+    <tr><td>React, Vue, Svelte, Astro, Next.js</td><td>build on GitHub</td><td>A GitHub Actions workflow is added and Pages is enabled; GitHub builds and publishes</td></tr>
+    <tr><td>PHP, Laravel, WordPress</td><td>code only</td><td>Code is committed to the repository; it needs PHP hosting to go live</td></tr>
+  </table>
+  <ul>
+    <li>Builds use <code>claude-sonnet-5-5</code>, a cost cap per build and a time limit. Known sites per client are listed in <code>client_websites</code> and on the client page.</li>
+    <li>Static sites and the WordPress theme path have been tested live. The framework stacks (React and others) are built but not yet live-tested.</li>
+  </ul>
+
+  <h2 style="margin-top:18pt;">8. Usage, Billing and Invoices</h2>
+  <ul>
+    <li>Each message stores tokens and USD cost in <code>conversation_messages</code> and <code>api_usage_logs</code>, with the person, channel and model.</li>
+    <li>If a client uses its own Anthropic key, its replies are stored at zero billable cost.</li>
+    <li><b>Usage &amp; Billing</b> shows usage per client and channel for a chosen period (week, month or custom range), with CSV export.</li>
+    <li>Invoices are generated per client and period (<code>client_invoices</code>); a JTS Admin marks an invoice paid manually.</li>
+  </ul>
+</section>
+
+<!-- ============================== 9. FILE STRUCTURE ============================== -->
+<section class="page">
+  <h2>9. File Structure</h2>
+  <p class="lead">A FastAPI backend with a separate worker, and a Next.js dashboard.</p>
+<pre>jts-powertool/
+|-- app/                              # Backend (FastAPI + AI engine)
+|   |-- main.py                       # API entry point, login middleware, router wiring
+|   |-- slack_router.py               # Slack events, OAuth install, interactive buttons, system prompt
+|   |-- worker.py                     # Background worker: claims jobs from job_queue, runs Claude
+|   |-- claude.py                     # Claude streaming + tool loop, forced-tool rules, cost cap
+|   |-- auth_router.py                # Login, sessions, roles, client scope
+|   |-- api_approvals.py              # Approvals API (list, approve, reject, previews)
+|   |-- client_keys_router.py         # Keys & Connections API
+|   |-- github_router.py              # GitHub connect/callback/webhook + dashboard endpoints
+|   |-- jira_router.py                # Jira connect/callback + dashboard endpoints
+|   |-- site_router.py                # Website drafts, previews, client websites
+|   |-- usage_router.py, invoice_router.py   # Usage, billing, invoices
+|   |-- channel_secrets_router.py     # Clients & channels, vault (API Keys) endpoints
+|   |-- global_settings_router.py, organizations_router.py, logs_router.py, db_router.py, context_router.py
+|   |-- memory_manager.py, vector_memory.py  # Chat history, semantic memory, key hiding
+|   |-- teams/                        # Microsoft Teams webhook
+|   |-- services/
+|   |   |-- channel_secrets_service.py     # Client/channel keys, folders, AWS Secrets Manager
+|   |   |-- github_app_service.py          # GitHub App connection and tokens
+|   |   |-- jira_service.py                # Jira OAuth connection, tools, token rotation
+|   |   |-- site_builder_service.py        # Website drafts, publish, edit-by-pull-request
+|   |   |-- slack_key_capture.py           # "NAME = value" keys from Slack
+|   |   |-- secret_redaction.py            # Hides key values in text
+|   |   |-- tool_permissions.py            # GitHub / Jira permission checkboxes and the bot's check
+|   |   |-- usage_service.py, invoice_service.py, email_service.py
+|   |-- tools/
+|   |   |-- tool_adapter.py           # Tool dispatcher and safety gate (GitHub, Jira, site, keys)
+|   |   |-- slack_approval_ui.py      # Approval cards
+|   |   |-- secrets_manager.py        # Secret lookup (bundle, vault, env)
+|   |   |-- mcp_client.py, web_tools.py
+|   `-- db/                           # PostgreSQL session and repositories
+|-- frontend/                         # Next.js 14 dashboard
+|   `-- src/
+|       |-- lib/api.ts, types.ts      # Backend calls, types, date formatters
+|       |-- components/               # Sidebar, Header, DashboardShell, DataTable, ui,
+|       |                             # GithubConnectionCard, JiraConnectionCard,
+|       |                             # ClientApiKeyCard, WebsitesCard, InvoicesPanel
+|       `-- app/                      # Pages (see section 10)
+|-- docs/plans, docs/setup            # Plans and setup guides (GitHub App, Jira, Slack key messages)
+|-- .github/workflows/deploy.yml      # Deploy to EC2 on push to main
+`-- requirements.txt, .env.example</pre>
+</section>
+
+<!-- ============================== 10. PAGES ============================== -->
+<section class="page">
+  <h2>10. Dashboard Pages</h2>
+  <table>
+    <tr><th style="width:24%">Menu item</th><th style="width:14%">Path</th><th style="width:22%">Who</th><th>What it does</th></tr>
+    <tr><td>Dashboard</td><td><code>/</code></td><td>JTS, Client Admin</td><td>System overview and statistics</td></tr>
+    <tr><td>My Activity</td><td><code>/my-tasks</code></td><td>Team Member</td><td>Their own requests</td></tr>
+    <tr><td>Approvals</td><td><code>/approvals</code></td><td>All roles</td><td>Review, approve or reject GitHub, Jira and website changes; previews and diffs</td></tr>
+    <tr><td>Usage &amp; Billing</td><td><code>/billing</code></td><td>JTS, Client Admin</td><td>Usage by client/channel, periods, CSV, invoices</td></tr>
+    <tr><td>Clients &amp; Channels</td><td><code>/folders</code></td><td>JTS, Client Admin</td><td>Client folders, channels, GitHub / Jira cards, client websites</td></tr>
+    <tr><td>Keys &amp; Connections</td><td><code>/client-keys</code></td><td>All (edit: Client Admin, JTS)</td><td>GitHub and Jira connections, client and channel keys</td></tr>
+    <tr><td>Users &amp; Organizations</td><td><code>/users</code>, <code>/organizations</code></td><td>JTS</td><td>Accounts, roles, client assignment</td></tr>
+    <tr><td>API Keys</td><td><code>/keys</code></td><td>JTS</td><td>Global secrets stored in AWS</td></tr>
+    <tr><td>System Settings</td><td><code>/global-settings</code></td><td>JTS</td><td>Timezone and default tool rules</td></tr>
+    <tr><td>Activity Log</td><td><code>/logs</code></td><td>JTS</td><td>Live telemetry and security events</td></tr>
+    <tr><td>Conversation Inspector</td><td><code>/context</code></td><td>JTS</td><td>Stored conversations and prompts</td></tr>
+    <tr><td>Database</td><td><code>/database</code></td><td>JTS</td><td>Read-only database view</td></tr>
+    <tr><td>Profile Settings</td><td><code>/settings</code></td><td>All</td><td>Personal timezone ("System Time")</td></tr>
+  </table>
+
+  <h2 style="margin-top:16pt;">11. Database Tables</h2>
+  <table>
+    <tr><th style="width:36%">Table</th><th>What it stores</th></tr>
+    <tr><td><code>dashboard_users</code>, <code>organizations</code>, <code>password_reset_tokens</code>, <code>user_channel_permissions</code></td><td>Accounts, roles, client assignment, the GitHub / Jira permission checkboxes (<code>tool_permissions</code>), set-password links and per-user channel permissions</td></tr>
+    <tr><td><code>channel_folders</code>, <code>channel_metadata</code></td><td>Client folders and the Slack channels assigned to each</td></tr>
+    <tr><td><code>slack_workspaces</code></td><td>Installed Slack workspaces and their bot tokens</td></tr>
+    <tr><td><code>job_queue</code></td><td>Slack messages waiting for the worker (durable queue)</td></tr>
+    <tr><td><code>conversation_messages</code>, <code>user_memories</code></td><td>Chat history with per-message tokens and cost; semantic memory (key values hidden)</td></tr>
+    <tr><td><code>secrets_vault</code></td><td>Names and owners of the global keys on the API Keys page (values are in AWS)</td></tr>
+    <tr><td><code>channel_secret_mappings</code></td><td>Channel-specific keys: provider and the AWS secret name only</td></tr>
+    <tr><td><code>folder_api_keys</code> <span class="tag new">NEW</span></td><td>Client-wide keys: provider, last 4 characters, who saved it, health; also hidden connection tokens (<code>github_user</code>, <code>jira_oauth</code>)</td></tr>
+    <tr><td><code>github_connections</code>, <code>github_connect_links</code> <span class="tag new">NEW</span></td><td>Each client's GitHub installation and the single-use connect links</td></tr>
+    <tr><td><code>jira_connections</code>, <code>jira_connect_links</code> <span class="tag new">NEW</span></td><td>Each client's Jira site and the single-use connect links</td></tr>
+    <tr><td><code>pending_approvals</code></td><td>Actions waiting for approval, and the final record of who approved and the result</td></tr>
+    <tr><td><code>site_drafts</code>, <code>site_draft_files</code>, <code>site_draft_base_files</code>, <code>client_websites</code> <span class="tag new">NEW</span></td><td>Website drafts, their files, the base for edits, and each client's published sites</td></tr>
+    <tr><td><code>api_usage_logs</code>, <code>client_invoices</code></td><td>Token and cost analytics; generated invoices</td></tr>
+    <tr><td><code>telemetry_logs</code>, <code>global_system_settings</code>, <code>claude_context_snapshots</code></td><td>Activity and security events, system settings, saved prompt snapshots</td></tr>
+  </table>
+</section>
+
+<!-- ============================== 12. STACK ============================== -->
+<section class="page">
+  <h2>12. Technology Stack</h2>
+  <table>
+    <tr><th style="width:26%">Layer</th><th style="width:30%">Technology</th><th>Purpose</th></tr>
+    <tr><td>Frontend</td><td>Next.js 14 (App Router), React 18, TypeScript</td><td>Admin and client dashboards</td></tr>
+    <tr><td>Styling and icons</td><td>Tailwind CSS, Lucide React</td><td>Responsive UI, forms and icons</td></tr>
+    <tr><td>Backend</td><td>FastAPI (Python 3.11+), Uvicorn</td><td>REST API, Slack webhook, OAuth callbacks</td></tr>
+    <tr><td>AI</td><td>Anthropic Claude: <code>claude-haiku-4-5</code> (chat), <code>claude-sonnet-5-5</code> (website builds)</td><td>Reasoning, code generation, tool selection</td></tr>
+    <tr><td>Tool protocol</td><td>Model Context Protocol (GitHub server) plus direct GitHub App, Jira and web calls</td><td>Tool connections</td></tr>
+    <tr><td>Database</td><td>PostgreSQL</td><td>Users, channels, queue, chat, billing, connections</td></tr>
+    <tr><td>Semantic memory</td><td>sentence-transformers (<code>BAAI/bge-small-en-v1.5</code>)</td><td>Long-term retrieval of past context</td></tr>
+    <tr><td>Queue and worker</td><td>PostgreSQL <code>job_queue</code> + asyncio worker (<code>jts-worker</code>)</td><td>Answer Slack in under 3 seconds, work in the background</td></tr>
+    <tr><td>Secrets</td><td>AWS Secrets Manager (boto3)</td><td>Every key and token, encrypted</td></tr>
+    <tr><td>Chat platform</td><td>Slack API (Events, Interactivity, OAuth v2); Microsoft Teams webhook</td><td>Mentions, threads, cards, buttons</td></tr>
+    <tr><td>Integrations</td><td>GitHub App (REST + Git Data API), Atlassian OAuth 2.0 + Jira Cloud REST API</td><td>Repositories, pull requests, issues, tickets</td></tr>
+    <tr><td>Proxy and process</td><td>Nginx, systemd</td><td>HTTPS, routing, service restarts on Ubuntu (AWS EC2)</td></tr>
+    <tr><td>Deployment</td><td>GitHub Actions to EC2 over SSH</td><td>Push to <code>main</code> deploys and restarts the three services</td></tr>
+  </table>
+
+  <h2 style="margin-top:16pt;">13. Operations and Known Gaps</h2>
+  <h3>Deploy and services</h3>
+  <ul>
+    <li>Pushing to <code>main</code> on GitHub runs <code>.github/workflows/deploy.yml</code>, which updates the server and restarts <code>jts-worker</code>, <code>jts-powertool</code> and <code>jts-frontend</code>.</li>
+    <li>Logs: <code>sudo journalctl -u jts-powertool</code> (API) and <code>-u jts-worker</code> (worker). Log times are UTC.</li>
+    <li>If a deploy seems to have no effect, check for a second service holding port 8000 (<code>sudo ss -ltnp | grep :8000</code>). An old leftover <code>jts-backend.service</code> once served stale code and has been disabled.</li>
+    <li>Useful log tags: <code>[JIRA]</code>, <code>[SLACK_KEYS]</code>, <code>[APPROVALS_SCOPE]</code>, <code>[GITHUB_APP]</code>.</li>
+  </ul>
+  <h3>Known gaps</h3>
+  <ul>
+    <li>The GitHub and Jira permission checkboxes depend on the Slack email matching the Users page. Someone whose emails differ is treated as "not matched" (read-only) until the email is corrected.</li>
+    <li>The Global Settings default checkboxes (stored in the browser) are not used by this check; the per-user boxes and the role defaults are.</li>
+    <li>Framework website stacks (React and others) are built but not yet tested live.</li>
+    <li>Any member of a client channel can save keys by Slack message (an owner decision); each save is logged by name.</li>
+    <li>The Jira search call uses Atlassian's newer search endpoint; if Atlassian changes it, search is the first thing to re-check.</li>
+    <li>Old test messages stored before the key-hiding was added may still show in the Conversation Inspector (the bot itself no longer repeats them).</li>
+  </ul>
+  <div class="footer-note">This document describes the production system as of 2 October 2026. Setup guides: <code>docs/setup/github-app-setup.md</code>, <code>docs/setup/jira-app-setup.md</code>, <code>docs/setup/slack-key-messages.md</code>.</div>
+</section>
+
+</body>
+</html>

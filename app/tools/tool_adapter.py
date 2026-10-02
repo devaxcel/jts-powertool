@@ -714,6 +714,24 @@ class ControlledToolAdapter:
             False,
         )
 
+    async def _permission_denial(self, tool_name: str) -> Optional[str]:
+        """Checks the asking person's GitHub / Jira checkboxes. Returns the refusal text, or None when allowed."""
+        from app.services import tool_permissions as tp
+
+        if not tp.required_permission(tool_name):
+            return None
+        allowed, message = await tp.check_tool(tool_name, self.user_id, self.channel_id, self.slack_token)
+        if allowed:
+            return None
+        logger.warning(f"[PERMISSIONS] Denied {tool_name} for slack_user={self.user_id} in channel={self.channel_id}")
+        try:
+            from app.log_stream import emit_telemetry
+            emit_telemetry(action="TOOL_PERMISSION_DENIED", category="SECURITY", level="WARNING", user_id=self.user_id,
+                           message=f"{tool_name} refused for Slack user {self.user_id} in {self.channel_id}.")
+        except Exception:
+            pass
+        return f"PERMISSION DENIED: {message} Tell the user this plainly and do not try another way to do it."
+
     def jira_connection(self) -> Optional[Dict[str, Any]]:
         """The client's active Jira connection for this channel (loaded once per request), or None."""
         if not self._jira_loaded:
@@ -1154,6 +1172,11 @@ class ControlledToolAdapter:
                 "Destructive operations like deleting a repository are prohibited.",
                 True,
             )
+
+        # 1.2. The asking person's GitHub / Jira permission checkboxes (Users page)
+        denial = await self._permission_denial(tool_name)
+        if denial:
+            return (denial, True)
 
         # 1.5. Native Web Search and URL Fetching tools
         if tool_name == "fetch_url_content":
