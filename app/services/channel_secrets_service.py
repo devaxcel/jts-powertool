@@ -1220,6 +1220,7 @@ def sync_bot_conversations_from_slack() -> Dict[str, Any]:
                     try:
                         from app.db.repositories import save_slack_workspace
                         save_slack_workspace(team_id=team_id, team_name=team_name, bot_token=tok)
+                        logger.info(f"[CHANNEL_SECRETS] Workspace name for {team_id} set to '{team_name}' (was '{stored_name}')")
                     except Exception as ex:
                         logger.debug(f"[CHANNEL_SECRETS] Could not repair the workspace name for {team_id}: {ex}")
         except Exception as ex:
@@ -1238,6 +1239,7 @@ def sync_bot_conversations_from_slack() -> Dict[str, Any]:
         try:
             part = _sync_workspace_conversations(tok, tid, tname)
             all_channels.extend(part["channels"])
+            logger.info(f"[CHANNEL_SECRETS] Synced {len(part['channels'])} channel(s) from workspace '{tname}' ({tid})")
             if tid:
                 done_teams.add(tid)
         except Exception as ex:
@@ -1245,6 +1247,7 @@ def sync_bot_conversations_from_slack() -> Dict[str, Any]:
                 raise
             problems.append(f"{tname or tid or 'a workspace'}: {ex}")
             logger.warning(f"[CHANNEL_SECRETS] Sync failed for {tname or tid}: {ex}")
+    logger.info(f"[CHANNEL_SECRETS] Slack sync finished: {len(all_channels)} channel(s), {len(tokens)} token(s) tried, {len(problems)} problem(s)")
     msg = f"Successfully synced {len(all_channels)} channels and conversations from {len(done_teams) or len(tokens)} workspace(s)."
     if problems:
         msg += " Problems: " + "; ".join(problems)
