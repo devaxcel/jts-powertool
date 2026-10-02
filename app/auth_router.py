@@ -327,11 +327,16 @@ def get_folder_channel_ids(client_folder_id: Optional[int]) -> List[str]:
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
+            from app.services.channel_secrets_service import _ensure_workspace_folder_column
+            _ensure_workspace_folder_column(cur)
+            conn.commit()
+            # The client's own channels, plus chats (for example personal chats) of a Slack workspace linked to this client.
             cur.execute("""
-                SELECT channel_id, channel_name 
-                FROM channel_metadata 
-                WHERE folder_id = %s OR folder_id::text = %s;
-            """, (client_folder_id, str(client_folder_id)))
+                SELECT cm.channel_id, cm.channel_name
+                FROM channel_metadata cm
+                LEFT JOIN slack_workspaces sw ON sw.team_id = cm.workspace_id
+                WHERE cm.folder_id = %s OR cm.folder_id::text = %s OR (cm.folder_id IS NULL AND sw.folder_id = %s);
+            """, (client_folder_id, str(client_folder_id), client_folder_id))
             rows = cur.fetchall() or []
             result = set()
             for r in rows:

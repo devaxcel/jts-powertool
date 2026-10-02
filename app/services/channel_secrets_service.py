@@ -2200,7 +2200,16 @@ def channel_id_variants(channel_id: str) -> List[str]:
     return [cid, alias] if alias else [cid]
 
 
+def _ensure_workspace_folder_column(cur) -> None:
+    """slack_workspaces.folder_id: the client a whole Slack workspace belongs to (NULL = shared workspace)."""
+    from app.db.repositories import _ensure_slack_workspaces_table
+
+    _ensure_slack_workspaces_table(cur)
+    cur.execute("ALTER TABLE slack_workspaces ADD COLUMN IF NOT EXISTS folder_id INTEGER REFERENCES channel_folders(id) ON DELETE SET NULL;")
+
+
 def get_folder_id_for_channel(channel_id: str) -> Optional[int]:
+    """The client a channel belongs to: its own folder, or else the client its Slack workspace is linked to."""
     if not channel_id:
         return None
     conn = get_db_connection()
@@ -2211,7 +2220,26 @@ def get_folder_id_for_channel(channel_id: str) -> Optional[int]:
                 (channel_id_variants(channel_id),),
             )
             row = cur.fetchone()
-            return int(row["folder_id"]) if row else None
+            if row:
+                return int(row["folder_id"])
+            # No folder of its own (for example a personal chat): use the client the whole workspace is linked to.
+            try:
+                _ensure_workspace_folder_column(cur)
+                conn.commit()
+                cur.execute(
+                    """
+                    SELECT sw.folder_id FROM channel_metadata cm
+                    JOIN slack_workspaces sw ON sw.team_id = cm.workspace_id
+                    WHERE UPPER(cm.channel_id) = ANY(%s) AND sw.folder_id IS NOT NULL LIMIT 1;
+                    """,
+                    (channel_id_variants(channel_id),),
+                )
+                row = cur.fetchone()
+                return int(row["folder_id"]) if row else None
+            except Exception as ws_err:
+                conn.rollback()
+                logger.debug(f"[FOLDER_KEYS] Workspace client lookup failed for {channel_id}: {ws_err}")
+                return None
     except Exception as e:
         logger.debug(f"[FOLDER_KEYS] Could not resolve folder for channel {channel_id}: {e}")
         return None
@@ -2279,4 +2307,53 @@ def list_folder_api_keys(folder_id: int) -> List[Dict[str, Any]]:
         rec["status"] = "failing" if rec.get("last_error") else "ok"
         out.append(rec)
     return out
+
+
+# --- Slack workspace -> client link ---
+
+def list_workspaces_with_clients() -> List[Dict[str, Any]]:
+    """Connected Slack workspaces with the client each is linked to. Never returns tokens."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            _ensure_workspace_folder_column(cur)
+            conn.commit()
+            cur.execute("""
+                SELECT sw.team_id, COALESCE(NULLIF(sw.team_name, ''), sw.team_id) AS team_name, sw.folder_id,
+                       f.name AS folder_name,
+                       (SELECT COUNT(*) FROM channel_metadata cm WHERE cm.workspace_id = sw.team_id) AS chat_count
+                FROM slack_workspaces sw
+                LEFT JOIN channel_folders f ON f.id = sw.folder_id
+                ORDER BY sw.created_at ASC;
+            """)
+            return [dict(r) for r in cur.fetchall() or []]
+    finally:
+        conn.close()
+
+
+def set_workspace_client(team_id: str, folder_id: Optional[int]) -> Dict[str, Any]:
+    """Links a Slack workspace to a client (or unlinks it with None)."""
+    team_id = (team_id or "").strip()
+    if not team_id:
+        raise ValueError("A workspace is required.")
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            _ensure_workspace_folder_column(cur)
+            cur.execute("SELECT team_id FROM slack_workspaces WHERE team_id = %s;", (team_id,))
+            if not cur.fetchone():
+                raise LookupError("That Slack workspace isn't connected.")
+            folder_name = None
+            if folder_id:
+                cur.execute("SELECT name FROM channel_folders WHERE id = %s;", (folder_id,))
+                f = cur.fetchone()
+                if not f:
+                    raise LookupError("That client was not found.")
+                folder_name = f["name"] if isinstance(f, dict) else f[0]
+            cur.execute("UPDATE slack_workspaces SET folder_id = %s, updated_at = NOW() WHERE team_id = %s;", (folder_id or None, team_id))
+            conn.commit()
+        _FOLDER_KEY_CACHE.clear()
+        return {"team_id": team_id, "folder_id": folder_id or None, "folder_name": folder_name}
+    finally:
+        conn.close()
 

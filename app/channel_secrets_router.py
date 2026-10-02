@@ -332,6 +332,33 @@ def sync_slack_channels_endpoint(_: str = Depends(require_jts_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class WorkspaceClientPayload(BaseModel):
+    folder_id: Optional[int] = None
+
+
+@channel_secrets_router.get("/workspaces", summary="Connected Slack workspaces and the client each is linked to")
+def list_workspaces_endpoint(_: str = Depends(require_jts_admin)):
+    from app.services.channel_secrets_service import list_workspaces_with_clients
+    return {"workspaces": list_workspaces_with_clients()}
+
+
+@channel_secrets_router.put("/workspaces/{team_id}", summary="Link a Slack workspace to a client (or unlink it)")
+def set_workspace_client_endpoint(team_id: str, payload: WorkspaceClientPayload, _: str = Depends(require_jts_admin)):
+    from app.services.channel_secrets_service import set_workspace_client
+    try:
+        result = set_workspace_client(team_id, payload.folder_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"[CHANNEL_SECRETS_ROUTER] Linking workspace {team_id} failed: {e}")
+        raise HTTPException(status_code=500, detail="Couldn't link the workspace. Please try again.")
+    msg = (f"Chats in this workspace that aren't in another client's folder now belong to {result['folder_name']}."
+           if result["folder_id"] else "The workspace is no longer linked to a client.")
+    return {"ok": True, "message": msg, **result}
+
+
 @channel_secrets_router.get("/unassigned", summary="List discovered channels not assigned to any folder")
 def get_unassigned_channels_endpoint(_: str = Depends(require_jts_admin)):
     """

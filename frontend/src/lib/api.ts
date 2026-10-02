@@ -361,6 +361,32 @@ export async function fetchFolders(): Promise<ChannelFolder[]> {
   return data.folders || [];
 }
 
+export interface SlackWorkspaceLink {
+  team_id: string;
+  team_name: string;
+  folder_id: number | null;
+  folder_name: string | null;
+  chat_count: number | string;
+}
+
+export async function fetchWorkspaceClients(): Promise<SlackWorkspaceLink[]> {
+  const res = await fetch(`${API_BASE}/api/channels/workspaces`, { headers: getAuthHeaders(), cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load the Slack workspaces."));
+  return data.workspaces || [];
+}
+
+export async function setWorkspaceClient(teamId: string, folderId: number | null): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/api/channels/workspaces/${encodeURIComponent(teamId)}`, {
+    method: "PUT",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ folder_id: folderId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't save that."));
+  return data;
+}
+
 export async function createFolder(
   name: string,
   description?: string

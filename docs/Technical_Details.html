@@ -288,6 +288,15 @@
   </table>
   <div class="note"><b>Each client has its own connections.</b> Connecting GitHub or Jira for one client does not connect it for another. Test from a channel that belongs to the client that was connected.</div>
 
+  <h3>Several Slack workspaces and personal chats <span class="tag new">NEW</span></h3>
+  <ul>
+    <li><b>Add a workspace:</b> sign in to it in the browser and open <code>https://journeys.pe/api/slack/install</code>, then click Allow. The server saves the workspace and its bot token automatically. Invite the bot to a channel with <code>/invite @jpt</code>.</li>
+    <li><b>Find Slack channels</b> (Clients &amp; Channels) searches every connected workspace and records which workspace each channel belongs to. Direct messages and Slack's own Slackbot chat are left out of the "Channels not in a folder yet" list.</li>
+    <li><b>Link a workspace to a client:</b> in <b>Clients &amp; Channels &rarr; Slack workspaces</b>, a JTS Admin picks the client for a workspace that belongs to one company. Leave a shared workspace on "Shared".</li>
+    <li>For a linked workspace, any chat that is <i>not</i> in another client's folder, including a person's <b>personal chat with the bot</b>, belongs to that client: its usage goes on that client's invoice, the client's own Anthropic key is used, GitHub / Jira / keys work in it, and the client's admins can see its approvals and usage. A channel placed in a different client's folder always stays with that client.</li>
+    <li>In a workspace that is <b>not</b> linked, personal chats belong to no client. They use the JTS key and are not invoiced to anyone (the usage is still recorded for JTS Admin).</li>
+  </ul>
+
   <h3>Tool permissions (GitHub and Jira checkboxes) <span class="tag new">NEW</span></h3>
   <p>On <b>Users &rarr; Add / Edit user</b>, a JTS Admin sets what each person may ask the assistant to do in Slack:</p>
   <table>
@@ -387,6 +396,7 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
   <ul>
     <li>Each message stores tokens and USD cost in <code>conversation_messages</code> and <code>api_usage_logs</code>, with the person, channel and model.</li>
     <li>If a client uses its own Anthropic key, its replies are stored at zero billable cost.</li>
+    <li>An invoice covers the billable (JTS key) usage of the channels in the client's folder, plus the chats of any Slack workspace linked to that client that are not in another client's folder.</li>
     <li><b>Usage &amp; Billing</b> shows usage per client and channel for a chosen period (week, month or custom range), with CSV export.</li>
     <li>Invoices are generated per client and period (<code>client_invoices</code>); a JTS Admin marks an invoice paid manually.</li>
   </ul>
@@ -465,7 +475,7 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
     <tr><th style="width:36%">Table</th><th>What it stores</th></tr>
     <tr><td><code>dashboard_users</code>, <code>organizations</code>, <code>password_reset_tokens</code>, <code>user_channel_permissions</code></td><td>Accounts, roles, client assignment, the GitHub / Jira permission checkboxes (<code>tool_permissions</code>), set-password links and per-user channel permissions</td></tr>
     <tr><td><code>channel_folders</code>, <code>channel_metadata</code></td><td>Client folders and the Slack channels assigned to each</td></tr>
-    <tr><td><code>slack_workspaces</code></td><td>Installed Slack workspaces and their bot tokens</td></tr>
+    <tr><td><code>slack_workspaces</code></td><td>Installed Slack workspaces, their bot tokens and the client each is linked to (<code>folder_id</code>)</td></tr>
     <tr><td><code>job_queue</code></td><td>Slack messages waiting for the worker (durable queue)</td></tr>
     <tr><td><code>conversation_messages</code>, <code>user_memories</code></td><td>Chat history with per-message tokens and cost; semantic memory (key values hidden)</td></tr>
     <tr><td><code>secrets_vault</code></td><td>Names and owners of the global keys on the API Keys page (values are in AWS)</td></tr>

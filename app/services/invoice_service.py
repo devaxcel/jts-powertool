@@ -77,8 +77,15 @@ def get_folder_usage(cur, folder_id: int, period_start: date, period_end: date) 
     channels = cur.fetchall() or []
     names = {str(c["channel_id"]).upper(): c["channel_name"] for c in channels if c.get("channel_id")}
 
+    # Slack workspaces linked to this client: their chats that aren't in another client's folder (for example personal
+    # chats with the bot) are billed to this client too.
+    from app.services.channel_secrets_service import _ensure_workspace_folder_column
+    _ensure_workspace_folder_column(cur)
+    cur.execute("SELECT team_id FROM slack_workspaces WHERE folder_id = %s;", (folder_id,))
+    linked_teams = [r["team_id"] for r in cur.fetchall() or []]
+
     line_items: List[Dict[str, Any]] = []
-    if names:
+    if names or linked_teams:
         cur.execute("""
             SELECT UPPER(channel_id) AS channel_key,
                    COUNT(*) AS replies,
@@ -88,12 +95,23 @@ def get_folder_usage(cur, folder_id: int, period_start: date, period_end: date) 
                    COALESCE(SUM(cost_usd), 0) AS cost_usd
             FROM api_usage_logs
             WHERE COALESCE(key_source, 'jts') = 'jts'
-              AND UPPER(channel_id) = ANY(%s)
+              AND (
+                    UPPER(channel_id) = ANY(%s)
+                    OR (workspace_id = ANY(%s) AND NOT EXISTS (
+                          SELECT 1 FROM channel_metadata cm
+                          WHERE UPPER(cm.channel_id) = UPPER(api_usage_logs.channel_id) AND cm.folder_id IS NOT NULL))
+                  )
               AND created_at >= %s AND created_at < %s
             GROUP BY UPPER(channel_id)
             ORDER BY cost_usd DESC;
-        """, (list(names.keys()), start_dt, end_dt))
-        for r in cur.fetchall() or []:
+        """, (list(names.keys()), linked_teams, start_dt, end_dt))
+        usage_rows = cur.fetchall() or []
+        missing = [r["channel_key"] for r in usage_rows if r["channel_key"] not in names]
+        if missing:
+            cur.execute("SELECT UPPER(channel_id) AS k, channel_name FROM channel_metadata WHERE UPPER(channel_id) = ANY(%s);", (missing,))
+            for m in cur.fetchall() or []:
+                names[m["k"]] = m["channel_name"]
+        for r in usage_rows:
             line_items.append({
                 "channel_id": r["channel_key"],
                 "channel_name": names.get(r["channel_key"]) or r["channel_key"],

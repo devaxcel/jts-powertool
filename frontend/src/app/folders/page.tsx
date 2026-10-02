@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceClientsCard } from "@/components/WorkspaceClientsCard";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -420,6 +421,9 @@ export default function FoldersPage() {
                 </div>
               )}
             </div>
+
+            {/* Section 1b: which client each Slack workspace belongs to */}
+            {isMasterAdmin && <WorkspaceClientsCard folders={displayedFolders} />}
 
             {/* Section 2: Unassigned Slack Channels */}
             {isMasterAdmin && (
