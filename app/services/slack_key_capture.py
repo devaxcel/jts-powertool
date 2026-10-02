@@ -20,6 +20,7 @@ from app.tools.secrets_manager import get_secret
 logger = logging.getLogger(__name__)
 
 MAX_KEYS_PER_MESSAGE = 10
+SAVE_TIMEOUT_SECONDS = 25.0
 _MENTION = re.compile(r"<@[A-Z0-9]+>")
 _LEAD = re.compile(r"^\s*(?:please\s+)?(?:save|add|store|set|update|replace)\s+(?:this|the|my|these)?\s*(?:api\s*)?(?:keys?|secrets?|tokens?)?\s*[:\-]?\s*", re.I)
 _CHANNEL_ONLY = re.compile(r"\b(?:only\s+)?(?:for|in)\s+this\s+channel(?:\s+only)?\b|\bchannel\s+only\b", re.I)
@@ -114,7 +115,9 @@ def save_entries(
         except ValueError as e:
             results.append({"name": raw_name, "label": shown, "ok": False, "message": f"*{shown}* wasn't saved: {e}"})
         except Exception as e:
-            logger.error(f"[SLACK_KEYS] Saving {shown} failed: {type(e).__name__}")  # never log the value or the full error body
+            # AWS error text explains problems like missing permissions; the key value is masked out of it.
+            detail = str(e).replace(value, "***")[:300] if isinstance(e, RuntimeError) else ""
+            logger.error(f"[SLACK_KEYS] Saving {shown} failed: {type(e).__name__} {detail}".strip())
             results.append({"name": raw_name, "label": shown, "ok": False, "message": f"*{shown}* wasn't saved because of a server error. Please try again."})
     return results
 
@@ -166,11 +169,26 @@ async def handle_key_message(
     bot_token: str, folder_id: Optional[int], actor: str,
 ) -> Dict[str, Any]:
     """Saves + deletes + confirms. Returns {"names": [...], "deleted": bool} (no values)."""
-    save_task = asyncio.to_thread(
-        save_entries, folder_id=folder_id, channel_id=channel_id, scope=parsed["scope"], entries=parsed["entries"], actor=actor
-    )
+    names = [n.upper() for n, _ in parsed["entries"]]
+    logger.info(f"[SLACK_KEYS] Start: {len(names)} key(s) {names} scope={parsed['scope']} folder={folder_id} by {actor}")
+
+    async def _save():
+        # AWS can be slow or unreachable: never hang the message. The thread can't be cancelled, but we stop waiting.
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(save_entries, folder_id=folder_id, channel_id=channel_id, scope=parsed["scope"],
+                                  entries=parsed["entries"], actor=actor),
+                timeout=SAVE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"[SLACK_KEYS] Saving timed out after {SAVE_TIMEOUT_SECONDS}s (AWS Secrets Manager or the database is slow)")
+            return [{"name": n, "label": n.upper(), "ok": False,
+                     "message": f"*{n.upper()}* wasn't saved: the secret store didn't answer in time. Please try again."}
+                    for n, _ in parsed["entries"]]
+
     # Delete in parallel with saving: the value should leave the channel as quickly as possible.
-    (results, (deleted, why)) = await asyncio.gather(save_task, delete_message(slack_channel_id, message_ts))
+    (results, (deleted, why)) = await asyncio.gather(_save(), delete_message(slack_channel_id, message_ts))
+    logger.info(f"[SLACK_KEYS] Saved={sum(1 for r in results if r['ok'])}/{len(results)} deleted={deleted} reason={why or '-'}")
 
     lines = [("✅ " if r["ok"] else "⚠️ ") + r["message"] for r in results]
     if deleted:
@@ -184,4 +202,5 @@ async def handle_key_message(
         lines.append(f"🔒 *Please delete your message with the key now.* {hint}.")
         logger.warning(f"[SLACK_KEYS] Message with a key was NOT deleted (reason={why}).")
     await post_reply(bot_token, slack_channel_id, thread_ts, "\n".join(lines))
+    logger.info("[SLACK_KEYS] Confirmation posted")
     return {"names": [r["label"] for r in results], "deleted": deleted, "saved": sum(1 for r in results if r["ok"])}

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -337,6 +338,7 @@ def get_system_prompt(user_prompt: str = "", user_profile: Optional[dict] = None
 
 SYSTEM_PROMPT = get_system_prompt()
 TENANT_ID = "T5ZMF56H5"
+_KEY_TASKS: set = set()  # keeps background key-handling tasks alive until they finish
 
 _USER_PROFILES: dict[str, dict[str, Any]] = {}
 
@@ -1000,27 +1002,45 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks = Non
         if key_msg:
             from app.services.channel_secrets_service import get_folder_id_for_channel
 
-            try:
-                outcome = await skc.handle_key_message(
-                    parsed=key_msg, channel_id=channel_id, slack_channel_id=event.get("channel") or channel_id,
-                    message_ts=message_ts or "", thread_ts=actual_thread_ts if not is_dm else None, bot_token=token,
-                    folder_id=None if is_dm else get_folder_id_for_channel(channel_id), actor=user_display,
-                )
-            except Exception as key_err:
-                logger.error(f"[SLACK_KEYS] Key message handling failed: {type(key_err).__name__}")
-                outcome = {"names": [n.upper() for n, _ in key_msg["entries"]], "deleted": False, "saved": 0}
-            save_conversation_message(
-                team_id=incoming_team_id, workspace_id=incoming_team_id, workspace_name=workspace_name,
-                channel_id=channel_id, thread_ts=thread_to_pass, user_id=user_id, user_name=user_display, role="user",
-                content=f"[Key(s) {', '.join(outcome['names'])} sent by {user_display}; values hidden]",
-                message_ts=message_ts, input_tokens=0, output_tokens=0, total_tokens=0, cost_usd=0,
-            )
-            emit_telemetry(
-                action="KEY_MESSAGE_HANDLED", category="SECURITY", level="INFO", thread_id=thread_to_pass,
-                event_id=message_id, user_id=user_id, channel_id=channel_id, channel_name=channel_name,
-                message=f"Key message from {user_display}: {outcome['saved']} saved, message deleted={outcome['deleted']} (values never logged).",
-            )
-            return JSONResponse(content={"status": "key_captured", "saved": outcome["saved"], "deleted": outcome["deleted"]})
+            slack_channel_for_api = event.get("channel") or channel_id
+            key_thread = actual_thread_ts if not is_dm else None
+            key_folder = None if is_dm else get_folder_id_for_channel(channel_id)
+            key_names = [n.upper() for n, _ in key_msg["entries"]]
+
+            async def _process_key_message(parsed=key_msg):
+                # Runs AFTER Slack got its 200 (Slack retries anything slower than ~3 seconds).
+                try:
+                    outcome = await skc.handle_key_message(
+                        parsed=parsed, channel_id=channel_id, slack_channel_id=slack_channel_for_api,
+                        message_ts=message_ts or "", thread_ts=key_thread, bot_token=token,
+                        folder_id=key_folder, actor=user_display,
+                    )
+                except Exception as key_err:
+                    logger.error(f"[SLACK_KEYS] Key message handling failed: {type(key_err).__name__}")
+                    outcome = {"names": key_names, "deleted": False, "saved": 0}
+                    await skc.post_reply(token, slack_channel_for_api, key_thread,
+                                         "⚠️ Something went wrong, so the key wasn't saved. 🔒 Please delete your message with the key now.")
+                try:
+                    save_conversation_message(
+                        team_id=incoming_team_id, workspace_id=incoming_team_id, workspace_name=workspace_name,
+                        channel_id=channel_id, thread_ts=thread_to_pass, user_id=user_id, user_name=user_display, role="user",
+                        content=f"[Key(s) {', '.join(outcome['names'])} sent by {user_display}; values hidden]",
+                        message_ts=message_ts, input_tokens=0, output_tokens=0, total_tokens=0, cost_usd=0,
+                    )
+                    emit_telemetry(
+                        action="KEY_MESSAGE_HANDLED", category="SECURITY", level="INFO", thread_id=thread_to_pass,
+                        event_id=message_id, user_id=user_id, channel_id=channel_id, channel_name=channel_name,
+                        message=f"Key message from {user_display}: {outcome['saved']} saved, message deleted={outcome['deleted']} (values never logged).",
+                    )
+                except Exception as note_err:
+                    logger.warning(f"[SLACK_KEYS] Could not record the key note: {type(note_err).__name__}")
+
+            if background_tasks is not None:
+                background_tasks.add_task(_process_key_message)
+            else:
+                _KEY_TASKS.add(task := asyncio.create_task(_process_key_message()))
+                task.add_done_callback(_KEY_TASKS.discard)
+            return JSONResponse(content={"status": "key_capture_started"})
 
         # 1. Store EVERY incoming message from any team member in PostgreSQL memory
         file_summary = f"[Attached: {', '.join([f['name'] for f in files_data])}]" if files_data else ""
