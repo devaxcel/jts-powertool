@@ -49,7 +49,7 @@
   <div style="font-size:20pt;font-weight:600;">Technical Details</div>
   <div class="sub">Project flow, setup, connections, file structure and technology stack</div>
   <div class="meta">
-    Updated to the current production setup &middot; 2 October 2026<br>
+    Updated to the current production setup &middot; 5 October 2026<br>
     Replaces the earlier version of this document (adds Keys &amp; Connections, GitHub App, Jira, website builder,<br>
     Slack key capture, billing and invoices)
   </div>
@@ -280,7 +280,7 @@
 
   <table>
     <tr><th style="width:6%">#</th><th style="width:34%">Step</th><th>Where / how</th></tr>
-    <tr><td>1</td><td>Create the client folder</td><td><b>Clients &amp; Channels &rarr; New client folder</b>. A client folder is one company.</td></tr>
+    <tr><td>1</td><td>Create the client folder</td><td><b>Clients &amp; Channels &rarr; New client folder</b>. A client folder is one company. Use the pencil on the folder to set <b>Billed as (organization)</b>; invoices for the client are then made out to that organization automatically.</td></tr>
     <tr><td>2</td><td>Move its Slack channels into the folder</td><td><b>Clients &amp; Channels</b>, "Channels not in a folder yet": pick the client for each channel. Only JTS Admin can move channels. A channel that is not in a client cannot use GitHub, Jira or client keys.</td></tr>
     <tr><td>3</td><td>Create the client's users</td><td><b>Users &amp; Organizations &rarr; Add user</b>. Choose the role (Client Admin or Team Member) and the client folder.</td></tr>
     <tr><td>4</td><td>The Client Admin connects the tools</td><td><b>Keys &amp; Connections</b>, or in Slack: <code>@bot connect my github</code>, <code>@bot connect my jira</code>. No tokens are typed.</td></tr>
@@ -399,6 +399,7 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
     <li>An invoice covers the billable (JTS key) usage of the channels in the client's folder, plus the chats of any Slack workspace linked to that client that are not in another client's folder.</li>
     <li><b>Usage &amp; Billing</b> shows usage per client and channel for a chosen period (week, month or custom range), with CSV export.</li>
     <li>Invoices are generated per client and period (<code>client_invoices</code>); a JTS Admin marks an invoice paid manually.</li>
+    <li>When an invoice is made, <b>Bill to (organization)</b> is filled in from the client automatically: first the organization linked to the client (Clients &amp; Channels, edit the client, <i>Billed as</i>), otherwise the organization of a Client Admin assigned to the client. Linking a Client Admin to an organization also links their client if it had none. It can still be changed by hand, and switching client picks up the new client's organization.</li>
   </ul>
 </section>
 
@@ -440,10 +441,11 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
 |   `-- db/                           # PostgreSQL session and repositories
 |-- frontend/                         # Next.js 14 dashboard
 |   `-- src/
-|       |-- lib/api.ts, types.ts      # Backend calls, types, date formatters
+|       |-- lib/api.ts, types.ts, permissions.ts   # Backend calls, types, date formatters, permission list
 |       |-- components/               # Sidebar, Header, DashboardShell, DataTable, ui,
 |       |                             # GithubConnectionCard, JiraConnectionCard,
-|       |                             # ClientApiKeyCard, WebsitesCard, InvoicesPanel
+|       |                             # ClientApiKeyCard, WebsitesCard, InvoicesPanel,
+|       |                             # UserPermissionsTab, WorkspaceClientsCard
 |       `-- app/                      # Pages (see section 10)
 |-- docs/plans, docs/setup            # Plans and setup guides (GitHub App, Jira, Slack key messages)
 |-- .github/workflows/deploy.yml      # Deploy to EC2 on push to main
@@ -459,9 +461,9 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
     <tr><td>My Activity</td><td><code>/my-tasks</code></td><td>Team Member</td><td>Their own requests</td></tr>
     <tr><td>Approvals</td><td><code>/approvals</code></td><td>All roles</td><td>Review, approve or reject GitHub, Jira and website changes; previews and diffs</td></tr>
     <tr><td>Usage &amp; Billing</td><td><code>/billing</code></td><td>JTS, Client Admin</td><td>Usage by client/channel, periods, CSV, invoices</td></tr>
-    <tr><td>Clients &amp; Channels</td><td><code>/folders</code></td><td>JTS, Client Admin</td><td>Client folders, channels, GitHub / Jira cards, client websites</td></tr>
+    <tr><td>Clients &amp; Channels</td><td><code>/folders</code></td><td>JTS, Client Admin</td><td>Client folders (name, description and the organization a client is billed as), channels, the Slack workspaces table (link a workspace to a client), GitHub / Jira cards, client websites</td></tr>
     <tr><td>Keys &amp; Connections</td><td><code>/client-keys</code></td><td>All (edit: Client Admin, JTS)</td><td>GitHub and Jira connections, client and channel keys</td></tr>
-    <tr><td>Users &amp; Organizations</td><td><code>/users</code>, <code>/organizations</code></td><td>JTS</td><td>Accounts, roles, client assignment</td></tr>
+    <tr><td>Users &amp; Organizations</td><td><code>/users</code>, <code>/organizations</code></td><td>JTS</td><td><b>Users</b> tab: accounts, roles, client assignment. <b>Permissions</b> tab: the GitHub / Jira checkboxes for each person</td></tr>
     <tr><td>API Keys</td><td><code>/keys</code></td><td>JTS</td><td>Global secrets stored in AWS</td></tr>
     <tr><td>System Settings</td><td><code>/global-settings</code></td><td>JTS</td><td>Timezone and default tool rules</td></tr>
     <tr><td>Activity Log</td><td><code>/logs</code></td><td>JTS</td><td>Live telemetry and security events</td></tr>
@@ -474,7 +476,7 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
   <table>
     <tr><th style="width:36%">Table</th><th>What it stores</th></tr>
     <tr><td><code>dashboard_users</code>, <code>organizations</code>, <code>password_reset_tokens</code>, <code>user_channel_permissions</code></td><td>Accounts, roles, client assignment, the GitHub / Jira permission checkboxes (<code>tool_permissions</code>), set-password links and per-user channel permissions</td></tr>
-    <tr><td><code>channel_folders</code>, <code>channel_metadata</code></td><td>Client folders and the Slack channels assigned to each</td></tr>
+    <tr><td><code>channel_folders</code>, <code>channel_metadata</code></td><td>Client folders (with the organization each is billed as, <code>organization_id</code>) and the Slack channels assigned to each</td></tr>
     <tr><td><code>slack_workspaces</code></td><td>Installed Slack workspaces, their bot tokens and the client each is linked to (<code>folder_id</code>)</td></tr>
     <tr><td><code>job_queue</code></td><td>Slack messages waiting for the worker (durable queue)</td></tr>
     <tr><td><code>conversation_messages</code>, <code>user_memories</code></td><td>Chat history with per-message tokens and cost; semantic memory (key values hidden)</td></tr>
@@ -527,7 +529,7 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
     <li>The Jira search call uses Atlassian's newer search endpoint; if Atlassian changes it, search is the first thing to re-check.</li>
     <li>Old test messages stored before the key-hiding was added may still show in the Conversation Inspector (the bot itself no longer repeats them).</li>
   </ul>
-  <div class="footer-note">This document describes the production system as of 2 October 2026. Setup guides: <code>docs/setup/github-app-setup.md</code>, <code>docs/setup/jira-app-setup.md</code>, <code>docs/setup/slack-key-messages.md</code>.</div>
+  <div class="footer-note">This document describes the production system as of 5 October 2026. Setup guides: <code>docs/setup/github-app-setup.md</code>, <code>docs/setup/jira-app-setup.md</code>, <code>docs/setup/slack-key-messages.md</code>.</div>
 </section>
 
 </body>
