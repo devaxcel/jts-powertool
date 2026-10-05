@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Building2, Loader2, MessagesSquare } from "lucide-react";
+import { Building2, Loader2, MessagesSquare, ShieldCheck } from "lucide-react";
 import { SlackWorkspaceLink, fetchWorkspaceClients, setWorkspaceClient } from "@/lib/api";
 import { ChannelFolder } from "@/lib/types";
 import { Alert, LoadingState, inputClass } from "@/components/ui";
@@ -9,12 +9,15 @@ import { Alert, LoadingState, inputClass } from "@/components/ui";
 /** JTS Admin: which client does each connected Slack workspace belong to? */
 export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) {
   const [rows, setRows] = useState<SlackWorkspaceLink[] | null>(null);
+  const [deleteLink, setDeleteLink] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setRows(await fetchWorkspaceClients());
+      const res = await fetchWorkspaceClients();
+      setRows(res.workspaces);
+      setDeleteLink(res.deleteLink);
     } catch (e: any) {
       setFeedback({ type: "error", message: e?.message || "We couldn't load the Slack workspaces." });
       setRows([]);
@@ -70,6 +73,7 @@ export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) 
                 <th className="p-3 font-semibold">Workspace ID</th>
                 <th className="p-3 font-semibold text-center">Chats seen</th>
                 <th className="p-3 font-semibold">Belongs to client</th>
+                <th className="p-3 font-semibold">Delete key messages</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -99,6 +103,30 @@ export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) 
                       </select>
                       {busyId === w.team_id && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
                     </div>
+                  </td>
+                  <td className="p-3">
+                    {w.can_delete_messages ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                        <ShieldCheck className="h-3 w-3" /> On
+                      </span>
+                    ) : (
+                      <div className="space-y-1">
+                        <span className="inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-gray-100 text-gray-600 border-gray-200">Off</span>
+                        {deleteLink && (
+                          <div>
+                            <a
+                              href={deleteLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-semibold text-[#088ADA] hover:underline"
+                              title="An admin or owner of this Slack workspace must open this link while signed in to it and click Allow"
+                            >
+                              Turn on (a workspace admin clicks this)
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

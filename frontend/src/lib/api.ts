@@ -367,13 +367,15 @@ export interface SlackWorkspaceLink {
   folder_id: number | null;
   folder_name: string | null;
   chat_count: number | string;
+  /** the bot can delete messages that contain a key in this workspace */
+  can_delete_messages?: boolean;
 }
 
-export async function fetchWorkspaceClients(): Promise<SlackWorkspaceLink[]> {
+export async function fetchWorkspaceClients(): Promise<{ workspaces: SlackWorkspaceLink[]; deleteLink: string }> {
   const res = await fetch(`${API_BASE}/api/channels/workspaces`, { headers: getAuthHeaders(), cache: "no-store" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load the Slack workspaces."));
-  return data.workspaces || [];
+  return { workspaces: data.workspaces || [], deleteLink: data.delete_permission_link || "" };
 }
 
 export async function setWorkspaceClient(teamId: string, folderId: number | null): Promise<{ ok: boolean; message: string }> {

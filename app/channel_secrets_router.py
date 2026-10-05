@@ -357,7 +357,15 @@ class WorkspaceClientPayload(BaseModel):
 @channel_secrets_router.get("/workspaces", summary="Connected Slack workspaces and the client each is linked to")
 def list_workspaces_endpoint(_: str = Depends(require_jts_admin)):
     from app.services.channel_secrets_service import list_workspaces_with_clients
-    return {"workspaces": list_workspaces_with_clients()}
+    from app.services.slack_key_capture import has_delete_token
+    from app.tools.secrets_manager import get_secret
+
+    base = (get_secret("PUBLIC_BASE_URL", "https://journeys.pe") or "https://journeys.pe").rstrip("/")
+    workspaces = list_workspaces_with_clients()
+    for w in workspaces:
+        w["can_delete_messages"] = has_delete_token(w.get("team_id"))
+    # One link for every workspace: the admin signs in to the workspace they want to enable and clicks Allow.
+    return {"workspaces": workspaces, "delete_permission_link": f"{base}/api/slack/install?delete_messages=true"}
 
 
 @channel_secrets_router.put("/workspaces/{team_id}", summary="Link a Slack workspace to a client (or unlink it)")

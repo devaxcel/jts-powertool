@@ -49,13 +49,17 @@ slack_router = APIRouter(prefix="/api/slack", tags=["slack"])
 
 
 @slack_router.get("/install", summary="Redirect to Slack OAuth authorization")
-async def slack_install_redirect():
+async def slack_install_redirect(delete_messages: bool = False):
     """Redirects administrator to Slack OAuth v2 authorization page to install bot in a workspace."""
     from fastapi.responses import RedirectResponse
     client_id = get_secret("SLACK_CLIENT_ID", "203729176583.11900714527686").strip() or "203729176583.11900714527686"
     redirect_uri = "https://journeys.pe/api/slack/oauth/callback"
     scopes = "app_mentions:read,channels:history,channels:read,chat:write,files:read,files:write,groups:history,groups:read,im:history,im:read,mpim:history,mpim:read,users:read"
     install_url = f"https://slack.com/oauth/v2/authorize?client_id={client_id}&scope={scopes}&redirect_uri={redirect_uri}"
+    if delete_messages:
+        # An admin of the workspace also allows the bot to delete messages that contain a key (their user token is kept
+        # for this workspace only).
+        install_url += "&user_scope=chat:write"
     return RedirectResponse(url=install_url)
 
 
@@ -154,6 +158,17 @@ async def slack_oauth_callback(code: Optional[str] = None, error: Optional[str] 
         except Exception as aws_err:
             logger.warning(f"[SLACK_OAUTH] Could not persist token to AWS Secrets Manager: {aws_err}")
 
+        # 2b. Optional: an admin also allowed deleting key messages in this workspace
+        delete_note = ""
+        authed = data.get("authed_user") or {}
+        if authed.get("access_token") and "chat:write" in str(authed.get("scope") or ""):
+            from app.services import slack_key_capture as _skc
+
+            enabled, delete_msg = await _skc.store_workspace_delete_token(team_id, authed.get("id", ""), authed["access_token"], access_token)
+            delete_note = (
+                f'<p style="margin: 8px 0 0 0;">{"✅" if enabled else "⚠️"} {delete_msg}</p>'
+            )
+
         # 3. Clear in-memory secrets cache
         clear_secrets_cache()
 
@@ -184,6 +199,7 @@ async def slack_oauth_callback(code: Optional[str] = None, error: Optional[str] 
                     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 24px; text-align: left; font-size: 13px; color: #64748b;">
                         <p style="margin: 0 0 6px 0;">🤖 Bot User: <strong>@{bot_user_id}</strong></p>
                         <p style="margin: 0;">🔒 Bot Token encrypted and stored in AWS Secrets Manager &amp; PostgreSQL.</p>
+                        {delete_note}
                     </div>
                     <p style="color: #94a3b8; font-size: 13px; margin: 0;">You can now close this browser tab and return to Slack.</p>
                 </div>
@@ -1016,7 +1032,7 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks = Non
                     outcome = await skc.handle_key_message(
                         parsed=parsed, channel_id=channel_id, slack_channel_id=slack_channel_for_api,
                         message_ts=message_ts or "", thread_ts=key_thread, bot_token=token,
-                        folder_id=key_folder, actor=user_display,
+                        folder_id=key_folder, actor=user_display, team_id=incoming_team_id,
                     )
                 except Exception as key_err:
                     logger.error(f"[SLACK_KEYS] Key message handling failed: {type(key_err).__name__}")

@@ -125,9 +125,56 @@ def save_entries(
     return results
 
 
-async def delete_message(channel_id: str, ts: str) -> Tuple[bool, str]:
+ORIGINAL_TEAM_ID = "T5ZMF56H5"  # Axcel World: the workspace the single SLACK_USER_TOKEN was created in
+
+
+def user_token_for(team_id: Optional[str]) -> str:
+    """The admin user token that may delete messages in this workspace.
+    Each workspace has its own (SLACK_USER_TOKEN_<TEAM ID>). The original single SLACK_USER_TOKEN belongs to Axcel World."""
+    team = (team_id or "").strip().upper()
+    if team:
+        specific = (get_secret(f"SLACK_USER_TOKEN_{team}", "") or "").strip()
+        if specific:
+            return specific
+    if not team or team == ORIGINAL_TEAM_ID:
+        return (get_secret("SLACK_USER_TOKEN", "") or "").strip()
+    return ""
+
+
+def has_delete_token(team_id: Optional[str]) -> bool:
+    return bool(user_token_for(team_id))
+
+
+async def store_workspace_delete_token(team_id: str, authed_user_id: str, user_token: str, bot_token: str) -> Tuple[bool, str]:
+    """After an admin of a workspace authorizes the delete permission: keep their token for that workspace only.
+    A non-admin's token can't delete other people's messages, so it is not stored."""
+    if not (team_id and user_token and str(user_token).startswith("xoxp-")):
+        return False, "Slack didn't send a user token."
+    is_admin = False
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get("https://slack.com/api/users.info", params={"user": authed_user_id},
+                                    headers={"Authorization": f"Bearer {bot_token}"})
+        u = (resp.json().get("user") or {})
+        is_admin = bool(u.get("is_admin") or u.get("is_owner") or u.get("is_primary_owner"))
+    except Exception as e:
+        logger.warning(f"[SLACK_KEYS] Could not check whether the authorizing user is an admin: {type(e).__name__}")
+    if not is_admin:
+        return False, "That account isn't an admin or owner of the workspace, so it can't delete other people's messages. Ask an admin to click the link."
+    try:
+        from app.services.channel_secrets_service import store_vault_secret
+
+        await asyncio.to_thread(store_vault_secret, key_name=f"SLACK_USER_TOKEN_{team_id.upper()}", key_value=user_token)
+    except Exception as e:
+        logger.error(f"[SLACK_KEYS] Could not store the delete token for {team_id}: {type(e).__name__}")
+        return False, "The token couldn't be saved. Please try again."
+    logger.info(f"[SLACK_KEYS] Delete permission enabled for workspace {team_id} by user {authed_user_id}")
+    return True, "Key messages will now be deleted automatically in this workspace."
+
+
+async def delete_message(channel_id: str, ts: str, team_id: Optional[str] = None) -> Tuple[bool, str]:
     """Deletes the user's message with an admin/owner user token. Returns (deleted, reason_if_not)."""
-    token = (get_secret("SLACK_USER_TOKEN", "") or "").strip()
+    token = user_token_for(team_id)
     if not token:
         return False, "no_user_token"
     if not channel_id or not ts:
@@ -169,7 +216,7 @@ async def post_reply(token: str, channel_id: str, thread_ts: Optional[str], text
 
 async def handle_key_message(
     *, parsed: Dict[str, Any], channel_id: str, slack_channel_id: str, message_ts: str, thread_ts: Optional[str],
-    bot_token: str, folder_id: Optional[int], actor: str,
+    bot_token: str, folder_id: Optional[int], actor: str, team_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Saves + deletes + confirms. Returns {"names": [...], "deleted": bool} (no values)."""
     names = [n.upper() for n, _ in parsed["entries"]]
@@ -190,7 +237,7 @@ async def handle_key_message(
                     for n, _ in parsed["entries"]]
 
     # Delete in parallel with saving: the value should leave the channel as quickly as possible.
-    (results, (deleted, why)) = await asyncio.gather(_save(), delete_message(slack_channel_id, message_ts))
+    (results, (deleted, why)) = await asyncio.gather(_save(), delete_message(slack_channel_id, message_ts, team_id))
     logger.info(f"[SLACK_KEYS] Saved={sum(1 for r in results if r['ok'])}/{len(results)} deleted={deleted} reason={why or '-'}")
 
     lines = [("✅ " if r["ok"] else "⚠️ ") + r["message"] for r in results]
@@ -198,7 +245,7 @@ async def handle_key_message(
         lines.append("_Your message with the key was deleted. The values are hidden._")
     else:
         hint = {
-            "no_user_token": "I can't delete messages yet (ask your JTS administrator to set that up)",
+            "no_user_token": "I can't delete messages in this workspace yet (ask your JTS administrator to enable it)",
             "cant_delete_message": "I'm not allowed to delete that message",
             "message_not_found": "I couldn't find your message to delete",
         }.get(why, "I couldn't delete your message")

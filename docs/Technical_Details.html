@@ -268,9 +268,10 @@
     <li>In the Slack app: <b>OAuth &amp; Permissions &rarr; User Token Scopes &rarr; Add <code>chat:write</code></b>, then <b>Reinstall to Workspace</b> signed in as an Owner/Admin. Copy the <b>User OAuth Token</b> (<code>xoxp-</code>).</li>
     <li>On the dashboard <b>API Keys</b> page save it as <code>SLACK_USER_TOKEN</code>, then restart <code>jts-powertool</code> and <code>jts-worker</code>.</li>
     <li>Make sure Slack's <i>Message editing &amp; deletion</i> setting lets Owners/Admins delete other people's messages.</li>
-    <li>If this is missing, keys are still saved and the bot asks the person to delete their own message.</li>
+    <li>That single token belongs to Axcel World. <b>Every other workspace needs its own:</b> on <b>Clients &amp; Channels &rarr; Slack workspaces</b>, the <i>Delete key messages</i> column shows On or Off. For an Off workspace, an Owner or Admin of that workspace opens the <b>Turn on</b> link while signed in to it and clicks Allow. The token is saved as <code>SLACK_USER_TOKEN_&lt;workspace id&gt;</code> and used for that workspace only; a normal member's token is refused.</li>
+    <li>If it is off for a workspace, keys are still saved and the bot asks the person to delete their own message.</li>
   </ul>
-  <div class="note">Re-running <code>/api/slack/install</code> installs the bot scopes only. The user token is created from the app's own OAuth page. Each Slack workspace (Axcel World, JTS Team) is installed separately.</div>
+  <div class="note">Re-running <code>/api/slack/install</code> installs the bot scopes only; adding <code>?delete_messages=true</code> also asks the signed-in admin for the delete permission. The user token is created from the app's own OAuth page. Each Slack workspace (Axcel World, JTS Team) is installed separately.</div>
 </section>
 
 <!-- ============================== 5. CLIENT SETUP ============================== -->

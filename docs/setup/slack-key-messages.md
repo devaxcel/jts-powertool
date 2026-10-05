@@ -35,6 +35,19 @@ Owners/Admins are allowed to delete other people's messages.
 
 If the token is missing or Slack refuses, the key is still saved, and the bot asks the person to delete their own message.
 
+## Other workspaces (axime and any workspace you add later)
+
+Each workspace needs its own admin's permission to delete messages. The `SLACK_USER_TOKEN` above belongs to Axcel World.
+
+1. In the dashboard open **Clients & Channels** and find the **Slack workspaces** table. The **Delete key messages** column shows
+   **On** or **Off** for each workspace.
+2. For a workspace that is **Off**, click **Turn on**. An **Owner or Admin of that workspace** opens the link while signed in to it
+   (use a private window if the browser keeps another workspace signed in), and clicks **Allow**.
+3. The page says "Key messages will now be deleted automatically in this workspace." The column turns **On**.
+
+The token is saved as `SLACK_USER_TOKEN_<workspace id>` and used only for that workspace. A normal member's token is refused,
+because it can't delete other people's messages. The same link works for every workspace.
+
 ## Notes
 
 - The `SLACK_USER_TOKEN` belongs to a real person's account. If they leave the workspace, create a new one.
