@@ -3,7 +3,7 @@ Per-user tool permissions (GitHub and Jira checkboxes on the Users page) and the
 reads or changes anything for someone.
 
 How it works
-  * Each dashboard user has six permissions (stored as JSON in dashboard_users.tool_permissions; empty = role defaults).
+  * Each dashboard user has nine permissions (stored as JSON in dashboard_users.tool_permissions; empty = role defaults).
   * When someone asks the bot for a GitHub / Jira action, we look up their Slack email and match it to a dashboard user.
   * JTS Admins may do everything. Client users may only act in channels of their own client, and only with the
     permissions ticked for them.
@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 # key, group, label, description
 PERMISSIONS = [
     ("github_read", "GitHub", "Can read repositories", "Read issues, files, code, commits and pull requests"),
-    ("github_write", "GitHub", "Can make changes", "Create issues, push files, open pull requests, publish and edit websites"),
+    ("github_issues", "GitHub", "Can create and comment on issues", "Create issues, update issues and add comments"),
+    ("github_code", "GitHub", "Can commit code and files", "Create or update files, push files and create branches"),
+    ("github_prs", "GitHub", "Can open pull requests", "Open pull requests"),
+    ("github_sites", "GitHub", "Can publish and edit websites", "Publish a built website and propose changes to a published site"),
     ("jira_read", "Jira", "Can read tickets", "Search tickets and read their details"),
     ("jira_create", "Jira", "Can create tickets", "Create new Jira tickets"),
     ("jira_edit", "Jira", "Can edit and comment", "Change a ticket's title, description, priority, labels and add comments"),
@@ -34,6 +37,11 @@ PERMISSION_KEYS = [p[0] for p in PERMISSIONS]
 LABELS = {p[0]: p[2] for p in PERMISSIONS}
 READ_KEYS = {"github_read", "jira_read"}
 
+# Before the GitHub change-permissions were split, one box "github_write" covered all of these. Saved settings that still
+# carry it are expanded, so nobody gains or loses access when the boxes were split.
+LEGACY_GITHUB_WRITE = "github_write"
+GITHUB_WRITE_KEYS = ("github_issues", "github_code", "github_prs", "github_sites")
+
 TOOL_PERMISSION: Dict[str, str] = {
     # GitHub reads
     "get_file_contents": "github_read", "list_issues": "github_read", "get_issue": "github_read",
@@ -42,9 +50,10 @@ TOOL_PERMISSION: Dict[str, str] = {
     "get_pull_request": "github_read", "get_issue_comments": "github_read",
     "list_my_websites": "github_read", "start_site_edit": "github_read",
     # GitHub changes
-    "create_issue": "github_write", "update_issue": "github_write", "add_issue_comment": "github_write",
-    "create_or_update_file": "github_write", "push_files": "github_write", "create_pull_request": "github_write",
-    "create_branch": "github_write", "publish_website": "github_write", "propose_site_changes": "github_write",
+    "create_issue": "github_issues", "update_issue": "github_issues", "add_issue_comment": "github_issues",
+    "create_or_update_file": "github_code", "push_files": "github_code", "create_branch": "github_code",
+    "create_pull_request": "github_prs",
+    "publish_website": "github_sites", "propose_site_changes": "github_sites",
     # Jira
     "jira_search_issues": "jira_read", "jira_get_issue": "jira_read", "jira_list_projects": "jira_read",
     "jira_create_issue": "jira_create",
@@ -80,6 +89,11 @@ def effective_permissions(stored: Any, role: Optional[str]) -> Dict[str, bool]:
         except ValueError:
             stored = None
     if isinstance(stored, dict):
+        legacy = stored.get(LEGACY_GITHUB_WRITE)
+        if isinstance(legacy, bool):
+            for k in GITHUB_WRITE_KEYS:
+                if not isinstance(stored.get(k), bool):
+                    perms[k] = legacy
         for k in PERMISSION_KEYS:
             if isinstance(stored.get(k), bool):
                 perms[k] = stored[k]
@@ -94,11 +108,16 @@ def clean_permissions(data: Optional[Dict[str, Any]]) -> Optional[Dict[str, bool
         raise ValueError("Tool permissions must be a list of on/off values.")
     out: Dict[str, bool] = {}
     for k, v in data.items():
-        if k not in PERMISSION_KEYS:
+        if k != LEGACY_GITHUB_WRITE and k not in PERMISSION_KEYS:
             raise ValueError(f"Unknown permission '{k}'.")
         if not isinstance(v, bool):
             raise ValueError(f"Permission '{k}' must be on or off.")
         out[k] = v
+    # An old client may still send the single "can make changes" box: spread it over the finer ones.
+    if LEGACY_GITHUB_WRITE in out:
+        legacy = out.pop(LEGACY_GITHUB_WRITE)
+        for k in GITHUB_WRITE_KEYS:
+            out.setdefault(k, legacy)
     return out
 
 

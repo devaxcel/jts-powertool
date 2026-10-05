@@ -164,7 +164,7 @@
     <li>Security-relevant actions (key saved or removed, connections changed) are written to the activity log. Key values are never logged.</li>
   </ul>
 
-  <div class="note"><b>Who is asking is checked first.</b> Before a GitHub or Jira tool runs, the bot matches the person's Slack email to a dashboard user and checks the six permission checkboxes on the Users page (section 5). A refused request stops there: no approval card is posted and the bot tells the person why. The approval card is the second safety layer for anything that changes data.</div>
+  <div class="note"><b>Who is asking is checked first.</b> Before a GitHub or Jira tool runs, the bot matches the person's Slack email to a dashboard user and checks the nine permission checkboxes on the Users page (section 5). A refused request stops there: no approval card is posted and the bot tells the person why. The approval card is the second safety layer for anything that changes data.</div>
 </section>
 
 <!-- ============================== 3. DIAGRAM ============================== -->
@@ -302,13 +302,17 @@
   <table>
     <tr><th style="width:18%">Group</th><th style="width:30%">Checkbox</th><th>Allows</th></tr>
     <tr><td>GitHub</td><td>Can read repositories</td><td>Read issues, files, code, commits and pull requests</td></tr>
-    <tr><td>GitHub</td><td>Can make changes</td><td>Create issues, push files, open pull requests, publish and edit websites</td></tr>
+    <tr><td>GitHub</td><td>Can create and comment on issues</td><td>Create issues, update issues and add comments</td></tr>
+    <tr><td>GitHub</td><td>Can commit code and files</td><td>Create or update files, push files and create branches</td></tr>
+    <tr><td>GitHub</td><td>Can open pull requests</td><td>Open pull requests</td></tr>
+    <tr><td>GitHub</td><td>Can publish and edit websites</td><td>Publish a built website and propose changes to a published site</td></tr>
     <tr><td>Jira</td><td>Can read tickets</td><td>Search tickets and read their details</td></tr>
     <tr><td>Jira</td><td>Can create tickets</td><td>Create new tickets</td></tr>
     <tr><td>Jira</td><td>Can edit and comment</td><td>Change title, description, priority, labels; add comments</td></tr>
     <tr><td>Jira</td><td>Can move or close tickets</td><td>Change a ticket's status</td></tr>
   </table>
   <ul>
+    <li><b>Older settings carry over:</b> before the GitHub boxes were split, one box "Can make changes" covered issues, files, pull requests and websites. A person who had it ticked now has all four of the new change boxes ticked, and a person who had it unticked has none, so nobody gains or loses access.</li>
     <li><b>Defaults:</b> JTS Admin and Client Admin start with everything ticked; a Team Member starts with the two "read" boxes only. A new user starts with their role's defaults; change them later on the Permissions tab.</li>
     <li><b>JTS Admins</b> always have every permission and cannot be restricted. Client users can only act in channels of their own client.</li>
     <li><b>How the person is found:</b> the bot reads the person's Slack email and matches it (ignoring upper/lower case) to the email on the Users page. The two emails must be the same.</li>

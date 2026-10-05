@@ -91,7 +91,7 @@ export function UserPermissionsTab({
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm bg-white">
-        <table className="w-full text-left border-collapse min-w-[900px]">
+        <table className="w-full text-left border-collapse min-w-[1150px]">
           <thead className="text-white text-xs uppercase tracking-wider">
             <tr className="bg-[#088ADA]">
               <th rowSpan={2} className="p-3 font-semibold align-bottom">Person</th>
