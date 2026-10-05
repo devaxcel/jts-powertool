@@ -135,6 +135,16 @@ def get_folder_usage(cur, folder_id: int, period_start: date, period_end: date) 
 
 
 def _suggest_organization_id(cur, folder_id: int) -> Optional[int]:
+    """The organization to bill: the one linked to the client itself, else the one of a user assigned to the client."""
+    try:
+        from app.services.channel_secrets_service import ensure_folder_org_column
+        ensure_folder_org_column(cur)
+        cur.execute("SELECT organization_id FROM channel_folders WHERE id = %s;", (folder_id,))
+        own = cur.fetchone()
+        if own and own.get("organization_id"):
+            return own["organization_id"]
+    except Exception:
+        pass
     cur.execute("""
         SELECT organization_id FROM dashboard_users
         WHERE client_folder_id = %s AND organization_id IS NOT NULL

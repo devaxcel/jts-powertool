@@ -374,6 +374,19 @@ def get_folder_channel_ids(client_folder_id: Optional[int]) -> List[str]:
             conn.close()
 
 
+def _link_folder_to_organization(cur, role: str, folder_id: Optional[int], org_id: Optional[int]) -> None:
+    """A Client Admin tied to an organization also tells us which organization their client is billed as.
+    Only fills the client's organization when it has none yet (never overwrites a choice)."""
+    if role != "client_admin" or not folder_id or not org_id:
+        return
+    try:
+        from app.services.channel_secrets_service import ensure_folder_org_column
+        ensure_folder_org_column(cur)
+        cur.execute("UPDATE channel_folders SET organization_id = %s WHERE id = %s AND organization_id IS NULL;", (org_id, folder_id))
+    except Exception as e:
+        logger.debug(f"[USERS] Could not link client {folder_id} to organization {org_id}: {e}")
+
+
 def _ensure_users_columns(conn_or_cur):
     """Ensure name, organization_id, and timezone columns exist in dashboard_users table safely and committed to disk."""
     try:
@@ -893,6 +906,7 @@ def create_user(req: CreateUserRequest, request: Request):
                   json.dumps(perms) if perms is not None else None))
             row = cur.fetchone()
             new_id = row["id"] if isinstance(row, dict) else row[0]
+            _link_folder_to_organization(cur, role, folder_id, org_id)
 
             email_sent = False
             email_msg = ""
@@ -1254,6 +1268,7 @@ def update_user(user_id: int, req: UpdateUserRequest, request: Request):
 
             if perms is not None:
                 cur.execute("UPDATE dashboard_users SET tool_permissions = %s::jsonb WHERE id = %s;", (json.dumps(perms), user_id))
+            _link_folder_to_organization(cur, role, folder_id, org_id)
 
             conn.commit()
             u_name = user_row.get("username") if isinstance(user_row, dict) else user_row[1]

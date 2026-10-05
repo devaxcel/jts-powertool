@@ -162,6 +162,24 @@ def update_folder_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class FolderOrganizationPayload(BaseModel):
+    organization_id: Optional[int] = None
+
+
+@channel_secrets_router.put("/folders/{folder_id}/organization", summary="Link a client to the organization it is billed as")
+def set_folder_organization_endpoint(folder_id: int, payload: FolderOrganizationPayload, _: str = Depends(require_jts_admin)):
+    from app.services.channel_secrets_service import set_folder_organization
+    try:
+        res = set_folder_organization(folder_id, payload.organization_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"[CHANNEL_SECRETS_ROUTER] Linking client {folder_id} to an organization failed: {e}")
+        raise HTTPException(status_code=500, detail="Couldn't link the organization. Please try again.")
+    return {"ok": True, "message": ("Invoices for this client will be made out to " + res["organization_name"] + ".") if res["organization_name"]
+            else "This client is no longer linked to an organization.", **res}
+
+
 @channel_secrets_router.delete("/folders/{folder_id}", summary="Delete a channel folder")
 def delete_folder_endpoint(
     folder_id: int,

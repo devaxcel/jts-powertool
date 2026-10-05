@@ -424,6 +424,17 @@ export async function updateFolder(
   return res.json();
 }
 
+export async function setFolderOrganization(folderId: number, organizationId: number | null): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/organization`, {
+    method: "PUT",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ organization_id: organizationId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't link the organization."));
+  return data;
+}
+
 export async function deleteFolder(folderId: number): Promise<{ status: string; message: string }> {
   const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}`, {
     method: "DELETE",

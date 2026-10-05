@@ -833,6 +833,36 @@ def create_channel_folder(name: str, description: Optional[str] = None) -> Dict[
         conn.close()
 
 
+def ensure_folder_org_column(cur) -> None:
+    """channel_folders.organization_id: the organization this client is billed as (shown on invoices)."""
+    cur.execute("ALTER TABLE channel_folders ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;")
+
+
+def set_folder_organization(folder_id: int, organization_id: Optional[int]) -> Dict[str, Any]:
+    """Links a client folder to an organization (or clears it with None)."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            ensure_folder_org_column(cur)
+            cur.execute("SELECT id, name FROM channel_folders WHERE id = %s;", (folder_id,))
+            folder = cur.fetchone()
+            if not folder:
+                raise LookupError("That client was not found.")
+            org_name = None
+            if organization_id:
+                cur.execute("SELECT id, name FROM organizations WHERE id = %s;", (organization_id,))
+                org = cur.fetchone()
+                if not org:
+                    raise LookupError("That organization was not found.")
+                org_name = org["name"] if isinstance(org, dict) else org[1]
+            cur.execute("UPDATE channel_folders SET organization_id = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s;",
+                        (organization_id or None, folder_id))
+            conn.commit()
+            return {"folder_id": folder_id, "organization_id": organization_id or None, "organization_name": org_name}
+    finally:
+        conn.close()
+
+
 def list_channel_folders() -> List[Dict[str, Any]]:
     """
     Lists all folders permanently saved in the database with their channel counts.
@@ -841,12 +871,16 @@ def list_channel_folders() -> List[Dict[str, Any]]:
     try:
         with conn.cursor() as cur:
             try:
+                ensure_folder_org_column(cur)
+                conn.commit()
                 cur.execute("""
                     SELECT f.id, f.name, f.description, f.created_at, f.updated_at,
+                           f.organization_id, o.name AS organization_name,
                            COUNT(cm.channel_id) as channel_count
                     FROM channel_folders f
+                    LEFT JOIN organizations o ON o.id = f.organization_id
                     LEFT JOIN channel_metadata cm ON f.id = cm.folder_id AND cm.channel_id NOT IN ('C0BMV3EM9PY', 'C0BV6S5UJ0P', 'D0BSLP9LXUZ')
-                    GROUP BY f.id, f.name, f.description, f.created_at, f.updated_at
+                    GROUP BY f.id, f.name, f.description, f.created_at, f.updated_at, f.organization_id, o.name
                     ORDER BY f.name ASC;
                 """)
                 rows = cur.fetchall()

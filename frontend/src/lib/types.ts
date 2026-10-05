@@ -90,6 +90,9 @@ export interface ChannelFolder {
   id: number;
   name: string;
   description?: string;
+  /** the organization this client is billed as (shown on invoices) */
+  organization_id?: number | null;
+  organization_name?: string | null;
   channel_count: number;
   created_at?: string;
   updated_at?: string;

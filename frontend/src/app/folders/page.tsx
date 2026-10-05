@@ -20,6 +20,8 @@ import {
   fetchFolders,
   createFolder,
   updateFolder,
+  setFolderOrganization,
+  fetchOrganizations,
   deleteFolder,
   fetchUnassignedChannels,
   syncSlackChannels,
@@ -101,6 +103,9 @@ export default function FoldersPage() {
   const [editFolderNameInput, setEditFolderNameInput] = useState("");
   const [editFolderDescInput, setEditFolderDescInput] = useState("");
   const [editFolderSaving, setEditFolderSaving] = useState(false);
+  const [editFolderOrgInput, setEditFolderOrgInput] = useState<string>("");
+  const [editFolderOrgOriginal, setEditFolderOrgOriginal] = useState<string>("");
+  const [organizations, setOrganizations] = useState<Array<{ id: number; name: string }>>([]);
 
   // Assign Channel to Folder state
   const [assigningChannelId, setAssigningChannelId] = useState<string | null>(null);
@@ -137,10 +142,12 @@ export default function FoldersPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [foldersData, unassignedData] = await Promise.all([
+      const [foldersData, unassignedData, orgsData] = await Promise.all([
         fetchFolders().catch(() => []),
         fetchUnassignedChannels().catch(() => []),
+        fetchOrganizations().catch(() => ({ organizations: [] as any[], total: 0 })),
       ]);
+      setOrganizations((orgsData.organizations || []).map((o: any) => ({ id: o.id, name: o.name })));
       const normalizedUnassigned = (unassignedData || []).map((ch: ChannelProject) => {
         const cid = canonicalChannelId(ch.channel_id, ch.workspace_id || ch.workspace_name, ch.channel_name);
         const authWs = getAuthoritativeWorkspace(cid, ch.workspace_id, ch.workspace_name);
@@ -222,6 +229,8 @@ export default function FoldersPage() {
     setEditFolderId(folder.id);
     setEditFolderNameInput(folder.name);
     setEditFolderDescInput(folder.description || "");
+    setEditFolderOrgInput(folder.organization_id ? String(folder.organization_id) : "");
+    setEditFolderOrgOriginal(folder.organization_id ? String(folder.organization_id) : "");
     setIsEditFolderModalOpen(true);
   }
 
@@ -231,6 +240,9 @@ export default function FoldersPage() {
     setEditFolderSaving(true);
     try {
       const res = await updateFolder(editFolderId, editFolderNameInput.trim(), editFolderDescInput.trim() || undefined);
+      if (editFolderOrgInput !== editFolderOrgOriginal) {
+        await setFolderOrganization(editFolderId, editFolderOrgInput ? Number(editFolderOrgInput) : null);
+      }
       setFeedback({ type: "success", message: res.message || "Folder updated in database." });
       setIsEditFolderModalOpen(false);
       await loadData();
@@ -678,6 +690,25 @@ export default function FoldersPage() {
                     placeholder="Folder description..."
                     className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 text-sm placeholder-gray-400 focus:outline-none focus:border-[#088ADA] focus:ring-1 focus:ring-[#088ADA] transition resize-none"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                    Billed as (organization) <span className="text-gray-400 text-[11px]">(Optional)</span>
+                  </label>
+                  <select
+                    value={editFolderOrgInput}
+                    onChange={(e) => setEditFolderOrgInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 text-sm focus:outline-none focus:border-[#088ADA] focus:ring-1 focus:ring-[#088ADA] transition"
+                  >
+                    <option value="">No organization</option>
+                    {organizations.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-gray-500 mt-1">Invoices for this client are made out to this organization automatically.</p>
                 </div>
               </div>
 

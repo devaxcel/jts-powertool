@@ -166,7 +166,14 @@ function CreateInvoiceModal({ onClose, onCreated }: { onClose: () => void; onCre
     <Modal title="Create invoice" onClose={onClose}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Client">
-          <select className={inputClass} value={folderId} onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : "")}>
+          <select
+            className={inputClass}
+            value={folderId}
+            onChange={(e) => {
+              setFolderId(e.target.value ? Number(e.target.value) : "");
+              setOrgTouched(false); // a new client: pick up that client's organization again
+            }}
+          >
             <option value="">Choose a client...</option>
             {folders.map((f) => (
               <option key={f.id} value={f.id}>
@@ -176,7 +183,11 @@ function CreateInvoiceModal({ onClose, onCreated }: { onClose: () => void; onCre
           </select>
         </Field>
 
-        <Field label="Bill to (organization)" hint={selectedOrg ? `Invoice email: ${selectedOrg.billing_email || selectedOrg.email || "not set"}` : "Optional. Shown on the invoice."}>
+        <Field label="Bill to (organization)" hint={
+            selectedOrg
+              ? `${!orgTouched && preview?.suggested_organization_id === selectedOrg.id ? "Filled in from the client. " : ""}Invoice email: ${selectedOrg.billing_email || selectedOrg.email || "not set"}`
+              : "Optional. Shown on the invoice. Link an organization to the client under Clients & Channels to fill this in automatically."
+          }>
           <select
             className={inputClass}
             value={orgId}
