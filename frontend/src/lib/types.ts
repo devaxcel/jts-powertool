@@ -583,6 +583,10 @@ export interface InvoicePreview {
   folder_id: number;
   folder_name: string;
   channel_count: number;
+  /** names of the channels in the client's folder (to explain an empty preview) */
+  channel_names?: string[];
+  /** replies in the period that used the client's own Anthropic key, so are not billed */
+  non_billable_replies?: number;
   line_items: InvoiceLineItem[];
   replies: number;
   total_tokens: number;

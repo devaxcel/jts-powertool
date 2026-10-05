@@ -259,10 +259,27 @@ function CreateInvoiceModal({ onClose, onCreated }: { onClose: () => void; onCre
         {preview && inputsValid && (
           <>
             {preview.line_items.length === 0 ? (
-              <p className="text-xs text-gray-600">
-                No billable AI usage in this period
-                {preview.channel_count === 0 ? " (this client has no channels yet)" : ""}. The invoice would be $0.00.
-              </p>
+              <div className="text-xs text-gray-600 space-y-1">
+                <p>
+                  No billable AI usage in this period
+                  {preview.channel_count === 0 ? " (this client has no channels yet)" : ""}. The invoice would be $0.00.
+                </p>
+                {preview.channel_count === 0 ? (
+                  <p className="text-gray-500">
+                    Put this client&apos;s channels in its folder (Clients &amp; Channels), or link its Slack workspace to it, then try again.
+                  </p>
+                ) : (
+                  <p className="text-gray-500">
+                    Channels counted for {preview.folder_name}: {(preview.channel_names || []).join(", ") || `${preview.channel_count}`}.
+                  </p>
+                )}
+                {(preview.non_billable_replies ?? 0) > 0 && (
+                  <p className="text-amber-700">
+                    {preview.non_billable_replies} {preview.non_billable_replies === 1 ? "reply" : "replies"} in this period used the client&apos;s own
+                    Anthropic key, so they are not billed.
+                  </p>
+                )}
+              </div>
             ) : (
               <table className="w-full text-xs">
                 <thead className="text-gray-500">

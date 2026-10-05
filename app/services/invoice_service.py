@@ -84,9 +84,26 @@ def get_folder_usage(cur, folder_id: int, period_start: date, period_end: date) 
     cur.execute("SELECT team_id FROM slack_workspaces WHERE folder_id = %s;", (folder_id,))
     linked_teams = [r["team_id"] for r in cur.fetchall() or []]
 
+    from app.services.channel_secrets_service import channel_id_variants
+
+    # A channel can be known by Slack's real id and by a stored alias (see LEGACY_CHANNEL_ALIASES): match both, and show
+    # them as one line under the id stored on the client's folder.
+    stored_of: Dict[str, str] = {}
+    for stored in names:
+        for v in channel_id_variants(stored):
+            stored_of.setdefault(v, stored)
+    match_ids = list(stored_of.keys())
+
     line_items: List[Dict[str, Any]] = []
+    non_billable_replies = 0
     if names or linked_teams:
-        cur.execute("""
+        scope = """(
+                    UPPER(channel_id) = ANY(%s)
+                    OR (workspace_id = ANY(%s) AND NOT EXISTS (
+                          SELECT 1 FROM channel_metadata cm
+                          WHERE UPPER(cm.channel_id) = UPPER(api_usage_logs.channel_id) AND cm.folder_id IS NOT NULL))
+                  )"""
+        cur.execute(f"""
             SELECT UPPER(channel_id) AS channel_key,
                    COUNT(*) AS replies,
                    COALESCE(SUM(input_tokens), 0) AS input_tokens,
@@ -95,38 +112,52 @@ def get_folder_usage(cur, folder_id: int, period_start: date, period_end: date) 
                    COALESCE(SUM(cost_usd), 0) AS cost_usd
             FROM api_usage_logs
             WHERE COALESCE(key_source, 'jts') = 'jts'
-              AND (
-                    UPPER(channel_id) = ANY(%s)
-                    OR (workspace_id = ANY(%s) AND NOT EXISTS (
-                          SELECT 1 FROM channel_metadata cm
-                          WHERE UPPER(cm.channel_id) = UPPER(api_usage_logs.channel_id) AND cm.folder_id IS NOT NULL))
-                  )
+              AND {scope}
               AND created_at >= %s AND created_at < %s
             GROUP BY UPPER(channel_id)
             ORDER BY cost_usd DESC;
-        """, (list(names.keys()), linked_teams, start_dt, end_dt))
-        usage_rows = cur.fetchall() or []
-        missing = [r["channel_key"] for r in usage_rows if r["channel_key"] not in names]
+        """, (match_ids, linked_teams, start_dt, end_dt))
+        merged: Dict[str, Dict[str, Any]] = {}
+        for r in cur.fetchall() or []:
+            key = stored_of.get(r["channel_key"], r["channel_key"])
+            m = merged.setdefault(key, {"replies": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost": Decimal("0")})
+            m["replies"] += int(r["replies"])
+            m["input_tokens"] += int(r["input_tokens"])
+            m["output_tokens"] += int(r["output_tokens"])
+            m["total_tokens"] += int(r["total_tokens"])
+            m["cost"] += _money(r["cost_usd"], "0.000001")
+        missing = [k for k in merged if k not in names]
         if missing:
             cur.execute("SELECT UPPER(channel_id) AS k, channel_name FROM channel_metadata WHERE UPPER(channel_id) = ANY(%s);", (missing,))
             for m in cur.fetchall() or []:
                 names[m["k"]] = m["channel_name"]
-        for r in usage_rows:
+        for key, m in sorted(merged.items(), key=lambda kv: kv[1]["cost"], reverse=True):
             line_items.append({
-                "channel_id": r["channel_key"],
-                "channel_name": names.get(r["channel_key"]) or r["channel_key"],
-                "replies": int(r["replies"]),
-                "input_tokens": int(r["input_tokens"]),
-                "output_tokens": int(r["output_tokens"]),
-                "total_tokens": int(r["total_tokens"]),
-                "cost_usd": float(_money(r["cost_usd"], "0.000001")),
+                "channel_id": key,
+                "channel_name": names.get(key) or key,
+                "replies": m["replies"],
+                "input_tokens": m["input_tokens"],
+                "output_tokens": m["output_tokens"],
+                "total_tokens": m["total_tokens"],
+                "cost_usd": float(_money(m["cost"], "0.000001")),
             })
+        # Replies in the same scope that used the client's own Anthropic key: not billed. Explains an empty invoice.
+        cur.execute(f"""
+            SELECT COUNT(*) AS replies FROM api_usage_logs
+            WHERE COALESCE(key_source, 'jts') <> 'jts'
+              AND {scope}
+              AND created_at >= %s AND created_at < %s;
+        """, (match_ids, linked_teams, start_dt, end_dt))
+        nb = cur.fetchone()
+        non_billable_replies = int((nb or {}).get("replies") or 0)
 
     usage_cost = sum((_money(i["cost_usd"], "0.000001") for i in line_items), Decimal("0"))
     return {
         "folder_id": folder["id"],
         "folder_name": folder["name"],
         "channel_count": len(names),
+        "channel_names": sorted({str(c.get("channel_name") or c.get("channel_id")) for c in channels}),
+        "non_billable_replies": non_billable_replies,
         "line_items": line_items,
         "replies": sum(i["replies"] for i in line_items),
         "total_tokens": sum(i["total_tokens"] for i in line_items),
