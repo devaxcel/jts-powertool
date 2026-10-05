@@ -316,7 +316,7 @@ export default function UsersPage() {
       </div>
 
       {/* Tabs: the people, and what each may ask the assistant to do */}
-      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit text-xs font-medium">
+      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit text-xs font-bold">
         {([
           { id: "users", label: "Users" },
           { id: "permissions", label: "Permissions" },
@@ -325,7 +325,7 @@ export default function UsersPage() {
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
-            className={`px-4 py-1.5 rounded-md ${tab === t.id ? "bg-white shadow-sm text-gray-900" : "text-gray-600 hover:text-gray-900"}`}
+            className={`px-4 py-1.5 rounded-md font-bold ${tab === t.id ? "bg-white shadow-sm text-gray-900" : "text-gray-600 hover:text-gray-900"}`}
           >
             {t.label}
           </button>
