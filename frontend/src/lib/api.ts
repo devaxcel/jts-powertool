@@ -1000,7 +1000,6 @@ export async function createDashboardUser(payload: {
   timezone?: string | null;
   client_folder_id?: number | null;
   organization_id?: number | null;
-  tool_permissions?: Record<string, boolean>;
 }): Promise<{ status: string; user_id: number; message: string; email_sent?: boolean }> {
   // Generate a temporary secure placeholder password so older/newer backend APIs never fail on empty password
   const placeholderPassword =
@@ -1093,6 +1092,21 @@ export async function submitSetPassword(payload: {
   return res.json();
 }
 
+/** Saves one person's GitHub / Jira permission checkboxes. Pass null to go back to the role's defaults. */
+export async function updateUserPermissions(
+  userId: number,
+  toolPermissions: Record<string, boolean> | null
+): Promise<{ status: string; message: string; tool_permissions: Record<string, boolean> }> {
+  const res = await fetch(`${API_BASE}/api/users/${userId}/permissions`, {
+    method: "PUT",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ tool_permissions: toolPermissions }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't save the permissions."));
+  return data;
+}
+
 export async function updateDashboardUser(
   userId: number,
   payload: {
@@ -1102,7 +1116,6 @@ export async function updateDashboardUser(
     role: string;
     client_folder_id?: number | null;
     organization_id?: number | null;
-    tool_permissions?: Record<string, boolean>;
   }
 ): Promise<{ status: string; message: string }> {
   let res = await fetch(`${API_BASE}/api/users/${userId}`, {

@@ -16,7 +16,7 @@ import {
 import { DataTable } from "@/components/DataTable";
 import { DashboardUser, ChannelFolder, Organization, formatLocalDateTime } from "@/lib/types";
 import { PageHeader, Alert, btn } from "@/components/ui";
-import { ToolPermissionsBox, ToolPermissions, permissionDefaults } from "@/components/ToolPermissionsBox";
+import { UserPermissionsTab } from "@/components/UserPermissionsTab";
 
 const ROLE_LABELS: Record<string, string> = {
   jts_admin: "JTS Admin",
@@ -36,6 +36,7 @@ export default function UsersPage() {
   const [sendingEmailId, setSendingEmailId] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  const [tab, setTab] = useState<"users" | "permissions">("users");
 
   // Create User Form State
   const [name, setName] = useState("");
@@ -44,7 +45,6 @@ export default function UsersPage() {
   const [role, setRole] = useState<"jts_admin" | "client_admin" | "client_standard">("client_admin");
   const [clientFolderId, setClientFolderId] = useState<string>("");
   const [organizationId, setOrganizationId] = useState<string>("");
-  const [perms, setPerms] = useState<ToolPermissions>(permissionDefaults("client_admin"));
 
   // Edit User Form State
   const [editName, setEditName] = useState("");
@@ -54,7 +54,6 @@ export default function UsersPage() {
   const [editRole, setEditRole] = useState<"jts_admin" | "client_admin" | "client_standard">("client_admin");
   const [editClientFolderId, setEditClientFolderId] = useState<string>("");
   const [editOrganizationId, setEditOrganizationId] = useState<string>("");
-  const [editPerms, setEditPerms] = useState<ToolPermissions>(permissionDefaults("client_admin"));
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -96,7 +95,6 @@ export default function UsersPage() {
     setRole("client_admin");
     setClientFolderId("");
     setOrganizationId("");
-    setPerms(permissionDefaults("client_admin"));
     setErrorMsg("");
   };
 
@@ -150,7 +148,6 @@ export default function UsersPage() {
         timezone: defaultTz,
         client_folder_id: clientFolderId ? parseInt(clientFolderId, 10) : null,
         organization_id: organizationId ? parseInt(organizationId, 10) : null,
-        tool_permissions: perms,
       });
       setSuccessMsg(
         res.message ||
@@ -195,7 +192,6 @@ export default function UsersPage() {
     setEditRole(u.role === "jts_admin" || u.role === "client_standard" ? u.role : "client_admin");
     setEditClientFolderId(u.client_folder_id ? String(u.client_folder_id) : "");
     setEditOrganizationId(u.organization_id ? String(u.organization_id) : "");
-    setEditPerms(u.tool_permissions && Object.keys(u.tool_permissions).length ? u.tool_permissions : permissionDefaults(u.role));
     setShowEditModal(true);
   };
 
@@ -238,7 +234,6 @@ export default function UsersPage() {
         role: editRole,
         client_folder_id: editClientFolderId ? parseInt(editClientFolderId, 10) : null,
         organization_id: editOrganizationId ? parseInt(editOrganizationId, 10) : null,
-        tool_permissions: editPerms,
       });
       setSuccessMsg(`User '${cleanName}' updated successfully!`);
       setShowEditModal(false);
@@ -320,6 +315,30 @@ export default function UsersPage() {
         </div>
       </div>
 
+      {/* Tabs: the people, and what each may ask the assistant to do */}
+      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit text-xs font-medium">
+        {([
+          { id: "users", label: "Users" },
+          { id: "permissions", label: "Permissions" },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`px-4 py-1.5 rounded-md ${tab === t.id ? "bg-white shadow-sm text-gray-900" : "text-gray-600 hover:text-gray-900"}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "permissions" ? (
+        <UserPermissionsTab
+          users={users}
+          onSaved={(userId, permissions) => setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, tool_permissions: permissions } : u)))}
+        />
+      ) : (
+        <>
       {/* Users Table */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         <DataTable
@@ -433,6 +452,9 @@ export default function UsersPage() {
       </div>
 
       {/* Create User Modal */}
+        </>
+      )}
+
       {showModal && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4 max-h-[90vh] overflow-y-auto my-auto">
@@ -544,7 +566,7 @@ export default function UsersPage() {
                 </label>
                 <select
                   value={role}
-                  onChange={(e: any) => { setRole(e.target.value); setPerms(permissionDefaults(e.target.value)); }}
+                  onChange={(e: any) => setRole(e.target.value)}
                   className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
                 >
                   <option value="client_admin">Client Admin: manages their organization, billing and API key</option>
@@ -553,7 +575,6 @@ export default function UsersPage() {
                 </select>
               </div>
 
-              <ToolPermissionsBox value={perms} onChange={setPerms} role={role} />
 
               {errorMsg && (
                 <div className="p-2.5 rounded-lg bg-rose-50 text-rose-700 text-xs border border-rose-200">
@@ -711,7 +732,7 @@ export default function UsersPage() {
                 </label>
                 <select
                   value={editRole}
-                  onChange={(e: any) => { setEditRole(e.target.value); setEditPerms(permissionDefaults(e.target.value)); }}
+                  onChange={(e: any) => setEditRole(e.target.value)}
                   className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
                 >
                   <option value="client_admin">Client Admin: manages their organization, billing and API key</option>
@@ -720,7 +741,6 @@ export default function UsersPage() {
                 </select>
               </div>
 
-              <ToolPermissionsBox value={editPerms} onChange={setEditPerms} role={editRole} />
 
               {errorMsg && (
                 <div className="p-2.5 rounded-lg bg-rose-50 text-rose-700 text-xs border border-rose-200">

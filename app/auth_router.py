@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Response, Request, status, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from app.tools.secrets_manager import get_secret
 from app.db.session import get_db_connection
@@ -141,7 +141,7 @@ class CreateUserRequest(BaseModel):
     timezone: Optional[str] = Field(default=None, description="Preferred timezone (defaults to global system timezone if omitted)")
     client_folder_id: Optional[int] = None
     organization_id: Optional[int] = None
-    tool_permissions: Optional[Dict[str, bool]] = Field(default=None, description="GitHub / Jira permission checkboxes")
+    tool_permissions: Optional[Dict[str, StrictBool]] = Field(default=None, description="GitHub / Jira permission checkboxes")
 
 
 class UpdateUserRequest(BaseModel):
@@ -152,7 +152,7 @@ class UpdateUserRequest(BaseModel):
     timezone: Optional[str] = Field(None, description="Preferred timezone")
     client_folder_id: Optional[int] = None
     organization_id: Optional[int] = None
-    tool_permissions: Optional[Dict[str, bool]] = Field(default=None, description="GitHub / Jira permission checkboxes")
+    tool_permissions: Optional[Dict[str, StrictBool]] = Field(default=None, description="GitHub / Jira permission checkboxes")
 
 
 class UpdateProfileRequest(BaseModel):
@@ -1174,6 +1174,72 @@ def set_password(req: SetPasswordRequest):
             conn.rollback()
         logger.error(f"Error setting password via token: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Failed to set password: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+
+ROLE_NAMES = {"jts_admin": "JTS Admin", "client_admin": "Client Admin", "client_standard": "Team Member"}
+
+
+class UpdatePermissionsRequest(BaseModel):
+    # null = go back to the role's defaults; an object = exactly these checkboxes
+    tool_permissions: Optional[Dict[str, StrictBool]] = None
+
+
+@users_router.put("/{user_id}/permissions", summary="Set a user's GitHub / Jira permission checkboxes")
+@users_router.put("/{user_id}/permissions/", summary="Set a user's GitHub / Jira permission checkboxes")
+def update_user_permissions(user_id: int, req: UpdatePermissionsRequest, request: Request):
+    """Saves only the permission checkboxes of one user (the Permissions tab). JTS Admin only."""
+    user_ctx = get_user_context(request)
+    actual_role = user_ctx.get("actual_role") or user_ctx.get("role")
+    active_role = user_ctx.get("role")
+    if not ((actual_role in ("jts_admin", "admin")) or (active_role in ("jts_admin", "admin"))):
+        raise HTTPException(status_code=403, detail="Access denied: Only JTS Admin can change permissions.")
+
+    reset = "tool_permissions" in req.model_fields_set and req.tool_permissions is None
+    try:
+        perms = clean_permissions(req.tool_permissions)
+    except ValueError as pe:
+        raise HTTPException(status_code=400, detail=str(pe))
+    if perms is None and not reset:
+        raise HTTPException(status_code=400, detail="Nothing to save.")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            _ensure_users_columns(cur)
+            cur.execute("SELECT id, username, role FROM dashboard_users WHERE id = %s;", (user_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"User #{user_id} not found.")
+            u_role = row["role"] if isinstance(row, dict) else row[2]
+            u_name = row["username"] if isinstance(row, dict) else row[1]
+            if u_role in ("jts_admin", "admin"):
+                conn.rollback()
+                return {"status": "success", "message": "JTS Admins always have every permission.",
+                        "tool_permissions": effective_permissions(None, u_role)}
+            if reset:
+                cur.execute("UPDATE dashboard_users SET tool_permissions = NULL WHERE id = %s;", (user_id,))
+            else:
+                cur.execute("UPDATE dashboard_users SET tool_permissions = %s::jsonb WHERE id = %s;", (json.dumps(perms), user_id))
+            conn.commit()
+            logger.info(f"[USERS] Permissions of user #{user_id} (@{u_name}) {'reset to role defaults' if reset else 'set to ' + json.dumps(perms)}")
+            return {
+                "status": "success",
+                "message": f"@{u_name} is back to the {ROLE_NAMES.get(u_role, u_role)} defaults." if reset else f"Permissions saved for @{u_name}.",
+                "tool_permissions": effective_permissions(perms if not reset else None, u_role),
+            }
+    except HTTPException:
+        if conn:
+            conn.rollback()
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Failed to update permissions of user #{user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="The permissions couldn't be saved. Please try again.")
     finally:
         if conn:
             conn.close()

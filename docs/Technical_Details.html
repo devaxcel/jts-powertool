@@ -298,7 +298,7 @@
   </ul>
 
   <h3>Tool permissions (GitHub and Jira checkboxes) <span class="tag new">NEW</span></h3>
-  <p>On <b>Users &rarr; Add / Edit user</b>, a JTS Admin sets what each person may ask the assistant to do in Slack:</p>
+  <p>On the <b>Users &rarr; Permissions</b> tab, a JTS Admin sets what each person may ask the assistant to do in Slack. There is one row per person with a checkbox for each permission, saved per row (the arrow button puts a row back to its role defaults). The Add and Edit user forms do not contain permissions:</p>
   <table>
     <tr><th style="width:18%">Group</th><th style="width:30%">Checkbox</th><th>Allows</th></tr>
     <tr><td>GitHub</td><td>Can read repositories</td><td>Read issues, files, code, commits and pull requests</td></tr>
@@ -309,7 +309,7 @@
     <tr><td>Jira</td><td>Can move or close tickets</td><td>Change a ticket's status</td></tr>
   </table>
   <ul>
-    <li><b>Defaults:</b> JTS Admin and Client Admin start with everything ticked; a Team Member starts with the two "read" boxes only. Changing the role in the form resets the boxes to that role's defaults.</li>
+    <li><b>Defaults:</b> JTS Admin and Client Admin start with everything ticked; a Team Member starts with the two "read" boxes only. A new user starts with their role's defaults; change them later on the Permissions tab.</li>
     <li><b>JTS Admins</b> always have every permission and cannot be restricted. Client users can only act in channels of their own client.</li>
     <li><b>How the person is found:</b> the bot reads the person's Slack email and matches it (ignoring upper/lower case) to the email on the Users page. The two emails must be the same.</li>
     <li><b>Someone who can't be matched</b> (their Slack email is not on the Users page) can read but not make changes, and is told to ask an administrator to add them. Two optional secrets change this: <code>TOOL_PERMISSIONS_UNMATCHED=allow</code> lets them change things; <code>TOOL_PERMISSIONS_ENFORCE=false</code> switches the checks off.</li>
