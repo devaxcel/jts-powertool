@@ -35,7 +35,7 @@ export function PageHeader({
   badge?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-gray-200">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-1">
       <div className="flex items-start gap-3 min-w-0">
         {Icon && (
           <div className="h-10 w-10 rounded-xl bg-[#088ADA]/10 text-[#088ADA] flex items-center justify-center shrink-0">
@@ -253,3 +253,122 @@ export function ConfirmDialog({
     </div>
   );
 }
+
+/* ---------------------------------------------------------------------------------------------
+   Layout helpers used by every page: tabs, section cards, badges and one table style.
+   --------------------------------------------------------------------------------------------- */
+
+type IconComponent = React.ComponentType<{ className?: string }>;
+
+/** Underline tabs. Use them to split a busy page into clearly named parts. */
+export function Tabs<T extends string>({
+  tabs,
+  value,
+  onChange,
+  className = "",
+}: {
+  tabs: Array<{ id: T; label: React.ReactNode; count?: number; icon?: IconComponent }>;
+  value: T;
+  onChange: (id: T) => void;
+  className?: string;
+}) {
+  return (
+    <div role="tablist" className={`flex flex-wrap items-center gap-1 border-b border-gray-200 ${className}`}>
+      {tabs.map((t) => {
+        const active = t.id === value;
+        const Icon = t.icon;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(t.id)}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 -mb-px border-b-2 text-sm font-bold whitespace-nowrap transition ${
+              active ? "border-[#088ADA] text-[#088ADA]" : "border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300"
+            }`}
+          >
+            {Icon && <Icon className="h-4 w-4" />}
+            {t.label}
+            {typeof t.count === "number" && (
+              <span
+                className={`min-w-[20px] px-1.5 py-0.5 rounded-full text-[11px] font-semibold text-center ${
+                  active ? "bg-[#088ADA]/10 text-[#088ADA]" : "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {t.count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A titled card. The header (title, short description, actions) is separated from the body. */
+export function Section({
+  title,
+  description,
+  icon: Icon,
+  actions,
+  children,
+  className = "",
+  bodyClassName = "p-5",
+}: {
+  title?: React.ReactNode;
+  description?: React.ReactNode;
+  icon?: IconComponent;
+  actions?: React.ReactNode;
+  children?: React.ReactNode;
+  className?: string;
+  bodyClassName?: string;
+}) {
+  return (
+    <section className={`bg-white border border-gray-200 rounded-2xl shadow-sm ${className}`}>
+      {(title || actions) && (
+        <header className="px-5 pt-4 pb-3 border-b border-gray-100">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {Icon && (
+                <div className="h-8 w-8 rounded-lg bg-[#088ADA]/10 text-[#088ADA] flex items-center justify-center shrink-0">
+                  <Icon className="h-4 w-4" />
+                </div>
+              )}
+              {title && <h2 className="text-sm font-bold text-gray-900 min-w-0">{title}</h2>}
+            </div>
+            {actions && <div className="flex items-center gap-2 flex-wrap justify-end shrink-0">{actions}</div>}
+          </div>
+          {description && <p className="text-xs text-gray-500 mt-2 max-w-3xl leading-relaxed">{description}</p>}
+        </header>
+      )}
+      <div className={bodyClassName}>{children}</div>
+    </section>
+  );
+}
+
+const BADGE_TONES = {
+  green: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  blue: "bg-sky-50 text-sky-700 border-sky-200",
+  amber: "bg-amber-50 text-amber-700 border-amber-200",
+  rose: "bg-rose-50 text-rose-700 border-rose-200",
+  gray: "bg-gray-100 text-gray-600 border-gray-200",
+};
+
+export function Badge({ tone = "gray", children, className = "" }: { tone?: keyof typeof BADGE_TONES; children: React.ReactNode; className?: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border whitespace-nowrap ${BADGE_TONES[tone]} ${className}`}>
+      {children}
+    </span>
+  );
+}
+
+/** One table look for the whole dashboard (matches DataTable). */
+export const tbl = {
+  wrap: "overflow-x-auto rounded-xl border border-gray-200 bg-white",
+  table: "w-full text-left border-collapse",
+  head: "bg-gray-50 border-b border-gray-200 text-gray-500 uppercase font-semibold text-[11px] tracking-wider",
+  th: "px-4 py-2.5 whitespace-nowrap",
+  td: "px-4 py-3 text-sm text-gray-700 align-middle",
+  row: "border-b border-gray-100 last:border-0 hover:bg-sky-50/40 transition-colors",
+};

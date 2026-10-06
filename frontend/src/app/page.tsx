@@ -291,7 +291,7 @@ export default function OverviewPage() {
         <StatCard
           label="Approved changes"
           value={stats ? fmtNum(stats.approvals.applied) : "-"}
-          hint="Applied to GitHub"
+          hint="Approved and carried out"
           icon={CheckCircle2}
           tone="green"
         />
@@ -329,7 +329,7 @@ export default function OverviewPage() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-sm font-semibold text-gray-800">Waiting for your review</h2>
-              <p className="text-xs text-gray-500">The bot needs a person to approve these GitHub changes.</p>
+              <p className="text-xs text-gray-500">The bot needs a person to approve these changes (GitHub, Jira, websites).</p>
             </div>
             <Link href="/approvals" className="text-xs text-[#088ADA] hover:text-[#0778bd] font-medium flex items-center gap-1">
               View all

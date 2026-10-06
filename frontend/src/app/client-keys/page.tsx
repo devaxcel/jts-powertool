@@ -15,7 +15,7 @@ import {
 import { ChannelFolder, formatLocalDateTime } from "@/lib/types";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
 import { JiraConnectionCard } from "@/components/JiraConnectionCard";
-import { Alert, ConfirmDialog, EmptyState, LoadingState, PageHeader, btn, inputClass } from "@/components/ui";
+import { Alert, Badge, ConfirmDialog, EmptyState, LoadingState, PageHeader, Section, Tabs, btn, inputClass, tbl } from "@/components/ui";
 
 export default function ClientKeysPage() {
   const [role, setRole] = useState("jts_admin");
@@ -33,6 +33,7 @@ export default function ClientKeysPage() {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState<ClientKeyItem | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"connections" | "keys">("connections");
 
   const isJts = role === "jts_admin";
 
@@ -80,6 +81,7 @@ export default function ClientKeysPage() {
     const q = new URLSearchParams(window.location.search);
     if (q.get("add") === "1") {
       setFromSlack(true);
+      setTab("keys");
       const n = (q.get("name") || "").toUpperCase().replace(/[^A-Z0-9_]+/g, "_").slice(0, 50);
       if (n) setKeyName(n);
     }
@@ -190,28 +192,36 @@ export default function ClientKeysPage() {
         !feedback && <EmptyState icon={Building2} title="No client selected" description="Create a client first in Clients & Channels." />
       ) : (
         <>
-          <GithubConnectionCard folderId={data.folder.id} canEdit={canEdit} />
-          <JiraConnectionCard folderId={data.folder.id} canEdit={canEdit} />
+          <Tabs
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { id: "connections" as const, label: "Connections", icon: Plug },
+              { id: "keys" as const, label: "API keys", count: keys.length, icon: KeyRound },
+            ]}
+          />
 
-          {fromSlack && !canEdit && (
-            <Alert type="warning">Only your Client Admin can add keys. Ask them to open the link from Slack, or sign in with a Client Admin account.</Alert>
+          {tab === "connections" && (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+              <GithubConnectionCard folderId={data.folder.id} canEdit={canEdit} />
+              <JiraConnectionCard folderId={data.folder.id} canEdit={canEdit} />
+            </div>
           )}
-          {canEdit ? (
-            <div className={`bg-white border rounded-2xl p-5 shadow-sm space-y-4 ${fromSlack ? "border-[#088ADA] ring-2 ring-[#088ADA]/20" : "border-gray-200"}`}>
-              <div className="flex items-center gap-2 pb-3 border-b border-gray-100">
-                <div className="h-8 w-8 rounded-lg bg-[#088ADA]/10 flex items-center justify-center text-[#088ADA]">
-                  <Lock className="h-4 w-4" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-semibold text-gray-800">Add a key</h2>
-                  <p className="text-xs text-gray-500">
-                    The value is stored securely in AWS and can&apos;t be viewed again after saving. Use the same name to replace an existing key. Name it
-                    ANTHROPIC_API_KEY to use your own Claude account for the assistant&apos;s replies.
-                  </p>
-                </div>
-              </div>
 
-              <form onSubmit={handleSave} autoComplete="off" data-lpignore="true" className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
+          {tab === "keys" && (
+            <div className="space-y-5">
+              {fromSlack && !canEdit && (
+                <Alert type="warning">Only your Client Admin can add keys. Ask them to open the link from Slack, or sign in with a Client Admin account.</Alert>
+              )}
+
+              {canEdit ? (
+                <Section
+                  icon={Lock}
+                  title="Add a key"
+                  description="The value is stored securely in AWS and can't be viewed again after saving. Use the same name to replace an existing key. Name it ANTHROPIC_API_KEY to use your own Claude account for the assistant's replies."
+                  className={fromSlack ? "border-[#088ADA] ring-2 ring-[#088ADA]/20" : ""}
+                >
+                  <form onSubmit={handleSave} autoComplete="off" data-lpignore="true" className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
                 <input type="text" name="fake_username_remembered" tabIndex={-1} className="hidden" aria-hidden="true" autoComplete="off" />
                 <input type="password" name="fake_password_remembered" tabIndex={-1} className="hidden" aria-hidden="true" autoComplete="off" />
 
@@ -295,72 +305,69 @@ export default function ClientKeysPage() {
                   </button>
                 </div>
               </form>
+                </Section>
+              ) : (
+                <Alert type="info">You can see which keys are saved. Only your Client Admin can add or remove them.</Alert>
+              )}
+
+              <Section title={`Saved keys (${keys.length})`} description="Only the names are shown. Values are never displayed." bodyClassName="p-0">
+                {keys.length === 0 ? (
+                  <div className="p-5">
+                    <EmptyState icon={Lock} title="No keys saved yet" description="Add your first API key or token using the form above." />
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className={tbl.table}>
+                      <thead className={tbl.head}>
+                        <tr>
+                          <th className={tbl.th}>Key name</th>
+                          <th className={tbl.th}>Applies to</th>
+                          <th className={tbl.th}>Added by</th>
+                          <th className={tbl.th}>Last updated</th>
+                          {canEdit && <th className={`${tbl.th} text-right`}>Actions</th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {keys.map((k) => (
+                          <tr key={`${k.applies_to}-${k.channel_id || ""}-${k.provider}`} className={tbl.row}>
+                            <td className={tbl.td}>
+                              <div className="flex items-center gap-2.5">
+                                <div className="h-8 w-8 rounded-lg bg-sky-50 border border-sky-100 flex items-center justify-center text-[#088ADA] shrink-0">
+                                  <KeyRound className="h-3.5 w-3.5" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-gray-900 truncate">{k.label}</div>
+                                  {k.key_hint && <div className="font-mono text-[11px] text-gray-500">{k.key_hint}</div>}
+                                </div>
+                                {k.status === "failing" && <Badge tone="rose">Failing</Badge>}
+                              </div>
+                            </td>
+                            <td className={tbl.td}>
+                              {k.applies_to === "client" ? <Badge tone="blue">Whole client</Badge> : <Badge tone="gray">Only {k.channel_name}</Badge>}
+                            </td>
+                            <td className={tbl.td}>{k.updated_by || "-"}</td>
+                            <td className={`${tbl.td} text-gray-500 whitespace-nowrap`}>{k.updated_at ? formatLocalDateTime(k.updated_at) : "-"}</td>
+                            {canEdit && (
+                              <td className={`${tbl.td} text-right`}>
+                                <button
+                                  onClick={() => setRemoving(k)}
+                                  className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                                  title="Delete key"
+                                  aria-label={`Delete ${k.label}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </Section>
             </div>
-          ) : (
-            <Alert type="info">You can see which keys are saved. Only your Client Admin can add or remove them.</Alert>
           )}
-
-          <div className="space-y-3">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-800">Saved keys ({keys.length})</h2>
-              <p className="text-xs text-gray-500">Only the names are shown. Values are never displayed.</p>
-            </div>
-
-            {keys.length === 0 ? (
-              <EmptyState icon={Lock} title="No keys saved yet" description="Add your first API key or token using the form above." />
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider">
-                    <tr className="bg-[#088ADA]">
-                      <th className="p-3 font-semibold bg-[#088ADA] text-white">Key name</th>
-                      <th className="p-3 font-semibold bg-[#088ADA] text-white">Applies to</th>
-                      <th className="p-3 font-semibold bg-[#088ADA] text-white">Added by</th>
-                      <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Last updated</th>
-                      {canEdit && <th className="p-3 font-semibold text-right bg-[#088ADA] text-white">Actions</th>}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {keys.map((k, idx) => (
-                      <tr key={`${k.applies_to}-${k.channel_id || ""}-${k.provider}`} className={`transition hover:bg-gray-200 ${idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"}`}>
-                        <td className="p-3">
-                          <div className="flex items-center gap-2.5">
-                            <div className="h-7 w-7 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] shrink-0">
-                              <KeyRound className="h-3.5 w-3.5" />
-                            </div>
-                            <div>
-                              <span className="text-sm font-semibold text-gray-800">{k.label}</span>
-                              {k.key_hint && <span className="ml-2 font-mono text-xs text-gray-500">{k.key_hint}</span>}
-                              {k.status === "failing" && (
-                                <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">Failing</span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-3 text-xs text-gray-700">
-                          {k.applies_to === "client" ? "Whole client" : `Only ${k.channel_name}`}
-                        </td>
-                        <td className="p-3 text-xs font-medium text-gray-700">{k.updated_by || "-"}</td>
-                        <td className="p-3 text-center text-xs text-gray-600">{k.updated_at ? formatLocalDateTime(k.updated_at) : "-"}</td>
-                        {canEdit && (
-                          <td className="p-3 text-right">
-                            <button
-                              onClick={() => setRemoving(k)}
-                              className="p-1.5 text-gray-500 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition"
-                              title="Delete key"
-                              aria-label={`Delete ${k.label}`}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         </>
       )}
 

@@ -10,7 +10,7 @@ import {
   setGithubDefaultRepo,
 } from "@/lib/api";
 import { formatLocalDateTime } from "@/lib/types";
-import { Alert, ConfirmDialog, btn } from "@/components/ui";
+import { Alert, Badge, ConfirmDialog, Section, btn, inputClass } from "@/components/ui";
 
 export function GithubConnectionCard({ folderId, canEdit }: { folderId: number | string; canEdit: boolean }) {
   const id = Number(folderId);
@@ -87,36 +87,26 @@ export function GithubConnectionCard({ folderId, canEdit }: { folderId: number |
   const connected = Boolean(status?.connected && conn);
 
   return (
-    <section className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gray-900 text-white flex items-center justify-center shrink-0">
-            <GitBranch className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
-              GitHub
-              {!loading && (
-                <span
-                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
-                    connected
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : conn
-                      ? "bg-rose-50 text-rose-700 border-rose-200"
-                      : "bg-gray-100 text-gray-600 border-gray-200"
-                  }`}
-                >
-                  {connected ? "Connected" : conn ? "Needs reconnecting" : "Not connected"}
-                </span>
-              )}
-            </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              The bot works on this client&apos;s own GitHub. Every change still needs approval. In Slack, anyone can type{" "}
-              <span className="font-mono">@bot connect my github</span>.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
+    <Section
+      icon={GitBranch}
+      title={
+        <span className="inline-flex items-center gap-2">
+          GitHub
+          {!loading && (
+            <Badge tone={connected ? "green" : conn ? "rose" : "gray"}>
+              {connected ? "Connected" : conn ? "Needs reconnecting" : "Not connected"}
+            </Badge>
+          )}
+        </span>
+      }
+      description={
+        <>
+          The bot works on this client&apos;s own GitHub. Every change still needs approval. In Slack, anyone can type{" "}
+          <span className="font-mono">@bot connect my github</span>.
+        </>
+      }
+      actions={
+        <>
           <button onClick={load} className={btn.secondary} disabled={loading} aria-label="Refresh GitHub status">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -126,9 +116,10 @@ export function GithubConnectionCard({ folderId, canEdit }: { folderId: number |
               {connected ? "Change connection" : "Connect GitHub"}
             </button>
           )}
-        </div>
-      </div>
-
+        </>
+      }
+      bodyClassName="p-5 space-y-4"
+    >
       {feedback && (
         <Alert type={feedback.type} onClose={() => setFeedback(null)}>
           {feedback.message}
@@ -146,26 +137,26 @@ export function GithubConnectionCard({ folderId, canEdit }: { folderId: number |
           Connect GitHub again so the bot can keep working.
         </Alert>
       ) : connected && conn ? (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {status?.error && <Alert type="warning">{status.error}</Alert>}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
             <div>
-              <p className="text-gray-500">Account</p>
-              <p className="font-semibold text-gray-800">
+              <dt className="text-gray-500">Account</dt>
+              <dd className="font-semibold text-gray-900 mt-0.5">
                 {conn.account_login} <span className="font-normal text-gray-500">({conn.account_type === "Organization" ? "organization" : "personal"})</span>
-              </p>
+              </dd>
             </div>
             <div>
-              <p className="text-gray-500">Repositories the bot can use</p>
-              <p className="font-semibold text-gray-800">
+              <dt className="text-gray-500">Repositories the bot can use</dt>
+              <dd className="font-semibold text-gray-900 mt-0.5">
                 {conn.repository_selection === "all" ? "All repositories" : `${status?.repos.length ?? conn.repo_count ?? 0} selected`}
-              </p>
+              </dd>
             </div>
             <div>
-              <p className="text-gray-500">Connected</p>
-              <p className="text-gray-800">{conn.updated_at ? formatLocalDateTime(conn.updated_at) : "—"}</p>
+              <dt className="text-gray-500">Connected</dt>
+              <dd className="text-gray-800 mt-0.5">{conn.updated_at ? formatLocalDateTime(conn.updated_at) : "—"}</dd>
             </div>
-          </div>
+          </dl>
 
           <label className="block space-y-1">
             <span className="text-xs font-semibold text-gray-700">Default repository</span>
@@ -173,7 +164,7 @@ export function GithubConnectionCard({ folderId, canEdit }: { folderId: number |
               value={conn.default_repo || ""}
               onChange={(e) => handleDefaultRepo(e.target.value)}
               disabled={!canEdit || busy}
-              className="w-full sm:max-w-md px-3 py-2 bg-white border border-gray-300 rounded-xl text-sm text-gray-800 focus:outline-none focus:border-[#088ADA] disabled:bg-gray-50"
+              className={`${inputClass} disabled:bg-gray-50`}
             >
               <option value="">None (the bot asks which repository)</option>
               {(status?.repos || []).map((r) => (
@@ -198,7 +189,7 @@ export function GithubConnectionCard({ folderId, canEdit }: { folderId: number |
           )}
 
           {canEdit && (
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-100">
               <p className="text-[11px] text-gray-500">To add or remove repositories, use “Change connection”.</p>
               <button onClick={() => setConfirmDisconnect(true)} className={btn.dangerSoft} disabled={busy}>
                 <Unlink className="h-3.5 w-3.5" /> Disconnect
@@ -207,7 +198,7 @@ export function GithubConnectionCard({ folderId, canEdit }: { folderId: number |
           )}
         </div>
       ) : (
-        <p className="text-xs text-gray-600">
+        <p className="text-sm text-gray-600">
           Not connected yet. {canEdit ? "Click “Connect GitHub”, or" : "Ask your Client Admin, or"} type{" "}
           <span className="font-mono">@bot connect my github</span> in one of this client&apos;s Slack channels.
         </p>
@@ -224,6 +215,6 @@ export function GithubConnectionCard({ folderId, canEdit }: { folderId: number |
       >
         <p>The bot stops using this GitHub account. To remove access completely, also uninstall “JTS PowerTool” in the GitHub account&apos;s settings.</p>
       </ConfirmDialog>
-    </section>
+    </Section>
   );
 }

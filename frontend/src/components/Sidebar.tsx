@@ -38,7 +38,7 @@ const NAV_SECTIONS: Array<{ title: string; items: NavItem[] }> = [
     items: [
       { label: "Dashboard", href: "/", icon: LayoutDashboard, roles: ["jts_admin", "client_admin"] },
       { label: "My Activity", href: "/my-tasks", icon: ListTodo, roles: ["client_standard"] },
-      { label: "Approvals", href: "/approvals", icon: ShieldCheck, roles: ["jts_admin", "client_admin", "client_standard"], hint: "Review GitHub changes proposed by the bot" },
+      { label: "Approvals", href: "/approvals", icon: ShieldCheck, roles: ["jts_admin", "client_admin", "client_standard"], hint: "Review changes proposed by the bot" },
       { label: "Usage & Billing", href: "/billing", icon: Receipt, roles: ["jts_admin", "client_admin"] },
       { label: "Clients & Channels", href: "/folders", icon: Folder, roles: ["jts_admin", "client_admin"] },
       { label: "Keys & Connections", href: "/client-keys", icon: Plug, roles: ["jts_admin", "client_admin", "client_standard"], hint: "Your own API keys and GitHub connection" },

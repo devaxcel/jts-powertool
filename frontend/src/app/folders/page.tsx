@@ -15,6 +15,8 @@ import {
   ChevronRight,
   Hash,
   AtSign,
+  Inbox,
+  MessagesSquare,
 } from "lucide-react";
 import {
   fetchFolders,
@@ -31,7 +33,7 @@ import {
 } from "@/lib/api";
 import { DataTable } from "@/components/DataTable";
 import { ChannelFolder, ChannelProject } from "@/lib/types";
-import { PageHeader, Alert, EmptyState, LoadingState, SectionTitle, btn } from "@/components/ui";
+import { PageHeader, Alert, EmptyState, LoadingState, SectionTitle, Tabs, btn } from "@/components/ui";
 
 function canonicalChannelId(cid: string, ws?: string, channelName?: string): string {
   if (!cid) return "";
@@ -103,6 +105,7 @@ export default function FoldersPage() {
   const [editFolderNameInput, setEditFolderNameInput] = useState("");
   const [editFolderDescInput, setEditFolderDescInput] = useState("");
   const [editFolderSaving, setEditFolderSaving] = useState(false);
+  const [tab, setTab] = useState<"clients" | "workspaces" | "unassigned">("clients");
   const [editFolderOrgInput, setEditFolderOrgInput] = useState<string>("");
   const [editFolderOrgOriginal, setEditFolderOrgOriginal] = useState<string>("");
   const [organizations, setOrganizations] = useState<Array<{ id: number; name: string }>>([]);
@@ -330,7 +333,22 @@ export default function FoldersPage() {
           <LoadingState label="Loading client folders..." />
         ) : (
           <>
-            {/* Section 1: Folders Table */}
+            <Tabs
+              value={tab}
+              onChange={setTab}
+              tabs={[
+                { id: "clients" as const, label: "Clients", count: displayedFolders.length, icon: Folder },
+                ...(isMasterAdmin
+                  ? [
+                      { id: "workspaces" as const, label: "Slack workspaces", icon: MessagesSquare },
+                      { id: "unassigned" as const, label: "Unassigned chats", count: dedupedUnassignedChannels.length, icon: Inbox },
+                    ]
+                  : []),
+              ]}
+            />
+
+            {/* Tab 1: client folders */}
+            {tab === "clients" && (
             <div>
               <SectionTitle
                 title={`Client folders (${displayedFolders.length})`}
@@ -433,13 +451,14 @@ export default function FoldersPage() {
                 </div>
               )}
             </div>
+            )}
 
-            {/* Section 1b: which client each Slack workspace belongs to */}
-            {isMasterAdmin && <WorkspaceClientsCard folders={displayedFolders} />}
+            {/* Tab 2: Slack workspaces */}
+            {isMasterAdmin && tab === "workspaces" && <WorkspaceClientsCard folders={displayedFolders} />}
 
-            {/* Section 2: Unassigned Slack Channels */}
-            {isMasterAdmin && (
-            <div className="pt-4 border-t border-gray-200">
+            {/* Tab 3: chats not in a folder yet */}
+            {isMasterAdmin && tab === "unassigned" && (
+            <div>
               <SectionTitle
                 title={`Channels not in a folder yet (${dedupedUnassignedChannels.length})`}
                 description="Slack channels and DMs the bot is in that don't belong to a client yet. Pick a folder to assign each one."

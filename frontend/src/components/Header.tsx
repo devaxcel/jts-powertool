@@ -13,6 +13,7 @@ const TITLES: Array<[string, string]> = [
   ["/users", "Users"],
   ["/organizations", "Organizations"],
   ["/my-tasks", "My Activity"],
+  ["/client-keys", "Keys & Connections"],
   ["/keys", "API Keys"],
   ["/folders", "Clients & Channels"],
   ["/logs", "Activity Log"],

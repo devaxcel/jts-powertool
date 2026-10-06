@@ -137,6 +137,42 @@ function describeApproval(a: Approval): Summary {
         ],
       };
     }
+    case "jira_create_issue":
+      return {
+        icon: CircleDot,
+        action: "Create a Jira issue",
+        headline: args.summary || "(no title)",
+        details: [
+          `Project: ${args.project || "?"} · Type: ${args.issue_type || "Task"}${args.priority ? ` · Priority: ${args.priority}` : ""}`,
+          ...(args.labels?.length ? [`Labels: ${args.labels.join(", ")}`] : []),
+          ...(args.description ? [`Description: ${String(args.description).slice(0, 200)}`] : []),
+        ],
+      };
+    case "jira_update_issue":
+      return {
+        icon: CircleDot,
+        action: "Update a Jira issue",
+        headline: `${args.issue_key || "Issue"}${args.summary ? `: ${args.summary}` : ""}`,
+        details: [
+          ...(args.priority ? [`Set priority to: ${args.priority}`] : []),
+          ...(args.labels?.length ? [`Labels: ${args.labels.join(", ")}`] : []),
+          ...(args.description ? [`New description: ${String(args.description).slice(0, 200)}`] : []),
+        ],
+      };
+    case "jira_add_comment":
+      return {
+        icon: MessageSquare,
+        action: "Comment on a Jira issue",
+        headline: args.issue_key || "Issue",
+        details: args.comment ? [`Comment: “${String(args.comment).slice(0, 200)}”`] : [],
+      };
+    case "jira_transition_issue":
+      return {
+        icon: CircleDot,
+        action: "Move a Jira issue",
+        headline: `${args.issue_key || "Issue"} → ${args.status || "?"}`,
+        details: [],
+      };
     case "add_issue_comment":
       return {
         icon: MessageSquare,
@@ -148,7 +184,7 @@ function describeApproval(a: Approval): Summary {
       return {
         icon: FileCode,
         action: a.tool_name.replace(/_/g, " "),
-        headline: repo || "GitHub",
+        headline: repo || (a.tool_name.startsWith("jira_") ? "Jira" : "GitHub"),
         details: [],
       };
   }
@@ -362,7 +398,7 @@ export default function ApprovalsPage() {
       <PageHeader
         icon={ShieldCheck}
         title="Approvals"
-        description="Before the bot changes anything on GitHub, an admin must approve it here or in Slack. Requests expire after 24 hours."
+        description="Before the bot changes anything in GitHub or Jira, an admin must approve it here or in Slack. Requests expire after 24 hours."
         badge={
           pendingCount > 0 ? (
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
@@ -540,7 +576,7 @@ export default function ApprovalsPage() {
                     }`}
                   >
                     <span className="block text-[11px] font-semibold text-gray-500 mb-0.5">
-                      {appr.status === "failed" ? "GitHub error" : "Result from GitHub"}
+                      {appr.status === "failed" ? "Error" : "Result"}
                     </span>
                     <details>
                       <summary className="text-gray-700 font-mono break-words line-clamp-2 cursor-pointer">

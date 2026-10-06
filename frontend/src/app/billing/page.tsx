@@ -22,7 +22,7 @@ import {
 import { UsageSummary, ApiUsageLog, formatLocalDateTime } from "@/lib/types";
 import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import { InvoicesPanel } from "@/components/InvoicesPanel";
-import { PageHeader, Alert, ConfirmDialog, btn } from "@/components/ui";
+import { PageHeader, Alert, ConfirmDialog, Tabs, btn } from "@/components/ui";
 import { DataTable, Column } from "@/components/DataTable";
 import {
   DateRange,
@@ -615,25 +615,14 @@ export default function BillingPage() {
       {!isMasterAdmin && myFolderId && <ClientApiKeyCard folderId={myFolderId} canEdit={userRole === "client_admin"} />}
 
       {canSeeInvoices && (
-        <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl p-1 w-fit text-sm font-medium">
-          {(
-            [
-              { value: "usage", label: "Usage", icon: BarChart3 },
-              { value: "invoices", label: "Invoices", icon: FileText },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.value}
-              onClick={() => setView(t.value)}
-              className={`px-4 py-2 rounded-lg transition flex items-center gap-1.5 ${
-                view === t.value ? "bg-[#088ADA] text-white shadow-sm" : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-              }`}
-            >
-              <t.icon className="h-4 w-4" />
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={view}
+          onChange={setView}
+          tabs={[
+            { id: "usage" as const, label: "Usage", icon: BarChart3 },
+            { id: "invoices" as const, label: "Invoices", icon: FileText },
+          ]}
+        />
       )}
 
       {feedback && (
@@ -685,7 +674,7 @@ export default function BillingPage() {
               />
             </>
           )}
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-500" suppressHydrationWarning>
             {rangeLabel} <span className="text-gray-400">(UTC)</span>
           </span>
         </div>
@@ -717,32 +706,22 @@ export default function BillingPage() {
       </div>
 
       {/* Controls & Filter Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col gap-4">
         {/* Navigation Tabs */}
-        <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200 text-xs font-semibold w-full md:w-auto flex-wrap">
-          {(
-            [
-              { value: "channel", label: "By channel", icon: FileText },
-              { value: "user", label: "By person", icon: User },
-              { value: "channel_user", label: "Person per channel", icon: Users },
-              { value: "logs", label: "Every reply", icon: Zap },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.value}
-              onClick={() => setActiveTab(t.value)}
-              className={`px-4 py-2 rounded-lg transition flex items-center gap-1.5 ${
-                activeTab === t.value ? "bg-[#088ADA] text-white shadow" : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              <t.icon className="h-3.5 w-3.5" />
-              <span>{t.label}</span>
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={activeTab}
+          onChange={setActiveTab}
+          className="w-full"
+          tabs={[
+            { id: "channel" as const, label: "By channel", icon: FileText },
+            { id: "user" as const, label: "By person", icon: User },
+            { id: "channel_user" as const, label: "Person per channel", icon: Users },
+            { id: "logs" as const, label: "Every reply", icon: Zap },
+          ]}
+        />
 
         {/* Workspace Dropdown & Instant Search */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
           {isMasterAdmin && (
             <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-xl shrink-0">
               <Building2 className="h-4 w-4 text-[#088ADA]" />

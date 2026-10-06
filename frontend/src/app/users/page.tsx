@@ -15,7 +15,7 @@ import {
 } from "@/lib/api";
 import { DataTable } from "@/components/DataTable";
 import { DashboardUser, ChannelFolder, Organization, formatLocalDateTime } from "@/lib/types";
-import { PageHeader, Alert, btn } from "@/components/ui";
+import { PageHeader, Alert, Tabs, btn } from "@/components/ui";
 import { UserPermissionsTab } from "@/components/UserPermissionsTab";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -282,6 +282,23 @@ export default function UsersPage() {
 
       {successMsg && <Alert type="success">{successMsg}</Alert>}
 
+      {/* Tabs: the people, and what each may ask the assistant to do */}
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: "users" as const, label: "Users", count: users.length, icon: Users },
+          { id: "permissions" as const, label: "Permissions", icon: Shield },
+        ]}
+      />
+
+      {tab === "permissions" ? (
+        <UserPermissionsTab
+          users={users}
+          onSaved={(userId, permissions) => setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, tool_permissions: permissions } : u)))}
+        />
+      ) : (
+        <>
       {/* Role Summary Badges */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="p-4 rounded-xl bg-white border border-gray-200 shadow-sm flex items-center gap-3">
@@ -315,30 +332,6 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Tabs: the people, and what each may ask the assistant to do */}
-      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit text-xs font-bold">
-        {([
-          { id: "users", label: "Users" },
-          { id: "permissions", label: "Permissions" },
-        ] as const).map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`px-4 py-1.5 rounded-md font-bold ${tab === t.id ? "bg-white shadow-sm text-gray-900" : "text-gray-600 hover:text-gray-900"}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "permissions" ? (
-        <UserPermissionsTab
-          users={users}
-          onSaved={(userId, permissions) => setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, tool_permissions: permissions } : u)))}
-        />
-      ) : (
-        <>
       {/* Users Table */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         <DataTable

@@ -12,7 +12,7 @@ import {
   EyeOff,
   ShieldCheck,
 } from "lucide-react";
-import { PageHeader, Alert, EmptyState, LoadingState, btn } from "@/components/ui";
+import { PageHeader, Alert, EmptyState, LoadingState, Section, btn, tbl } from "@/components/ui";
 import {
   fetchVaultSecrets,
   saveVaultSecret,
@@ -218,35 +218,32 @@ export default function KeysVaultPage() {
       </div>
 
       {/* Section 2: Stored Secrets Table */}
-      <div className="space-y-3 flex-1">
-        <div>
-          <h2 className="text-sm font-semibold text-gray-800">Saved keys ({vaultSecrets.length})</h2>
-          <p className="text-xs text-gray-500">Only the names are shown. Values are never displayed.</p>
-        </div>
-
+      <Section
+        icon={Lock}
+        title={`Saved keys (${vaultSecrets.length})`}
+        description="Only the names are shown. Values are never displayed."
+        bodyClassName="p-5"
+      >
         {loading ? (
           <LoadingState label="Loading keys..." />
         ) : vaultSecrets.length === 0 ? (
           <EmptyState icon={Lock} title="No keys saved yet" description="Add your first API key or token using the form above." />
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm border-b border-gray-300">
-                <tr className="bg-[#088ADA]">
-                  <th className="p-3 font-semibold bg-[#088ADA] text-white">Key name</th>
-                  <th className="p-3 font-semibold bg-[#088ADA] text-white">Stored at</th>
-                  <th className="p-3 font-semibold bg-[#088ADA] text-white">Added by</th>
-                  <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Date added</th>
-                  <th className="p-3 font-semibold text-right bg-[#088ADA] text-white">Actions</th>
+          <div className={tbl.wrap}>
+            <table className={tbl.table}>
+              <thead className={tbl.head}>
+                <tr>
+                  <th className={tbl.th}>Key name</th>
+                  <th className={tbl.th}>Stored at</th>
+                  <th className={tbl.th}>Added by</th>
+                  <th className={`${tbl.th} text-center`}>Date added</th>
+                  <th className={`${tbl.th} text-right`}>Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
-                {vaultSecrets.map((secret, idx) => (
-                  <tr
-                    key={secret.id}
-                    className={`transition hover:bg-gray-200 ${idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"}`}
-                  >
-                    <td className="p-3">
+              <tbody>
+                {vaultSecrets.map((secret) => (
+                  <tr key={secret.id} className={tbl.row}>
+                    <td className={tbl.td}>
                       <div className="flex items-center gap-2.5">
                         <div className="h-7 w-7 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] shrink-0">
                           <KeyRound className="h-3.5 w-3.5" />
@@ -254,18 +251,18 @@ export default function KeysVaultPage() {
                         <span className="text-sm font-semibold text-gray-800">{secret.key_name}</span>
                       </div>
                     </td>
-                    <td className="p-3">
+                    <td className={tbl.td}>
                       <span className="font-mono text-[11px] text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
                         {secret.aws_secret_name}
                       </span>
                     </td>
-                    <td className="p-3 text-xs font-medium text-gray-700">
+                    <td className={`${tbl.td} text-xs font-medium`}>
                       {secret.name || secret.full_name || "JTS Admin"}
                     </td>
-                    <td className="p-3 text-center text-xs text-gray-600">
+                    <td className={`${tbl.td} text-center text-xs text-gray-600`}>
                       {formatLocalDateTime(secret.created_at)}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className={`${tbl.td} text-right`}>
                       <button
                         onClick={() => handleDeleteVaultSecret(secret)}
                         className="p-1.5 text-gray-500 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition"
@@ -280,7 +277,7 @@ export default function KeysVaultPage() {
             </table>
           </div>
         )}
-      </div>
+      </Section>
     </div>
   );
 }

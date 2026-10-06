@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Building2, Loader2, MessagesSquare, ShieldCheck } from "lucide-react";
+import { Building2, ExternalLink, Loader2, MessagesSquare, ShieldCheck } from "lucide-react";
 import { SlackWorkspaceLink, fetchWorkspaceClients, setWorkspaceClient } from "@/lib/api";
 import { ChannelFolder } from "@/lib/types";
-import { Alert, LoadingState, inputClass } from "@/components/ui";
+import { Alert, Badge, LoadingState, Section, inputClass, tbl } from "@/components/ui";
 
 /** JTS Admin: which client does each connected Slack workspace belong to? */
 export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) {
@@ -43,17 +43,12 @@ export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) 
   }
 
   return (
-    <div className="pt-4 border-t border-gray-200 space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
-          <MessagesSquare className="h-4 w-4 text-[#088ADA]" /> Slack workspaces ({rows?.length ?? 0})
-        </h2>
-        <p className="text-xs text-gray-500 mt-0.5">
-          If a whole workspace belongs to one client, link it here. Personal chats with the bot, and any channel that isn&apos;t in another
-          client&apos;s folder, are then billed to and handled as that client. Leave a shared workspace unlinked.
-        </p>
-      </div>
-
+    <Section
+      icon={MessagesSquare}
+      title={`Slack workspaces (${rows?.length ?? 0})`}
+      description="If a whole workspace belongs to one client, link it here. Personal chats with the bot, and any channel that isn't in another client's folder, are then billed to and handled as that client. Leave a shared workspace unlinked."
+      bodyClassName="p-5 space-y-4"
+    >
       {feedback && (
         <Alert type={feedback.type} onClose={() => setFeedback(null)}>
           {feedback.message}
@@ -63,28 +58,28 @@ export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) 
       {rows === null ? (
         <LoadingState label="Loading Slack workspaces..." />
       ) : rows.length === 0 ? (
-        <p className="text-xs text-gray-600">No Slack workspaces are connected yet.</p>
+        <p className="text-sm text-gray-600">No Slack workspaces are connected yet.</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm bg-white">
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider">
+        <div className={tbl.wrap}>
+          <table className={tbl.table}>
+            <thead className={tbl.head}>
               <tr>
-                <th className="p-3 font-semibold">Slack workspace</th>
-                <th className="p-3 font-semibold">Workspace ID</th>
-                <th className="p-3 font-semibold text-center">Chats seen</th>
-                <th className="p-3 font-semibold">Belongs to client</th>
-                <th className="p-3 font-semibold">Delete key messages</th>
+                <th className={tbl.th}>Slack workspace</th>
+                <th className={tbl.th}>Workspace ID</th>
+                <th className={`${tbl.th} text-center`}>Chats seen</th>
+                <th className={tbl.th}>Belongs to client</th>
+                <th className={tbl.th}>Delete key messages</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
-              {rows.map((w, idx) => (
-                <tr key={w.team_id} className={idx % 2 === 0 ? "bg-white" : "bg-[#f7f7f7]"}>
-                  <td className="p-3 text-sm font-semibold text-gray-800">{w.team_name}</td>
-                  <td className="p-3">
+            <tbody>
+              {rows.map((w) => (
+                <tr key={w.team_id} className={tbl.row}>
+                  <td className={`${tbl.td} font-semibold text-gray-900`}>{w.team_name}</td>
+                  <td className={tbl.td}>
                     <span className="font-mono text-[11px] text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md">{w.team_id}</span>
                   </td>
-                  <td className="p-3 text-center text-xs text-gray-600">{Number(w.chat_count) || 0}</td>
-                  <td className="p-3">
+                  <td className={`${tbl.td} text-center tabular-nums`}>{Number(w.chat_count) || 0}</td>
+                  <td className={tbl.td}>
                     <div className="flex items-center gap-2 max-w-xs">
                       <Building2 className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                       <select
@@ -104,26 +99,24 @@ export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) 
                       {busyId === w.team_id && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
                     </div>
                   </td>
-                  <td className="p-3">
+                  <td className={tbl.td}>
                     {w.can_delete_messages ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                      <Badge tone="green">
                         <ShieldCheck className="h-3 w-3" /> On
-                      </span>
+                      </Badge>
                     ) : (
-                      <div className="space-y-1">
-                        <span className="inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-gray-100 text-gray-600 border-gray-200">Off</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge tone="gray">Off</Badge>
                         {deleteLink && (
-                          <div>
-                            <a
-                              href={deleteLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[11px] font-semibold text-[#088ADA] hover:underline"
-                              title="An admin or owner of this Slack workspace must open this link while signed in to it and click Allow"
-                            >
-                              Turn on (a workspace admin clicks this)
-                            </a>
-                          </div>
+                          <a
+                            href={deleteLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-[#088ADA] hover:underline"
+                            title="An admin or owner of this Slack workspace must open this link while signed in to it and click Allow"
+                          >
+                            Turn on <ExternalLink className="h-3 w-3" />
+                          </a>
                         )}
                       </div>
                     )}
@@ -134,6 +127,9 @@ export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) 
           </table>
         </div>
       )}
-    </div>
+      <p className="text-[11px] text-gray-500">
+        &ldquo;Turn on&rdquo; must be opened by an Owner or Admin of that Slack workspace, signed in to it. It lets the bot delete a message that contains a key.
+      </p>
+    </Section>
   );
 }

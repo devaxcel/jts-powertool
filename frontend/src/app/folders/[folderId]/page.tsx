@@ -24,6 +24,8 @@ import {
   CheckSquare,
   KeyRound,
   ShieldCheck,
+  Plug,
+  Globe2,
 } from "lucide-react";
 import {
   fetchFolder,
@@ -39,7 +41,7 @@ import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
 import { JiraConnectionCard } from "@/components/JiraConnectionCard";
 import { WebsitesCard } from "@/components/WebsitesCard";
-import { PageHeader, Alert, EmptyState, LoadingState, SectionTitle, ComingSoonBadge, btn } from "@/components/ui";
+import { PageHeader, Alert, Badge, EmptyState, LoadingState, Section, Tabs, ComingSoonBadge, btn, tbl } from "@/components/ui";
 
 interface ToolDefinition {
   id: string;
@@ -90,6 +92,7 @@ const AVAILABLE_TOOLS: ToolDefinition[] = [
 
 export default function FolderDetailPage() {
   const params = useParams();
+  const [tab, setTab] = useState<"channels" | "connections" | "websites">("channels");
   const folderId = params?.folderId as string;
 
   const [folder, setFolder] = useState<FolderDetails | null>(null);
@@ -354,36 +357,41 @@ export default function FolderDetailPage() {
         </Alert>
       )}
 
-      {/* Client's own Anthropic key vs. billed JTS key */}
-      {folderId && (
-        <ClientApiKeyCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: "channels" as const, label: "Channels", count: dedupedFolderChannels.length, icon: Hash },
+          { id: "connections" as const, label: "Keys & connections", icon: Plug },
+          { id: "websites" as const, label: "Websites", icon: Globe2 },
+        ]}
+      />
+
+      {tab === "connections" && folderId && (
+        <div className="space-y-5">
+          <ClientApiKeyCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+            <GithubConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
+            <JiraConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
+          </div>
+        </div>
       )}
 
-      {/* Client's own GitHub (GitHub App connection) */}
-      {folderId && (
-        <GithubConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
-      )}
-
-      {/* Client's own Jira (Atlassian connection) */}
-      {folderId && (
-        <JiraConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
-      )}
-
-      {/* Websites the assistant published for this client */}
-      {folderId && <WebsitesCard folderId={folderId} />}
+      {tab === "websites" && folderId && <WebsitesCard folderId={folderId} />}
 
       {/* Content Area */}
-      <div className="space-y-8 flex-1">
-        {loading ? (
+      <div className="space-y-6 flex-1">
+        {tab !== "channels" ? null : loading ? (
           <LoadingState label="Loading channels..." />
         ) : (
           <>
             {/* Section 1: Channels Added to this Folder */}
-            <div>
-              <SectionTitle
-                title={`Channels in this folder (${dedupedFolderChannels.length})`}
-                description="Open a channel to read its conversation with the bot."
-              />
+            <Section
+              icon={Hash}
+              title={`Channels in this folder (${dedupedFolderChannels.length})`}
+              description="Open a channel to read its conversation with the bot."
+              bodyClassName="p-5"
+            >
 
               {dedupedFolderChannels.length === 0 ? (
                 <EmptyState
@@ -396,22 +404,22 @@ export default function FolderDetailPage() {
                   }
                 />
               ) : (
-                <div className="rounded-xl border border-gray-200 shadow-sm relative z-30 overflow-visible">
-                  <table className="w-full text-left border-collapse overflow-visible">
-                    <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-10 shadow-sm border-b border-gray-300">
+                <div className="rounded-xl border border-gray-200 relative z-30 overflow-visible bg-white">
+                  <table className={`${tbl.table} overflow-visible`}>
+                    <thead className={`${tbl.head} rounded-t-xl`}>
                       <tr>
-                        <th className="p-3 font-semibold bg-[#088ADA] text-white">Channel or DM</th>
-                        <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Type</th>
-                        <th className="p-3 font-semibold text-right bg-[#088ADA] text-white">Actions</th>
+                        <th className={tbl.th}>Channel or DM</th>
+                        <th className={`${tbl.th} text-center`}>Type</th>
+                        <th className={`${tbl.th} text-right`}>Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {dedupedFolderChannels.map((channel, idx) => {
+                    <tbody>
+                      {dedupedFolderChannels.map((channel) => {
                         const isDm = isDmChannel(channel.channel_name, channel.channel_id);
                         const channelHref = `/folders/${folderId}/channels/${encodeURIComponent(channel.channel_id)}`;
                         return (
-                          <tr key={channel.channel_id} className={`transition hover:bg-gray-200 ${idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"} ${activeToolsDropdown === channel.channel_id ? "relative z-50" : ""}`}>
-                            <td className="p-3">
+                          <tr key={channel.channel_id} className={`${tbl.row} ${activeToolsDropdown === channel.channel_id ? "relative z-50" : ""}`}>
+                            <td className={tbl.td}>
                               <div className="flex items-center gap-2.5">
                                 <div className="h-7 w-7 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] shrink-0">
                                   {isDm ? <AtSign className="h-3.5 w-3.5" /> : <Hash className="h-3.5 w-3.5" />}
@@ -424,12 +432,11 @@ export default function FolderDetailPage() {
                                 </div>
                               </div>
                             </td>
-                            <td className="p-3 text-center">
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${isDm ? "bg-gray-100 text-[#088ADA]" : "bg-emerald-50 text-emerald-600 border border-emerald-200"}`}>
-                                {isDm ? "DM" : "Channel"}
-                              </span>
+                            <td className={`${tbl.td} text-center`}>
+                              <Badge tone={isDm ? "blue" : "green"}>{isDm ? "DM" : "Channel"}</Badge>
                             </td>
-                            <td className="p-3 text-right flex items-center justify-end gap-2">
+                            <td className={`${tbl.td} text-right`}>
+                              <div className="flex items-center justify-end gap-2">
                               {isMasterAdmin && (
                                 <div className="relative inline-block tools-dropdown-container">
                                   <button
@@ -528,6 +535,7 @@ export default function FolderDetailPage() {
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
                               )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -536,23 +544,16 @@ export default function FolderDetailPage() {
                   </table>
                 </div>
               )}
-            </div>
+            </Section>
 
             {/* Section 2: All Channels from Slack That Are NOT Part of Any Folder */}
             {isMasterAdmin && (
-              <div className="pt-6 border-t border-gray-200">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                  <div>
-                    <h2 className="text-sm font-semibold text-gray-800">
-                      Add a channel to this folder ({filteredUnassignedChannels.length} available)
-                    </h2>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Slack channels and DMs the bot is in that don&apos;t belong to any client yet.
-                    </p>
-                  </div>
-
-                  {/* Search & Sync toolbar */}
-                  <div className="flex items-center gap-2">
+              <Section
+                icon={Plus}
+                title={`Add a channel to this folder (${filteredUnassignedChannels.length} available)`}
+                description="Slack channels and DMs the bot is in that don't belong to any client yet."
+                actions={
+                  <>
                     <div className="relative">
                       <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400" />
                       <input
@@ -566,14 +567,16 @@ export default function FolderDetailPage() {
                     <button
                       onClick={handleSyncSlack}
                       disabled={syncing}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium border border-gray-200 transition shrink-0"
+                      className={btn.secondary}
                       title="Check Slack for channels the bot was recently added to"
                     >
                       <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin text-[#088ADA]" : ""}`} />
                       <span>Refresh list</span>
                     </button>
-                  </div>
-                </div>
+                  </>
+                }
+                bodyClassName="p-5"
+              >
 
                 {filteredUnassignedChannels.length === 0 ? (
                   <div className="p-6 rounded-2xl border border-gray-200 bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
@@ -593,30 +596,30 @@ export default function FolderDetailPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-[#088ADA] text-white text-xs uppercase tracking-wider sticky top-0 z-20 shadow-sm border-b border-gray-300">
+                  <div className={tbl.wrap}>
+                    <table className={tbl.table}>
+                      <thead className={tbl.head}>
                         <tr>
-                          <th className="p-3 font-semibold bg-[#088ADA] text-white">Workspace ID</th>
-                          <th className="p-3 font-semibold bg-[#088ADA] text-white">Slack workspace</th>
-                          <th className="p-3 font-semibold bg-[#088ADA] text-white">Channel or DM</th>
-                          <th className="p-3 font-semibold text-center bg-[#088ADA] text-white">Type</th>
-                          <th className="p-3 font-semibold text-right bg-[#088ADA] text-white">Actions</th>
+                          <th className={tbl.th}>Workspace ID</th>
+                          <th className={tbl.th}>Slack workspace</th>
+                          <th className={tbl.th}>Channel or DM</th>
+                          <th className={`${tbl.th} text-center`}>Type</th>
+                          <th className={`${tbl.th} text-right`}>Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200">
+                      <tbody>
                         {filteredUnassignedChannels.map((channel, idx) => {
                           const isDm = isDmChannel(channel.channel_name, channel.channel_id);
                           const isAssigning = assigningChannelId === channel.channel_id;
                           return (
-                            <tr key={`${channel.workspace_id || ''}-${channel.channel_id}-${idx}`} className={`transition hover:bg-gray-200 ${idx % 2 === 0 ? "bg-white" : "bg-[#ededed]"}`}>
-                              <td className="p-3 font-mono text-xs">
+                            <tr key={`${channel.workspace_id || ''}-${channel.channel_id}-${idx}`} className={tbl.row}>
+                              <td className={tbl.td}>
                                 <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-mono font-bold text-[10px] border border-blue-200">
                                   {channel.workspace_id || "T5ZMF56H5"}
                                 </span>
                               </td>
-                              <td className="p-3 text-xs font-bold text-gray-900">{channel.workspace_name || "Axcel World"}</td>
-                              <td className="p-3">
+                              <td className={`${tbl.td} font-semibold text-gray-900`}>{channel.workspace_name || "Axcel World"}</td>
+                              <td className={tbl.td}>
                                 <div className="flex items-center gap-2.5">
                                   <div className="h-7 w-7 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-[#088ADA] shrink-0">
                                     {isDm ? <AtSign className="h-3.5 w-3.5" /> : <Hash className="h-3.5 w-3.5" />}
@@ -627,12 +630,10 @@ export default function FolderDetailPage() {
                                   </div>
                                 </div>
                               </td>
-                              <td className="p-3 text-center">
-                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${isDm ? "bg-gray-100 text-[#088ADA]" : "bg-emerald-50 text-emerald-600 border border-emerald-200"}`}>
-                                  {isDm ? "DM" : "Channel"}
-                                </span>
+                              <td className={`${tbl.td} text-center`}>
+                                <Badge tone={isDm ? "blue" : "green"}>{isDm ? "DM" : "Channel"}</Badge>
                               </td>
-                              <td className="p-3 text-right">
+                              <td className={`${tbl.td} text-right`}>
                                 <button
                                   onClick={() => handleAddChannelToFolder(channel)}
                                   disabled={isAssigning}
@@ -649,7 +650,7 @@ export default function FolderDetailPage() {
                     </table>
                   </div>
                 )}
-              </div>
+              </Section>
             )}
           </>
         )}
