@@ -713,6 +713,35 @@ export async function resetUserMfa(userId: number): Promise<{ ok: boolean; messa
   return data;
 }
 
+export interface BudgetStatus {
+  budget: { folder_id: number; monthly_usd: number | null; monthly_tokens: number | null; thresholds: number[]; hard_stop: boolean; configured: boolean };
+  usage: { used_usd: number; used_tokens: number; replies: number; period_start: string; period_end: string; month: string };
+  percent: number | null;
+  level: "ok" | "warning" | "over" | null;
+  can_edit: boolean;
+}
+
+export async function fetchBudget(folderId: number | string): Promise<BudgetStatus> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/budget`, { headers: getAuthHeaders(), cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load the budget."));
+  return data;
+}
+
+export async function saveBudget(
+  folderId: number | string,
+  body: { monthly_usd: number | null; monthly_tokens: number | null; thresholds: number[]; hard_stop: boolean }
+): Promise<BudgetStatus> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/budget`, {
+    method: "PUT",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't save the budget."));
+  return data;
+}
+
 export async function fetchIpAllowlist(folderId: number | string): Promise<{ entries: string[]; your_ip: string }> {
   const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/ip-allowlist`, { headers: getAuthHeaders(), cache: "no-store" });
   const data = await res.json().catch(() => ({}));
@@ -987,6 +1016,40 @@ export async function markInvoicePaid(
 
 export async function voidInvoice(invoiceId: number, reason?: string): Promise<{ invoice: Invoice; message: string }> {
   return invoiceRequest(`/${invoiceId}/void`, { method: "POST", body: JSON.stringify({ reason }) }, "We couldn't void this invoice.");
+}
+
+export interface QuickBooksStatus {
+  configured: boolean;
+  environment: "sandbox" | "production";
+  redirect_uri: string;
+  connected: boolean;
+  status: string | null;
+  company_name: string | null;
+  connected_by: string | null;
+  connected_at: string | null;
+}
+
+async function qbRequest<T>(path: string, init: RequestInit, fallback: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers: getAuthHeaders({ "Content-Type": "application/json" }), cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, fallback));
+  return data as T;
+}
+
+export function fetchQuickBooksStatus(): Promise<QuickBooksStatus> {
+  return qbRequest("/api/quickbooks/status", {}, "We couldn't load the QuickBooks connection.");
+}
+
+export function startQuickBooksConnect(): Promise<{ url: string; expires_in_minutes: number }> {
+  return qbRequest("/api/quickbooks/start", { method: "POST" }, "We couldn't start the QuickBooks connection.");
+}
+
+export function disconnectQuickBooks(): Promise<{ ok: boolean; message: string }> {
+  return qbRequest("/api/quickbooks", { method: "DELETE" }, "We couldn't disconnect QuickBooks.");
+}
+
+export function sendInvoiceToQuickBooks(invoiceId: number): Promise<{ ok: boolean; message: string; qbo_invoice_id: string; link: string }> {
+  return qbRequest(`/api/invoices/${invoiceId}/quickbooks`, { method: "POST" }, "We couldn't send this invoice to QuickBooks.");
 }
 
 export async function clearBillingData(): Promise<{ status: string; message: string; deleted_count: number }> {

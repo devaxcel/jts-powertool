@@ -250,9 +250,16 @@ def _row_to_invoice(row: Dict[str, Any]) -> Dict[str, Any]:
     for k in ("period_start", "period_end", "due_date", "paid_at"):
         if isinstance(inv.get(k), date):
             inv[k] = inv[k].isoformat()
-    for k in ("created_at", "updated_at"):
+    for k in ("created_at", "updated_at", "qbo_synced_at"):
         if isinstance(inv.get(k), datetime):
             inv[k] = inv[k].isoformat()
+    if inv.get("qbo_invoice_id"):
+        try:
+            from app.services.quickbooks_service import app_link
+
+            inv["qbo_link"] = app_link(inv["qbo_invoice_id"])
+        except Exception:
+            pass
     due = row.get("due_date")
     inv["display_status"] = (
         "overdue" if inv.get("status") == "unpaid" and isinstance(due, date) and due < date.today() else inv.get("status")

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { FilePlus2, FileText, CheckCircle2, Ban, Printer, RefreshCw, Loader2, X } from "lucide-react";
+import { FilePlus2, FileText, CheckCircle2, Ban, Printer, RefreshCw, Loader2, X, Receipt, ExternalLink } from "lucide-react";
 import {
   fetchInvoices,
   fetchFolders,
@@ -11,6 +11,7 @@ import {
   createInvoice,
   markInvoicePaid,
   voidInvoice,
+  sendInvoiceToQuickBooks,
 } from "@/lib/api";
 import { ChannelFolder, Invoice, InvoicePreview } from "@/lib/types";
 import { DataTable } from "@/components/DataTable";
@@ -418,6 +419,21 @@ export function InvoicesPanel({ isMasterAdmin }: { isMasterAdmin: boolean }) {
     };
   }, [invoices]);
 
+  const [sendingId, setSendingId] = useState<number | null>(null);
+
+  async function sendToQuickBooks(i: Invoice) {
+    setSendingId(i.id);
+    try {
+      const res = await sendInvoiceToQuickBooks(i.id);
+      setFeedback({ type: "success", message: res.message });
+      await load();
+    } catch (e: any) {
+      setFeedback({ type: "error", message: e.message });
+    } finally {
+      setSendingId(null);
+    }
+  }
+
   async function confirmVoid() {
     if (!voiding) return;
     setBusy(true);
@@ -578,6 +594,19 @@ export function InvoicesPanel({ isMasterAdmin }: { isMasterAdmin: boolean }) {
                       <Printer className="h-3.5 w-3.5" />
                       View
                     </Link>
+                    {isMasterAdmin && i.status !== "void" && (
+                      i.qbo_invoice_id ? (
+                        <a href={i.qbo_link || "#"} target="_blank" rel="noopener noreferrer" className={btn.secondary} title="Open this invoice in QuickBooks">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          In QuickBooks
+                        </a>
+                      ) : (
+                        <button onClick={() => sendToQuickBooks(i)} disabled={sendingId === i.id} className={btn.secondary} title="Create this invoice in QuickBooks">
+                          {sendingId === i.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
+                          QuickBooks
+                        </button>
+                      )
+                    )}
                     {isMasterAdmin && i.status === "unpaid" && (
                       <>
                         <button onClick={() => setPaying(i)} className={btn.success}>

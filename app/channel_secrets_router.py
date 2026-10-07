@@ -419,6 +419,49 @@ def get_channels(request: Request):
     return {"channels": channels, "total": len(channels)}
 
 
+class BudgetRequest(BaseModel):
+    monthly_usd: Optional[float] = None
+    monthly_tokens: Optional[int] = None
+    thresholds: List[int] = Field(default_factory=lambda: [50, 80, 100])
+    hard_stop: bool = False
+
+
+@channel_secrets_router.get("/folders/{folder_id}/budget", summary="A client's monthly AI budget and how much is used")
+def get_budget_endpoint(folder_id: int, request: Request):
+    """JTS Admins see every client; a Client Admin sees their own. Team members don't see billing."""
+    ctx = get_user_context(request, ignore_simulation=True)
+    role = ctx.get("actual_role") or ctx.get("role")
+    can_edit = role in ("jts_admin", "admin")
+    if not can_edit:
+        _authorize_folder_key(request, folder_id, write=False)
+        if role != "client_admin":
+            raise HTTPException(status_code=403, detail="Only a Client Admin can see billing and budget.")
+    from app.services import budget_service
+
+    try:
+        return {**budget_service.status(folder_id, fresh=True), "can_edit": can_edit}
+    except Exception as e:
+        logger.error(f"[BUDGET] Could not load budget for client {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail="We couldn't load the budget. Please try again.")
+
+
+@channel_secrets_router.put("/folders/{folder_id}/budget", summary="Set a client's monthly AI budget (JTS Admin)")
+def set_budget_endpoint(folder_id: int, payload: BudgetRequest, request: Request):
+    admin = require_jts_admin(request)
+    from app.services import budget_service
+
+    try:
+        budget_service.set_budget(
+            folder_id, monthly_usd=payload.monthly_usd, monthly_tokens=payload.monthly_tokens,
+            thresholds=payload.thresholds, hard_stop=payload.hard_stop, by=admin if isinstance(admin, str) else "admin",
+        )
+    except budget_service.BudgetError as be:
+        raise HTTPException(status_code=400, detail=str(be))
+    except LookupError as le:
+        raise HTTPException(status_code=404, detail=str(le))
+    return {"message": "Saved.", **budget_service.status(folder_id, fresh=True), "can_edit": True}
+
+
 class IpAllowlistRequest(BaseModel):
     entries: List[str] = Field(default_factory=list)
 

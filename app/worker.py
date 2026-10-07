@@ -319,6 +319,32 @@ async def process_job(job: dict):
         mark_job_completed(job_id)
         return
 
+    # A client whose monthly AI budget is used up (and set to stop at the limit) is not answered until next month / a higher limit.
+    try:
+        from app.services import budget_service
+
+        budget_notice = await asyncio.to_thread(
+            budget_service.blocked_message, channel_id,
+            workspace_id=team_id, workspace_name=workspace_name, channel_name=channel_name,
+        ) if channel_id else None
+    except Exception as be:
+        budget_notice = None
+        logger.warning(f"[BUDGET] Budget check failed: {be}")
+    if budget_notice:
+        emit_telemetry(
+            action="BUDGET_BLOCKED", category="FILTER", level="WARN", thread_id=thread_ts, event_id=event_id, user_id=user_id,
+            message=f"Channel {channel_name} ({channel_id}): monthly budget reached; message not answered.",
+        )
+        try:
+            notice = {"channel": channel_id, "text": budget_notice}
+            if reply_in_thread and thread_ts and not thread_ts.startswith(("dm_", "channel_")):
+                notice["thread_ts"] = thread_ts
+            await _send_slack_post_message_with_fallback(token=token, payload=notice, team_id=team_id, channel_id=channel_id)
+        except Exception as ne:
+            logger.warning(f"[BUDGET] Could not post the budget notice: {ne}")
+        mark_job_completed(job_id)
+        return
+
     try:
         # 1. Clean prompt and resolve user identity
         cleaned_prompt = re.sub(r"<@[A-Z0-9]+>", "", raw_text).strip()
@@ -1067,6 +1093,27 @@ async def process_job(job: dict):
                 cost_usd=accumulated_usage.get("cost_usd", 0.0),
                 billable=is_billable,
             )
+
+        # 7b. Budget alerts: first time a threshold (50% / 80% / 100% ...) is crossed this month, tell people once
+        if is_billable and channel_id:
+            try:
+                from app.services import budget_service
+
+                alert = await asyncio.to_thread(
+                    budget_service.after_reply, channel_id,
+                    workspace_id=team_id, workspace_name=workspace_name, channel_name=channel_name,
+                )
+                if alert:
+                    alert_msg = {"channel": channel_id, "text": alert}
+                    if target_thread:
+                        alert_msg["thread_ts"] = target_thread
+                    await _send_slack_post_message_with_fallback(token=token, payload=alert_msg, team_id=team_id, channel_id=channel_id)
+                    emit_telemetry(
+                        action="BUDGET_ALERT", category="BILLING", level="WARN", thread_id=thread_id, event_id=message_id,
+                        user_id=user_id, channel_id=channel_id, channel_name=channel_name, message=alert,
+                    )
+            except Exception as ae:
+                logger.warning(f"[BUDGET] Alert step failed: {ae}")
 
         # 8. Mark Job Completed
         mark_job_completed(job_id)

@@ -16,9 +16,11 @@ import {
   CheckSquare,
   Wrench,
   Boxes,
+  Plug,
 } from "lucide-react";
 import { fetchGlobalSettings, updateGlobalSettings, resetGlobalSettings } from "@/lib/api";
 import { PageHeader, Alert, ComingSoonBadge, Tabs, btn } from "@/components/ui";
+import { QuickBooksCard } from "@/components/QuickBooksCard";
 import { formatLocalDateTime } from "@/lib/types";
 
 const DATE_FORMAT_OPTIONS = [
@@ -57,7 +59,7 @@ const POPULAR_TIMEZONES: TimezoneOption[] = [
 ];
 
 export default function GlobalSettingsPage() {
-  const [tab, setTab] = useState<"time" | "format" | "tools">("time");
+  const [tab, setTab] = useState<"time" | "format" | "tools" | "integrations">("time");
   const [selectedTimezone, setSelectedTimezone] = useState("UTC");
   const [dateFormat, setDateFormat] = useState("YYYY-MM-DD");
   const [timeFormat, setTimeFormat] = useState<"12h" | "24h">("12h");
@@ -402,6 +404,7 @@ export default function GlobalSettingsPage() {
             { id: "time" as const, label: "Time zone", icon: Globe },
             { id: "format" as const, label: "Format & alerts", icon: Sliders },
             { id: "tools" as const, label: "Tool permissions", icon: Wrench },
+            { id: "integrations" as const, label: "Integrations", icon: Plug },
           ]}
         />
 
@@ -792,7 +795,7 @@ export default function GlobalSettingsPage() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+        <div className={`flex items-center justify-between pt-4 border-t border-gray-200 ${tab === "integrations" ? "hidden" : ""}`}>
           <button
             type="button"
             onClick={handleResetDefaults}
@@ -813,6 +816,8 @@ export default function GlobalSettingsPage() {
           </button>
         </div>
       </form>
+
+      {tab === "integrations" && <QuickBooksCard />}
     </div>
   );
 }

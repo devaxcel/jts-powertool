@@ -146,3 +146,45 @@ If you did not request this invitation, you can safely ignore this email.
             "mode": "error",
             "error": f"Failed to send email: {str(e)}"
         }
+
+
+def send_simple_email(to_emails, subject: str, text: str) -> dict:
+    """Plain notification email to one or more people (budget alerts, ...). Mock mode (logged only) when SMTP isn't configured."""
+    recipients = [e.strip() for e in (to_emails or []) if e and e.strip()]
+    if not recipients:
+        return {"success": False, "error": "No recipients."}
+    smtp_host = get_secret("SMTP_HOST", os.getenv("SMTP_HOST", "smtp.gmail.com")).strip()
+    try:
+        smtp_port = int(get_secret("SMTP_PORT", os.getenv("SMTP_PORT", "587")).strip())
+    except ValueError:
+        smtp_port = 587
+    smtp_user = get_secret("SMTP_USER", os.getenv("SMTP_USER", "")).strip()
+    smtp_password = get_secret("SMTP_PASSWORD", os.getenv("SMTP_PASSWORD", "")).strip().replace(" ", "").replace('"', "").replace("'", "")
+    from_email = get_secret("SMTP_FROM_EMAIL", os.getenv("SMTP_FROM_EMAIL", smtp_user or "noreply@jts-powertool.com")).strip()
+    from_name = get_secret("SMTP_FROM_NAME", os.getenv("SMTP_FROM_NAME", "JTS Powertool")).strip()
+
+    if not smtp_user or not smtp_password:
+        logger.warning(f"[EMAIL_SERVICE] SMTP not set. Simulating email '{subject}' to {recipients}: {text}")
+        return {"success": True, "mode": "mock"}
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = formataddr((from_name, from_email))
+    msg["To"] = ", ".join(recipients)
+    msg.attach(MIMEText(text, "plain", "utf-8"))
+    try:
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=12)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=12)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+        server.login(smtp_user, smtp_password)
+        server.sendmail(from_email, recipients, msg.as_string())
+        server.quit()
+        logger.info(f"[EMAIL_SERVICE] Sent '{subject}' to {len(recipients)} recipient(s)")
+        return {"success": True, "mode": "live"}
+    except Exception as e:
+        logger.error(f"[EMAIL_SERVICE] Could not send '{subject}': {type(e).__name__}")
+        return {"success": False, "error": "Email could not be sent."}

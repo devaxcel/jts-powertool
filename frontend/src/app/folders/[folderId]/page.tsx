@@ -30,6 +30,7 @@ import {
   ArchiveRestore,
   SlidersHorizontal,
   Network,
+  Gauge,
 } from "lucide-react";
 import {
   fetchFolder,
@@ -49,6 +50,7 @@ import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
 import { JiraConnectionCard } from "@/components/JiraConnectionCard";
 import { WebsitesCard } from "@/components/WebsitesCard";
+import { BudgetCard } from "@/components/BudgetCard";
 import { PageHeader, Alert, Badge, ConfirmDialog, EmptyState, LoadingState, Section, Tabs, ComingSoonBadge, btn, tbl } from "@/components/ui";
 
 interface ToolDefinition {
@@ -100,7 +102,7 @@ const AVAILABLE_TOOLS: ToolDefinition[] = [
 
 export default function FolderDetailPage() {
   const params = useParams();
-  const [tab, setTab] = useState<"channels" | "connections" | "websites" | "security">("channels");
+  const [tab, setTab] = useState<"channels" | "connections" | "websites" | "budget" | "security">("channels");
   const folderId = params?.folderId as string;
 
   const [folder, setFolder] = useState<FolderDetails | null>(null);
@@ -463,6 +465,7 @@ export default function FolderDetailPage() {
           { id: "channels" as const, label: "Channels", count: activeChannels.length, icon: Hash },
           { id: "connections" as const, label: "Keys & connections", icon: Plug },
           { id: "websites" as const, label: "Websites", icon: Globe2 },
+          ...(isMasterAdmin || userRole === "client_admin" ? [{ id: "budget" as const, label: "Budget", icon: Gauge }] : []),
           ...(isMasterAdmin ? [{ id: "security" as const, label: "Security", icon: Network }] : []),
         ]}
       />
@@ -478,6 +481,8 @@ export default function FolderDetailPage() {
       )}
 
       {tab === "websites" && folderId && <WebsitesCard folderId={folderId} />}
+
+      {tab === "budget" && folderId && (isMasterAdmin || userRole === "client_admin") && <BudgetCard folderId={folderId} />}
 
       {tab === "security" && isMasterAdmin && (
         <Section

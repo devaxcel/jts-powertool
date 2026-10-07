@@ -590,6 +590,9 @@ export interface Invoice {
   paid_at?: string | null;
   payment_reference?: string | null;
   void_reason?: string | null;
+  qbo_invoice_id?: string | null;
+  qbo_link?: string | null;
+  qbo_synced_at?: string | null;
   created_by?: string | null;
   created_at?: string;
 }
