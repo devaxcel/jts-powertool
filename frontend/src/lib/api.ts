@@ -706,6 +706,17 @@ export async function fetchMfaStatus(): Promise<{ required: boolean; enabled: bo
   return data;
 }
 
+export async function changeUserAccess(userId: number, action: "revoke" | "disable" | "enable"): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/api/users/${userId}/access`, {
+    method: "POST",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ action }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't change that person's access."));
+  return data;
+}
+
 export async function resetUserMfa(userId: number): Promise<{ ok: boolean; message: string }> {
   const res = await fetch(`${API_BASE}/api/users/${userId}/mfa/reset`, { method: "POST", headers: getAuthHeaders() });
   const data = await res.json().catch(() => ({}));
@@ -1163,6 +1174,7 @@ export async function createDashboardUser(payload: {
   timezone?: string | null;
   client_folder_id?: number | null;
   organization_id?: number | null;
+  access_expires_on?: string | null;
 }): Promise<{ status: string; user_id: number; message: string; email_sent?: boolean }> {
   // Generate a temporary secure placeholder password so older/newer backend APIs never fail on empty password
   const placeholderPassword =
@@ -1279,6 +1291,7 @@ export async function updateDashboardUser(
     role: string;
     client_folder_id?: number | null;
     organization_id?: number | null;
+    access_expires_on?: string | null;
   }
 ): Promise<{ status: string; message: string }> {
   let res = await fetch(`${API_BASE}/api/users/${userId}`, {

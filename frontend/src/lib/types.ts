@@ -259,6 +259,9 @@ export interface DashboardUser {
   tool_permissions?: Record<string, boolean>;
   mfa_enabled?: boolean;
   mfa_required?: boolean;
+  disabled?: boolean;
+  access_expires_at?: string | null;
+  access_status?: "active" | "disabled" | "expired";
 }
 
 export interface VerifyTokenResponse {

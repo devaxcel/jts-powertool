@@ -126,6 +126,8 @@ def ensure_column(cur) -> None:
     if _column_ready:
         return
     cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS tool_permissions JSONB;")
+    cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS disabled BOOLEAN DEFAULT FALSE;")
+    cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS access_expires_at DATE;")
     _column_ready = True
 
 
@@ -139,7 +141,7 @@ def find_user_by_email(email: str) -> Optional[Dict[str, Any]]:
             ensure_column(cur)
             conn.commit()
             cur.execute(
-                "SELECT id, username, role, client_folder_id, tool_permissions FROM dashboard_users WHERE LOWER(TRIM(email)) = %s LIMIT 1;",
+                "SELECT id, username, role, client_folder_id, tool_permissions, disabled, access_expires_at FROM dashboard_users WHERE LOWER(TRIM(email)) = %s LIMIT 1;",
                 (email,),
             )
             row = cur.fetchone()
@@ -212,6 +214,12 @@ async def check_tool(tool_name: str, slack_user_id: str, channel_id: str, bot_to
             "I couldn't match your Slack account to a dashboard user, so I can only read, not make changes. Ask your JTS "
             "administrator to add you under Users with the same email you use in Slack."
         )
+
+    from app.services import access_control
+
+    ended = access_control.inactive_reason(user.get("disabled"), user.get("access_expires_at"))
+    if ended:
+        return False, access_control.reason_message(ended).replace("Please contact", "I can't do that for you. Please contact")
 
     role = user.get("role")
     if role in ("jts_admin", "admin"):

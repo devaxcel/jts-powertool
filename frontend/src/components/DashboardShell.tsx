@@ -28,6 +28,30 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const isSetPasswordPage = pathname === "/set-password";
   const isPublicPage = isLoginPage || isSetPasswordPage;
 
+  // If the server says this person's access ended (disabled, expired, removed, signed out), leave the dashboard at once
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const original = window.fetch;
+    window.fetch = async (...args) => {
+      const res = await original(...args);
+      if (res.status === 401) {
+        try {
+          const data = await res.clone().json();
+          if (typeof data?.code === "string" && data.code.startsWith("access_")) {
+            const message = data.detail || "Your access has ended.";
+            sessionStorage.clear();
+            sessionStorage.setItem("jts_access_message", message);
+            window.location.href = "/login";
+          }
+        } catch {}
+      }
+      return res;
+    };
+    return () => {
+      window.fetch = original;
+    };
+  }, []);
+
   // Auto-close mobile sidebar when navigating between pages
   useEffect(() => {
     setIsMobileOpen(false);

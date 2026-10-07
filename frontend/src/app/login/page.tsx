@@ -42,6 +42,16 @@ export default function LoginPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    try {
+      const why = sessionStorage.getItem("jts_access_message");
+      if (why) {
+        setError(why);
+        sessionStorage.removeItem("jts_access_message");
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
     if (!setupUri) return;
     QRCode.toDataURL(setupUri, { width: 192, margin: 1 })
       .then(setQrImage)

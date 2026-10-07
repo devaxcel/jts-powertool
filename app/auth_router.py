@@ -65,6 +65,7 @@ def create_session_token(
         "user": username,
         "role": role,
         "client_folder_id": client_folder_id,
+        "iat": round(time.time(), 3),
         "exp": int(time.time()) + SESSION_DURATION_SECONDS,
         "nonce": secrets.token_hex(8),
     }
@@ -94,6 +95,22 @@ def create_mfa_token(username: str, role: str, client_folder_id: Optional[int] =
 def verify_mfa_token(token: str) -> Optional[dict]:
     payload = _decode_token(token)
     return payload if payload and payload.get("purpose") == "mfa" else None
+
+
+def token_issued_at(payload: dict) -> float:
+    """When the token was made. Tokens from before this field existed are dated from their expiry."""
+    try:
+        return float(payload.get("iat") or (float(payload.get("exp", 0)) - SESSION_DURATION_SECONDS))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def session_access_problem(payload: dict) -> Optional[str]:
+    """Why this signed-in person must stop right now (removed / disabled / expired / revoked), or None."""
+    from app.services import access_control
+
+    master, _ = get_admin_credentials()
+    return access_control.session_problem(payload.get("user", ""), token_issued_at(payload), master_admin=master)
 
 
 def verify_session_token(token: str) -> Optional[dict]:
@@ -171,6 +188,7 @@ class CreateUserRequest(BaseModel):
     client_folder_id: Optional[int] = None
     organization_id: Optional[int] = None
     tool_permissions: Optional[Dict[str, StrictBool]] = Field(default=None, description="GitHub / Jira permission checkboxes")
+    access_expires_on: Optional[str] = Field(default=None, description="Last day of access (YYYY-MM-DD); empty = no end date")
 
 
 class UpdateUserRequest(BaseModel):
@@ -182,6 +200,7 @@ class UpdateUserRequest(BaseModel):
     client_folder_id: Optional[int] = None
     organization_id: Optional[int] = None
     tool_permissions: Optional[Dict[str, StrictBool]] = Field(default=None, description="GitHub / Jira permission checkboxes")
+    access_expires_on: Optional[str] = Field(default="__keep__", description="Last day of access (YYYY-MM-DD); empty clears it; omit to leave it as it is")
 
 
 class UpdateProfileRequest(BaseModel):
@@ -431,12 +450,18 @@ def _ensure_users_columns(conn_or_cur):
                 cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;")
                 cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS timezone VARCHAR(100) DEFAULT 'UTC';")
                 cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS tool_permissions JSONB;")
+                cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS disabled BOOLEAN DEFAULT FALSE;")
+                cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS access_expires_at DATE;")
+                cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS sessions_valid_after TIMESTAMP WITH TIME ZONE;")
             conn_or_cur.commit()
         else:
             conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS name VARCHAR(255);")
             conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;")
             conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS timezone VARCHAR(100) DEFAULT 'UTC';")
             conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS tool_permissions JSONB;")
+            conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS disabled BOOLEAN DEFAULT FALSE;")
+            conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS access_expires_at DATE;")
+            conn_or_cur.execute("ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS sessions_valid_after TIMESTAMP WITH TIME ZONE;")
     except Exception as e:
         logger.debug(f"[_ensure_users_columns] DDL note: {e}")
 
@@ -476,7 +501,8 @@ def get_user_from_db(username: str) -> Optional[dict]:
                 SELECT u.id, COALESCE(u.name, u.username) as name, u.username, u.email, u.password_hash, u.role, 
                        COALESCE(u.timezone, 'UTC') as timezone,
                        u.client_folder_id, f.name as client_folder_name,
-                       u.organization_id, o.name as organization_name
+                       u.organization_id, o.name as organization_name,
+                       u.disabled, u.access_expires_at
                 FROM dashboard_users u
                 LEFT JOIN channel_folders f ON u.client_folder_id = f.id
                 LEFT JOIN organizations o ON u.organization_id = o.id
@@ -539,11 +565,17 @@ def _issue_session(response: Response, username: str, message: Optional[str] = N
     return LoginResponse(status="success", message=msg, token=token, user=user, recovery_codes=recovery_codes)
 
 
-def _after_password(request: Request, response: Response, username: str, role: str, folder_id: Optional[int]):
+def _after_password(request: Request, response: Response, username: str, role: str, folder_id: Optional[int], db_row: Optional[dict] = None):
     """Steps after a correct password: the client's network rule, then two-step verification for admins."""
     from app.services import ip_allowlist, mfa_service as mfa
 
     ip_allowlist.enforce(request, role, folder_id)
+    if username != get_admin_credentials()[0]:
+        from app.services import access_control
+
+        blocked = access_control.inactive_reason(db_row.get("disabled") if db_row else None, db_row.get("access_expires_at") if db_row else None)
+        if blocked:
+            raise HTTPException(status_code=403, detail=access_control.reason_message(blocked))
     try:
         needs_mfa = mfa.required_for(role) or mfa.is_enabled(username)
     except Exception as e:  # never lock everyone out because of a database hiccup in the MFA table
@@ -576,7 +608,7 @@ def login(req: LoginRequest, request: Request, response: Response):
     if db_user:
         input_hash = hash_password(req.password.strip())
         if secrets.compare_digest(input_hash, db_user["password_hash"]):
-            return _after_password(request, response, db_user["username"], db_user["role"], db_user["client_folder_id"])
+            return _after_password(request, response, db_user["username"], db_user["role"], db_user["client_folder_id"], db_row=db_user)
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -892,7 +924,7 @@ def list_users(request: Request):
                            COALESCE(u.timezone, 'UTC') as timezone,
                            u.client_folder_id, f.name as client_folder_name,
                            u.organization_id, o.name as organization_name,
-                           u.created_at, u.tool_permissions
+                           u.created_at, u.tool_permissions, u.disabled, u.access_expires_at
                     FROM dashboard_users u
                     LEFT JOIN channel_folders f ON u.client_folder_id = f.id
                     LEFT JOIN organizations o ON u.organization_id = o.id
@@ -905,7 +937,7 @@ def list_users(request: Request):
                            COALESCE(u.timezone, 'UTC') as timezone,
                            u.client_folder_id, f.name as client_folder_name,
                            u.organization_id, o.name as organization_name,
-                           u.created_at, u.tool_permissions
+                           u.created_at, u.tool_permissions, u.disabled, u.access_expires_at
                     FROM dashboard_users u
                     LEFT JOIN channel_folders f ON u.client_folder_id = f.id
                     LEFT JOIN organizations o ON u.organization_id = o.id
@@ -920,6 +952,11 @@ def list_users(request: Request):
                 d = dict(r)
                 # The dashboard gets the permissions that are actually in force (role defaults + saved checkboxes).
                 d["tool_permissions"] = effective_permissions(d.get("tool_permissions"), d.get("role"))
+                from app.services import access_control
+
+                d["access_status"] = access_control.inactive_reason(d.get("disabled"), d.get("access_expires_at")) or "active"
+                d["disabled"] = bool(d.get("disabled"))
+                d["access_expires_at"] = d["access_expires_at"].isoformat() if d.get("access_expires_at") else None
                 d["mfa_enabled"] = (d.get("username") or "").strip().lower() in mfa_on
                 d["mfa_required"] = mfa_service.required_for(d.get("role"))
                 users.append(d)
@@ -1028,6 +1065,13 @@ def create_user(req: CreateUserRequest, request: Request):
                   json.dumps(perms) if perms is not None else None))
             row = cur.fetchone()
             new_id = row["id"] if isinstance(row, dict) else row[0]
+            if req.access_expires_on:
+                from app.services import access_control
+
+                try:
+                    access_control.set_expiry(cur, new_id, access_control.parse_expiry(req.access_expires_on))
+                except ValueError as ve:
+                    raise HTTPException(status_code=400, detail=str(ve))
             _link_folder_to_organization(cur, role, folder_id, org_id)
 
             email_sent = False
@@ -1279,6 +1323,9 @@ def set_password(req: SetPasswordRequest):
                 SET used_at = now()
                 WHERE id = %s;
             """, (t_id,))
+            from app.services import access_control
+
+            access_control.revoke_sessions(cur, user_id)
 
             conn.commit()
             logger.info(f"[AUTH] User '{username}' (#{user_id}) successfully set new password via token.")
@@ -1307,6 +1354,50 @@ ROLE_NAMES = {"jts_admin": "JTS Admin", "client_admin": "Client Admin", "client_
 class UpdatePermissionsRequest(BaseModel):
     # null = go back to the role's defaults; an object = exactly these checkboxes
     tool_permissions: Optional[Dict[str, StrictBool]] = None
+
+
+class AccessRequest(BaseModel):
+    action: str = Field(..., description="revoke | disable | enable")
+
+
+@users_router.post("/{user_id}/access", summary="Revoke, disable or re-enable a person's access (JTS Admin)")
+def change_user_access(user_id: int, req: AccessRequest, request: Request):
+    """'revoke' signs the person out everywhere (they can sign in again). 'disable' also blocks sign-in until re-enabled.
+    Both take effect on the person's very next click."""
+    ctx = require_jts_admin(request)
+    from app.services import access_control
+
+    if req.action not in ("revoke", "disable", "enable"):
+        raise HTTPException(status_code=400, detail="Unknown action.")
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            access_control.ensure_columns(cur)
+            cur.execute("SELECT username FROM dashboard_users WHERE id = %s;", (user_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found.")
+            username = row["username"] if isinstance(row, dict) else row[0]
+            if req.action in ("revoke", "disable") and username.strip().lower() == (ctx.get("username") or "").strip().lower():
+                raise HTTPException(status_code=400, detail="You can't end your own access from here.")
+            if req.action == "revoke":
+                access_control.revoke_sessions(cur, user_id)
+                msg = f"{username} was signed out everywhere. They can sign in again."
+            elif req.action == "disable":
+                access_control.set_disabled(cur, user_id, True)
+                msg = f"{username} is disabled and was signed out everywhere."
+            else:
+                access_control.set_disabled(cur, user_id, False)
+                msg = f"{username} can sign in again."
+        conn.commit()
+    except HTTPException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    access_control.invalidate()
+    logger.info(f"[ACCESS] '{ctx.get('username')}' did '{req.action}' on '{username}'")
+    return {"ok": True, "message": msg}
 
 
 @users_router.post("/{user_id}/mfa/reset", summary="Reset a person's two-step verification (JTS Admin)")
@@ -1435,10 +1526,11 @@ def update_user(user_id: int, req: UpdateUserRequest, request: Request):
             _ensure_users_columns(cur)
 
             # Check if user exists
-            cur.execute("SELECT id, username FROM dashboard_users WHERE id = %s;", (user_id,))
+            cur.execute("SELECT id, username, role, client_folder_id FROM dashboard_users WHERE id = %s;", (user_id,))
             user_row = cur.fetchone()
             if not user_row:
                 raise HTTPException(status_code=404, detail=f"User #{user_id} not found.")
+            prev_row = dict(user_row) if isinstance(user_row, dict) else None
 
             # Check if email is already taken by another user
             cur.execute("SELECT id FROM dashboard_users WHERE LOWER(TRIM(email)) = LOWER(%s) AND id != %s;", (clean_email, user_id))
@@ -1479,7 +1571,21 @@ def update_user(user_id: int, req: UpdateUserRequest, request: Request):
                 cur.execute("UPDATE dashboard_users SET tool_permissions = %s::jsonb WHERE id = %s;", (json.dumps(perms), user_id))
             _link_folder_to_organization(cur, role, folder_id, org_id)
 
+            from app.services import access_control
+
+            if req.access_expires_on != "__keep__":
+                try:
+                    access_control.set_expiry(cur, user_id, access_control.parse_expiry(req.access_expires_on))
+                except ValueError as ve:
+                    raise HTTPException(status_code=400, detail=str(ve))
+            # A new password, role or client ends the person's open sessions: they sign in again under the new rules.
+            if clean_password or (prev_row and (prev_row.get("role") != role or prev_row.get("client_folder_id") != folder_id)):
+                access_control.revoke_sessions(cur, user_id)
+
             conn.commit()
+            from app.services import access_control as _ac
+
+            _ac.invalidate()
             u_name = user_row.get("username") if isinstance(user_row, dict) else user_row[1]
             logger.info(f"[USERS] Updated user #{user_id} (@{u_name}) - name='{clean_name}', role={role}, folder={folder_id}, org={org_id}, tz={clean_tz}")
             return {"status": "success", "message": f"User '{clean_name}' (@{u_name}) updated successfully."}
@@ -1525,7 +1631,10 @@ def delete_user(user_id: int, request: Request):
         with conn.cursor() as cur:
             cur.execute("DELETE FROM dashboard_users WHERE id = %s;", (user_id,))
             conn.commit()
-            return {"status": "success", "message": f"User #{user_id} deleted."}
+            from app.services import access_control
+
+            access_control.invalidate()
+            return {"status": "success", "message": f"User #{user_id} deleted and signed out."}
     except Exception as e:
         if conn:
             conn.rollback()

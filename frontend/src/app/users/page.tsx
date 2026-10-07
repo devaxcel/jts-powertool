@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Users, UserPlus, Trash2, RefreshCw, Shield, ShieldOff, Building, Building2, X, Pencil, Mail } from "lucide-react";
+import { Users, UserPlus, Trash2, RefreshCw, Shield, ShieldOff, Building, Building2, X, Pencil, Mail, LogOut, UserX, UserCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   fetchUsers,
@@ -12,6 +12,7 @@ import {
   fetchOrganizations,
   sendUserSetupEmail,
   resetUserMfa,
+  changeUserAccess,
   extractErrorMessage,
 } from "@/lib/api";
 import { DataTable } from "@/components/DataTable";
@@ -54,6 +55,8 @@ export default function UsersPage() {
   const [editPassword, setEditPassword] = useState("");
   const [editRole, setEditRole] = useState<"jts_admin" | "client_admin" | "client_standard">("client_admin");
   const [editClientFolderId, setEditClientFolderId] = useState<string>("");
+  const [accessEnds, setAccessEnds] = useState<string>("");
+  const [editAccessEnds, setEditAccessEnds] = useState<string>("");
   const [editOrganizationId, setEditOrganizationId] = useState<string>("");
 
   const loadData = useCallback(async () => {
@@ -96,6 +99,7 @@ export default function UsersPage() {
     setRole("client_admin");
     setClientFolderId("");
     setOrganizationId("");
+    setAccessEnds("");
     setErrorMsg("");
   };
 
@@ -149,6 +153,7 @@ export default function UsersPage() {
         timezone: defaultTz,
         client_folder_id: clientFolderId ? parseInt(clientFolderId, 10) : null,
         organization_id: organizationId ? parseInt(organizationId, 10) : null,
+        access_expires_on: accessEnds || null,
       });
       setSuccessMsg(
         res.message ||
@@ -193,6 +198,7 @@ export default function UsersPage() {
     setEditRole(u.role === "jts_admin" || u.role === "client_standard" ? u.role : "client_admin");
     setEditClientFolderId(u.client_folder_id ? String(u.client_folder_id) : "");
     setEditOrganizationId(u.organization_id ? String(u.organization_id) : "");
+    setEditAccessEnds(u.access_expires_at ? u.access_expires_at.slice(0, 10) : "");
     setShowEditModal(true);
   };
 
@@ -235,6 +241,7 @@ export default function UsersPage() {
         role: editRole,
         client_folder_id: editClientFolderId ? parseInt(editClientFolderId, 10) : null,
         organization_id: editOrganizationId ? parseInt(editOrganizationId, 10) : null,
+        access_expires_on: editAccessEnds || null,
       });
       setSuccessMsg(`User '${cleanName}' updated successfully!`);
       setShowEditModal(false);
@@ -253,6 +260,28 @@ export default function UsersPage() {
       setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, mfa_enabled: false } : x)));
     } catch (err: any) {
       setErrorMsg(err.message || "We couldn't reset that.");
+    }
+  };
+
+  const handleAccess = async (u: DashboardUser, action: "revoke" | "disable" | "enable") => {
+    const who = u.name || u.username;
+    const ask =
+      action === "revoke"
+        ? `Sign ${who} out everywhere right now? They can sign in again.`
+        : action === "disable"
+        ? `Disable ${who}? They are signed out at once and can't sign in until you enable the account again.`
+        : "";
+    if (ask && !confirm(ask)) return;
+    try {
+      const res = await changeUserAccess(u.id, action);
+      setSuccessMsg(res.message);
+      if (action !== "revoke") {
+        setUsers((prev) =>
+          prev.map((x) => (x.id === u.id ? { ...x, disabled: action === "disable", access_status: action === "disable" ? "disabled" : "active" } : x))
+        );
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || "We couldn't change that person's access.");
     }
   };
 
@@ -366,6 +395,17 @@ export default function UsersPage() {
                     {u.name && <span className="text-[11px] text-gray-400 font-mono">@{u.username}</span>}
                   </div>
                   {u.email && <div className="text-[11px] text-gray-400">{u.email}</div>}
+                  {(u.access_status === "disabled" || u.access_status === "expired" || u.access_expires_at) && (
+                    <div className="mt-1">
+                      {u.access_status === "disabled" ? (
+                        <Badge tone="rose">Disabled</Badge>
+                      ) : u.access_status === "expired" ? (
+                        <Badge tone="rose">Access ended {u.access_expires_at}</Badge>
+                      ) : (
+                        <Badge tone="blue">Access ends {u.access_expires_at}</Badge>
+                      )}
+                    </div>
+                  )}
                   {u.mfa_required && (
                     <div className="mt-1">
                       {u.mfa_enabled ? (
@@ -451,6 +491,22 @@ export default function UsersPage() {
                       title="Reset two-step verification (lost phone)"
                     >
                       <ShieldOff className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleAccess(u, "revoke")}
+                    className="p-1.5 rounded text-gray-500 hover:bg-gray-100 transition"
+                    title="Sign out everywhere (they can sign in again)"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
+                  {u.disabled ? (
+                    <button onClick={() => handleAccess(u, "enable")} className="p-1.5 rounded text-emerald-600 hover:bg-emerald-50 transition" title="Enable this account again">
+                      <UserCheck className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <button onClick={() => handleAccess(u, "disable")} className="p-1.5 rounded text-amber-600 hover:bg-amber-50 transition" title="Disable this account and sign them out now">
+                      <UserX className="h-4 w-4" />
                     </button>
                   )}
                   <button
@@ -596,6 +652,19 @@ export default function UsersPage() {
                   <option value="client_standard">Team Member: sees their own requests only</option>
                   <option value="jts_admin">JTS Admin: full access to everything</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">Access ends on (optional)</label>
+                <input
+                  type="date"
+                  value={accessEnds}
+                  onChange={(e) => setAccessEnds(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  For contractors and temporary people: their access stops by itself after this day. Leave empty for no end date.
+                </p>
               </div>
 
 
@@ -762,6 +831,19 @@ export default function UsersPage() {
                   <option value="client_standard">Team Member: sees their own requests only</option>
                   <option value="jts_admin">JTS Admin: full access to everything</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-gray-600 font-semibold mb-1">Access ends on (optional)</label>
+                <input
+                  type="date"
+                  value={editAccessEnds}
+                  onChange={(e) => setEditAccessEnds(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg text-gray-800 bg-white focus:outline-none focus:border-[#088ADA]"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  For contractors and temporary people: their access stops by itself after this day. Leave empty for no end date.
+                </p>
               </div>
 
 
