@@ -1137,10 +1137,20 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks = Non
             )
             return JSONResponse(content={"status": "ignored_human_to_human_mention"})
 
-        # 4. Require explicit @mention in channels (in DMs @mention is not needed)
-        is_bot_mention = (event_type == "app_mention") or has_bot_in_mentions
+        # 4. Reply rule. Solo channels (1 human + bot) and DMs: answer everything. Group channels (2+ humans): only when tagged.
+        #    A JTS admin can force "always" / "tagged" per channel.
+        from app.services import channel_behavior as cb
 
-        if not is_dm and not is_bot_mention:
+        is_bot_mention = (event_type == "app_mention") or has_bot_in_mentions
+        behavior = cb.get_behavior(channel_id)
+        solo_channel = is_dm
+        if not is_dm and not is_bot_mention and behavior["response_mode"] == "auto":
+            solo_channel = await cb.is_solo_channel(token, event.get("channel") or channel_id, bot_ids_to_check)
+        answer_it = cb.should_answer(
+            response_mode=behavior["response_mode"], is_dm=is_dm, is_tagged=is_bot_mention, solo=solo_channel
+        )
+
+        if not answer_it:
             emit_telemetry(
                 action="MESSAGE_SAVED_TO_MEMORY",
                 category="SLACK",
@@ -1151,6 +1161,43 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks = Non
                 message=f"Stored message from {user_display} in local memory. Bot stayed silent (not @mentioned).",
             )
             return JSONResponse(content={"status": "stored_in_memory_no_bot_mention"})
+
+        # 4b. Batch mode: collect messages and answer them together when the person sends `go` (or attaches a file).
+        if behavior["batch_mode"] and (solo_channel or behavior["response_mode"] == "always") and not is_bot_mention:
+            if not (cb.is_batch_trigger(text) or files_data):
+                queued = cb.pending_batch(channel_id, thread_to_pass, user_id, exclude_message_ts=message_ts)
+                if not queued:
+                    ack_channel = event.get("channel") or channel_id
+                    ack_thread = actual_thread_ts if not is_dm else None
+
+                    async def _ack_batch():
+                        await skc.post_reply(
+                            token, ack_channel, ack_thread,
+                            ":inbox_tray: Batch mode is on: I'm collecting your messages. Send `go` when you want me to answer them all together.",
+                        )
+
+                    if background_tasks is not None:
+                        background_tasks.add_task(_ack_batch)
+                    else:
+                        _KEY_TASKS.add(task := asyncio.create_task(_ack_batch()))
+                        task.add_done_callback(_KEY_TASKS.discard)
+                emit_telemetry(
+                    action="BATCH_QUEUED", category="SLACK", level="INFO", thread_id=thread_to_pass, event_id=message_id,
+                    user_id=user_id, channel_id=channel_id, channel_name=channel_name,
+                    message=f"Batch mode: message from {user_display} queued ({len(queued) + 1} waiting). Bot stayed silent.",
+                )
+                return JSONResponse(content={"status": "batch_queued"})
+            combined = cb.pending_batch(channel_id, thread_to_pass, user_id, exclude_message_ts=message_ts)
+            own = "" if cb.is_batch_trigger(text) else text
+            if not combined and not own and not files_data:
+                return JSONResponse(content={"status": "batch_empty"})
+            if combined or own:
+                text = "\n\n".join([*combined, own] if own else combined)
+                emit_telemetry(
+                    action="BATCH_RELEASED", category="SLACK", level="INFO", thread_id=thread_to_pass, event_id=message_id,
+                    user_id=user_id, channel_id=channel_id, channel_name=channel_name,
+                    message=f"Batch mode: {len(combined) + (1 if own else 0)} message(s) from {user_display} sent to the assistant together.",
+                )
 
         emit_telemetry(
             action="EVENT_RECEIVED",

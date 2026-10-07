@@ -440,6 +440,38 @@ def archive_channel_endpoint(channel_id: str, payload: ArchiveChannelRequest, re
     return {"status": "success", "message": f"{res['channel_name']} {verb}.", **res}
 
 
+class ChannelBehaviorRequest(BaseModel):
+    response_mode: Optional[str] = None  # auto | always | tagged
+    batch_mode: Optional[bool] = None
+    observe_mode: Optional[bool] = None
+
+
+@channel_secrets_router.get("/{channel_id}/behavior", summary="How the assistant behaves in this channel")
+def get_channel_behavior_endpoint(channel_id: str, request: Request):
+    require_jts_admin(request)
+    from app.services.channel_behavior import get_behavior
+
+    return {"channel_id": channel_id, **get_behavior(channel_id)}
+
+
+@channel_secrets_router.patch("/{channel_id}/behavior", summary="Set reply rule, batch mode and observe mode for a channel")
+def set_channel_behavior_endpoint(channel_id: str, payload: ChannelBehaviorRequest, request: Request):
+    admin = require_jts_admin(request)
+    from app.services.channel_behavior import set_behavior
+
+    try:
+        res = set_behavior(
+            channel_id, response_mode=payload.response_mode, batch_mode=payload.batch_mode,
+            observe_mode=payload.observe_mode, actor=admin if isinstance(admin, str) else "admin",
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"[CHANNEL_SECRETS_ROUTER] Error saving behaviour for {channel_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not save these settings. Please try again.")
+    return {"status": "success", "message": "Saved. It applies to the next message.", **res}
+
+
 @channel_secrets_router.patch("/{channel_id}/name", summary="Rename or update friendly name for a channel")
 def update_channel_name_endpoint(
     channel_id: str,

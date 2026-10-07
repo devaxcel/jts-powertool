@@ -431,10 +431,13 @@ async def process_job(job: dict):
             )
 
         # 3. Retrieve thread context accumulatively (last 6 messages window)
+        from app.services.channel_behavior import OBSERVE_CONTEXT_MESSAGES, get_behavior
+
         history_messages, context_meta = get_thread_context_since_last_reply(
             channel_id=channel_id,
             thread_ts=thread_id,
             reply_in_thread=reply_in_thread,
+            max_context_limit=OBSERVE_CONTEXT_MESSAGES if get_behavior(channel_id).get("observe_mode") else None,
         )
 
         # 3b. Retrieve semantically relevant memories via local bge-small-en-v1.5 vector DB

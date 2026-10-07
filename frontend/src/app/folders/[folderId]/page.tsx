@@ -28,6 +28,7 @@ import {
   Globe2,
   Archive,
   ArchiveRestore,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   fetchFolder,
@@ -35,6 +36,7 @@ import {
   syncSlackChannels,
   assignChannelFolder,
   setChannelArchived,
+  setChannelBehavior,
   canonicalChannelId,
   getAuthoritativeWorkspace,
   AUTHORITATIVE_CHANNEL_NAMES,
@@ -44,7 +46,7 @@ import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
 import { JiraConnectionCard } from "@/components/JiraConnectionCard";
 import { WebsitesCard } from "@/components/WebsitesCard";
-import { PageHeader, Alert, Badge, EmptyState, LoadingState, Section, Tabs, ComingSoonBadge, btn, tbl } from "@/components/ui";
+import { PageHeader, Alert, Badge, ConfirmDialog, EmptyState, LoadingState, Section, Tabs, ComingSoonBadge, btn, tbl } from "@/components/ui";
 
 interface ToolDefinition {
   id: string;
@@ -251,6 +253,40 @@ export default function FolderDetailPage() {
       setFeedback({ type: "error", message: err?.message || "Failed to add channel to folder" });
     } finally {
       setAssigningChannelId(null);
+    }
+  }
+
+  // How the assistant behaves in a channel: reply rule, batch mode, observe mode
+  const [rulesFor, setRulesFor] = useState<ChannelProject | null>(null);
+  const [rulesDraft, setRulesDraft] = useState<{ response_mode: "auto" | "always" | "tagged"; batch_mode: boolean; observe_mode: boolean }>({
+    response_mode: "auto",
+    batch_mode: false,
+    observe_mode: false,
+  });
+  const [rulesBusy, setRulesBusy] = useState(false);
+
+  function openRules(channel: ChannelProject) {
+    setRulesDraft({
+      response_mode: channel.response_mode || "auto",
+      batch_mode: Boolean(channel.batch_mode),
+      observe_mode: Boolean(channel.observe_mode),
+    });
+    setRulesFor(channel);
+  }
+
+  async function saveRules() {
+    if (!rulesFor) return;
+    setRulesBusy(true);
+    try {
+      const res = await setChannelBehavior(rulesFor.channel_id, rulesDraft);
+      setFeedback({ type: "success", message: `${rulesFor.channel_name}: ${res.message}` });
+      setChannels((prev) => prev.map((c) => (c.channel_id === rulesFor.channel_id ? { ...c, ...rulesDraft } : c)));
+      setRulesFor(null);
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err?.message || "We couldn't save those settings." });
+      setRulesFor(null);
+    } finally {
+      setRulesBusy(false);
     }
   }
 
@@ -559,6 +595,15 @@ export default function FolderDetailPage() {
                               </Link>
                               {isMasterAdmin && (
                                 <button
+                                  onClick={() => openRules(channel)}
+                                  className="p-1.5 text-gray-500 hover:text-[#088ADA] hover:bg-sky-50 rounded-lg transition"
+                                  title="How the assistant behaves here (reply rule, batch mode, observe mode)"
+                                >
+                                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              {isMasterAdmin && (
+                                <button
                                   onClick={() => handleArchive(channel, true)}
                                   className="p-1.5 text-gray-500 hover:text-amber-700 hover:bg-amber-100 rounded-lg transition"
                                   title="Archive this channel (kept for the record, never deleted)"
@@ -765,6 +810,70 @@ export default function FolderDetailPage() {
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(rulesFor)}
+        busy={rulesBusy}
+        title={`Assistant behaviour in ${rulesFor?.channel_name ?? "this channel"}`}
+        confirmLabel="Save"
+        onCancel={() => setRulesFor(null)}
+        onConfirm={saveRules}
+      >
+        <div className="space-y-4 text-left">
+          <fieldset className="space-y-2">
+            <legend className="text-xs font-semibold text-gray-700 mb-1">When does the assistant reply?</legend>
+            {(
+              [
+                { id: "auto", label: "Automatic (recommended)", hint: "Only one person in the channel: it answers every message. Two or more people: only when tagged." },
+                { id: "always", label: "Always", hint: "Answers every message, even with several people." },
+                { id: "tagged", label: "Only when tagged", hint: "Answers only when someone tags it, even if you are the only person." },
+              ] as const
+            ).map((o) => (
+              <label key={o.id} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-gray-200 hover:border-[#088ADA]/50 cursor-pointer">
+                <input
+                  type="radio"
+                  name="response_mode"
+                  checked={rulesDraft.response_mode === o.id}
+                  onChange={() => setRulesDraft((d) => ({ ...d, response_mode: o.id }))}
+                  className="mt-0.5 text-[#088ADA]"
+                />
+                <span>
+                  <span className="block text-xs font-semibold text-gray-800">{o.label}</span>
+                  <span className="block text-[11px] text-gray-500">{o.hint}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-gray-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={rulesDraft.batch_mode}
+              onChange={(e) => setRulesDraft((d) => ({ ...d, batch_mode: e.target.checked }))}
+              className="mt-0.5 rounded text-[#088ADA]"
+            />
+            <span>
+              <span className="block text-xs font-semibold text-gray-800">Batch mode (one person)</span>
+              <span className="block text-[11px] text-gray-500">
+                The assistant collects several messages and answers them together as one input when the person sends <span className="font-mono">go</span> or attaches a file. Tagging it always answers straight away.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-gray-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={rulesDraft.observe_mode}
+              onChange={(e) => setRulesDraft((d) => ({ ...d, observe_mode: e.target.checked }))}
+              className="mt-0.5 rounded text-[#088ADA]"
+            />
+            <span>
+              <span className="block text-xs font-semibold text-gray-800">Observe mode (several people)</span>
+              <span className="block text-[11px] text-gray-500">
+                The assistant stays silent but reads along. When someone finally tags it, it remembers much more of the earlier conversation (about 40 messages instead of 6).
+              </span>
+            </span>
+          </label>
+        </div>
+      </ConfirmDialog>
 
       {/* Tool Keys & Configuration Modal */}
       {activeToolModal && (

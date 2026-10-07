@@ -121,6 +121,9 @@ export interface ChannelProject {
   folder_name?: string | null;
   archived_at?: string | null;
   archived_by?: string | null;
+  response_mode?: "auto" | "always" | "tagged";
+  batch_mode?: boolean;
+  observe_mode?: boolean;
 }
 
 export interface ChannelSecretMetadata {

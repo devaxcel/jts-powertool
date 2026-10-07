@@ -1122,6 +1122,9 @@ def get_channel_folder(folder_id: int) -> Optional[Dict[str, Any]]:
     try:
         with conn.cursor() as cur:
             _ensure_archive_columns(cur)
+            from app.services.channel_behavior import ensure_columns as _ensure_behavior_columns
+
+            _ensure_behavior_columns(cur)
             conn.commit()
             cur.execute("""
                 SELECT id, name, description, created_at, updated_at
@@ -1141,6 +1144,7 @@ def get_channel_folder(folder_id: int) -> Optional[Dict[str, Any]]:
             # Query channels assigned to this folder
             cur.execute("""
                 SELECT cm.channel_id, cm.channel_name, cm.channel_type, cm.folder_id, cm.archived_at, cm.archived_by,
+                       COALESCE(cm.response_mode, 'auto') AS response_mode, COALESCE(cm.batch_mode, FALSE) AS batch_mode, COALESCE(cm.observe_mode, FALSE) AS observe_mode,
                        COALESCE(sw.team_id, cm.workspace_id, 'T5ZMF56H5') as workspace_id,
                        COALESCE(sw.team_name, cm.workspace_name, 'Axcel World') as workspace_name,
                        COUNT(cs.id) as secret_count,
@@ -1150,7 +1154,7 @@ def get_channel_folder(folder_id: int) -> Optional[Dict[str, Any]]:
                 LEFT JOIN channel_secret_mappings cs ON cm.channel_id = cs.channel_id AND cs.status = 'active'
                 WHERE cm.folder_id = %s
                   AND cm.channel_id NOT IN ('C0BMV3EM9PY', 'C0BV6S5UJ0P', 'D0BSLP9LXUZ')
-                GROUP BY cm.channel_id, cm.channel_name, cm.channel_type, cm.folder_id, cm.archived_at, cm.archived_by, sw.team_id, cm.workspace_id, sw.team_name, cm.workspace_name
+                GROUP BY cm.channel_id, cm.channel_name, cm.channel_type, cm.folder_id, cm.archived_at, cm.archived_by, cm.response_mode, cm.batch_mode, cm.observe_mode, sw.team_id, cm.workspace_id, sw.team_name, cm.workspace_name
                 ORDER BY cm.channel_name ASC;
             """, (folder_id,))
             ch_rows = cur.fetchall()

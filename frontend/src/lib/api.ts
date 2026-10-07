@@ -579,6 +579,20 @@ export async function setChannelArchived(
   return data;
 }
 
+export async function setChannelBehavior(
+  channelId: string,
+  settings: { response_mode?: "auto" | "always" | "tagged"; batch_mode?: boolean; observe_mode?: boolean }
+): Promise<{ status: string; message: string; response_mode: "auto" | "always" | "tagged"; batch_mode: boolean; observe_mode: boolean }> {
+  const res = await fetch(`${API_BASE}/api/channels/${encodeURIComponent(channelId)}/behavior`, {
+    method: "PATCH",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(settings),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't save those settings."));
+  return data;
+}
+
 export async function fetchFolderApiKey(folderId: number | string): Promise<FolderApiKeyStatus> {
   const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/anthropic-key`, {
     headers: getAuthHeaders(),

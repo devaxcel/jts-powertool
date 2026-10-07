@@ -1005,9 +1005,10 @@ def get_thread_context_since_last_reply(
     channel_id: str,
     thread_ts: str,
     reply_in_thread: bool = True,
+    max_context_limit: Optional[int] = None,
 ) -> tuple[List[Dict[str, Any]], Dict]:
     """Conversation context for Claude, with any key values (also in older stored messages) hidden."""
-    messages, meta = _get_thread_context_raw(channel_id, thread_ts, reply_in_thread)
+    messages, meta = _get_thread_context_raw(channel_id, thread_ts, reply_in_thread, max_context_limit)
     for m in messages:
         if isinstance(m, dict) and isinstance(m.get("content"), str):
             m["content"] = redact_secrets(m["content"])
@@ -1018,6 +1019,7 @@ def _get_thread_context_raw(
     channel_id: str,
     thread_ts: str,
     reply_in_thread: bool = True,
+    max_context_limit: Optional[int] = None,
 ) -> tuple[List[Dict[str, Any]], Dict]:
     """
     Accumulative chronological context retrieval for Slack interactions:
@@ -1034,7 +1036,7 @@ def _get_thread_context_raw(
     conn = None
     formatted_messages: List[Dict[str, Any]] = []
     total_messages_retrieved = 0
-    max_context_limit = int(os.getenv("MAX_CONTEXT_MESSAGES", "6"))
+    max_context_limit = int(max_context_limit or os.getenv("MAX_CONTEXT_MESSAGES", "6"))
 
     clean_thread_ts = (thread_ts or "").strip()
     is_dm = clean_thread_ts.startswith("dm_")
