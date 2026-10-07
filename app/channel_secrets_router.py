@@ -192,6 +192,8 @@ def delete_folder_endpoint(
             "status": "success" if success else "not_found",
             "message": "Folder deleted successfully." if success else f"Folder {folder_id} not found.",
         }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         logger.error(f"[CHANNEL_SECRETS_ROUTER] Error deleting folder: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -415,6 +417,27 @@ def get_channels(request: Request):
         channels = [c for c in channels if c.get("folder_id") == target_id]
 
     return {"channels": channels, "total": len(channels)}
+
+
+class ArchiveChannelRequest(BaseModel):
+    archived: bool = True
+
+
+@channel_secrets_router.patch("/{channel_id}/archive", summary="Archive or restore a channel (never deleted)")
+def archive_channel_endpoint(channel_id: str, payload: ArchiveChannelRequest, request: Request):
+    """An archived channel keeps all its history, usage, approvals and keys; the assistant just stops answering in it."""
+    admin = require_jts_admin(request)
+    from app.services.channel_secrets_service import set_channel_archived
+
+    try:
+        res = set_channel_archived(channel_id, payload.archived, actor=admin if isinstance(admin, str) else "admin")
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"[CHANNEL_SECRETS_ROUTER] Error archiving channel {channel_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not change the channel. Please try again.")
+    verb = "archived. The assistant is paused there and everything is kept" if payload.archived else "restored. The assistant answers there again"
+    return {"status": "success", "message": f"{res['channel_name']} {verb}.", **res}
 
 
 @channel_secrets_router.patch("/{channel_id}/name", summary="Rename or update friendly name for a channel")

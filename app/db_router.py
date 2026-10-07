@@ -359,6 +359,8 @@ def _clear_table_records(conn, table_name: str):
 @db_router.post("/api/table/{table_name}/clear")
 async def clear_specific_table(table_name: str):
     """Permanently truncate or delete all rows of a specific table."""
+    if table_name == "channel_metadata":
+        raise HTTPException(status_code=400, detail="Channels are never deleted. Archive them from the client's page instead.")
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:

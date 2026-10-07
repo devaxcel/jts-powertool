@@ -119,6 +119,8 @@ export interface ChannelProject {
   providers: string[];
   folder_id?: number | null;
   folder_name?: string | null;
+  archived_at?: string | null;
+  archived_by?: string | null;
 }
 
 export interface ChannelSecretMetadata {

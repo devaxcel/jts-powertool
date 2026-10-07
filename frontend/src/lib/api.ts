@@ -565,6 +565,20 @@ export async function assignChannelFolder(
   return res.json();
 }
 
+export async function setChannelArchived(
+  channelId: string,
+  archived: boolean
+): Promise<{ status: string; message: string; channel_id: string; archived: boolean }> {
+  const res = await fetch(`${API_BASE}/api/channels/${encodeURIComponent(channelId)}/archive`, {
+    method: "PATCH",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ archived }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't change that channel."));
+  return data;
+}
+
 export async function fetchFolderApiKey(folderId: number | string): Promise<FolderApiKeyStatus> {
   const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/anthropic-key`, {
     headers: getAuthHeaders(),

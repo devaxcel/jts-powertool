@@ -26,17 +26,20 @@ import {
   ShieldCheck,
   Plug,
   Globe2,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 import {
   fetchFolder,
   fetchUnassignedChannels,
   syncSlackChannels,
   assignChannelFolder,
+  setChannelArchived,
   canonicalChannelId,
   getAuthoritativeWorkspace,
   AUTHORITATIVE_CHANNEL_NAMES,
 } from "@/lib/api";
-import { FolderDetails, ChannelProject } from "@/lib/types";
+import { FolderDetails, ChannelProject, formatLocalDateTime } from "@/lib/types";
 import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
 import { JiraConnectionCard } from "@/components/JiraConnectionCard";
@@ -251,6 +254,31 @@ export default function FolderDetailPage() {
     }
   }
 
+  // Archive or restore a channel: it is paused, never deleted
+  async function handleArchive(channel: ChannelProject, archived: boolean) {
+    if (
+      archived &&
+      !confirm(
+        `Archive '${channel.channel_name}'? The assistant stops answering there. Its messages, usage, approvals and keys are all kept, and you can restore it any time.`
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await setChannelArchived(channel.channel_id, archived);
+      setFeedback({ type: "success", message: res.message });
+      setChannels((prev) =>
+        prev.map((c) =>
+          c.channel_id === channel.channel_id
+            ? { ...c, archived_at: archived ? new Date().toISOString() : null, archived_by: archived ? "you" : null }
+            : c
+        )
+      );
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err?.message || "We couldn't change that channel." });
+    }
+  }
+
   // Remove channel from this folder
   async function handleRemoveChannelFromFolder(channel: ChannelProject) {
     if (!confirm(`Are you sure you want to remove '${channel.channel_name}' from this folder?`)) {
@@ -289,6 +317,9 @@ export default function FolderDetailPage() {
     }
     return result;
   }, [channels]);
+
+  const activeChannels = useMemo(() => dedupedFolderChannels.filter((c) => !c.archived_at), [dedupedFolderChannels]);
+  const archivedChannels = useMemo(() => dedupedFolderChannels.filter((c) => c.archived_at), [dedupedFolderChannels]);
 
   const filteredUnassignedChannels = useMemo(() => {
     const folderKeys = new Set(dedupedFolderChannels.map((c) => `${c.workspace_id || c.workspace_name || ''}::${c.channel_id.trim().toLowerCase()}`));
@@ -361,7 +392,7 @@ export default function FolderDetailPage() {
         value={tab}
         onChange={setTab}
         tabs={[
-          { id: "channels" as const, label: "Channels", count: dedupedFolderChannels.length, icon: Hash },
+          { id: "channels" as const, label: "Channels", count: activeChannels.length, icon: Hash },
           { id: "connections" as const, label: "Keys & connections", icon: Plug },
           { id: "websites" as const, label: "Websites", icon: Globe2 },
         ]}
@@ -388,12 +419,12 @@ export default function FolderDetailPage() {
             {/* Section 1: Channels Added to this Folder */}
             <Section
               icon={Hash}
-              title={`Channels in this folder (${dedupedFolderChannels.length})`}
+              title={`Channels in this folder (${activeChannels.length})`}
               description="Open a channel to read its conversation with the bot."
               bodyClassName="p-5"
             >
 
-              {dedupedFolderChannels.length === 0 ? (
+              {activeChannels.length === 0 ? (
                 <EmptyState
                   icon={Hash}
                   title="No channels in this folder yet"
@@ -414,7 +445,7 @@ export default function FolderDetailPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {dedupedFolderChannels.map((channel) => {
+                      {activeChannels.map((channel) => {
                         const isDm = isDmChannel(channel.channel_name, channel.channel_id);
                         const channelHref = `/folders/${folderId}/channels/${encodeURIComponent(channel.channel_id)}`;
                         return (
@@ -528,6 +559,15 @@ export default function FolderDetailPage() {
                               </Link>
                               {isMasterAdmin && (
                                 <button
+                                  onClick={() => handleArchive(channel, true)}
+                                  className="p-1.5 text-gray-500 hover:text-amber-700 hover:bg-amber-100 rounded-lg transition"
+                                  title="Archive this channel (kept for the record, never deleted)"
+                                >
+                                  <Archive className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              {isMasterAdmin && (
+                                <button
                                   onClick={() => handleRemoveChannelFromFolder(channel)}
                                   className="p-1.5 text-gray-500 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition"
                                   title="Remove from this folder"
@@ -545,6 +585,76 @@ export default function FolderDetailPage() {
                 </div>
               )}
             </Section>
+
+            {/* Archived channels: paused, never deleted */}
+            {archivedChannels.length > 0 && (
+              <Section
+                icon={Archive}
+                title={`Archived channels (${archivedChannels.length})`}
+                description="The assistant is paused in these channels. Their messages, usage, approvals and keys are kept for the record. Channels are never deleted."
+                bodyClassName="p-5"
+              >
+                <div className={tbl.wrap}>
+                  <table className={tbl.table}>
+                    <thead className={tbl.head}>
+                      <tr>
+                        <th className={tbl.th}>Channel or DM</th>
+                        <th className={tbl.th}>Archived</th>
+                        <th className={`${tbl.th} text-right`}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {archivedChannels.map((channel) => {
+                        const isDm = isDmChannel(channel.channel_name, channel.channel_id);
+                        const channelHref = `/folders/${folderId}/channels/${encodeURIComponent(channel.channel_id)}`;
+                        return (
+                          <tr key={channel.channel_id} className={tbl.row}>
+                            <td className={tbl.td}>
+                              <div className="flex items-center gap-2.5">
+                                <div className="h-7 w-7 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 shrink-0">
+                                  {isDm ? <AtSign className="h-3.5 w-3.5" /> : <Hash className="h-3.5 w-3.5" />}
+                                </div>
+                                <div>
+                                  <Link href={channelHref} className="text-sm font-semibold text-gray-600 hover:text-[#088ADA] hover:underline">
+                                    {channel.channel_name}
+                                  </Link>
+                                  <div className="font-mono text-[10px] text-gray-400">{channel.channel_id}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className={tbl.td}>
+                              <Badge tone="amber">Archived</Badge>
+                              <span className="ml-2 text-xs text-gray-500" suppressHydrationWarning>
+                                {channel.archived_at ? formatLocalDateTime(channel.archived_at) : ""}
+                                {channel.archived_by && channel.archived_by !== "you" ? ` · ${channel.archived_by}` : ""}
+                              </span>
+                            </td>
+                            <td className={`${tbl.td} text-right`}>
+                              <div className="flex items-center justify-end gap-2">
+                                <Link
+                                  href={channelHref}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#088ADA]/10 text-[#088ADA] hover:bg-[#088ADA] hover:text-white text-xs font-medium transition"
+                                  title="Read the saved conversation"
+                                >
+                                  <MessageSquare className="h-3.5 w-3.5" />
+                                  <span>View history</span>
+                                </Link>
+                                {isMasterAdmin && (
+                                  <button onClick={() => handleArchive(channel, false)} className={btn.secondary}>
+                                    <ArchiveRestore className="h-3.5 w-3.5" />
+                                    <span>Restore</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Section>
+            )}
 
             {/* Section 2: All Channels from Slack That Are NOT Part of Any Folder */}
             {isMasterAdmin && (

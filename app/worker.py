@@ -293,6 +293,32 @@ async def process_job(job: dict):
     thinking_ts = None
     token = get_slack_bot_token(team_id)
 
+    # Archived channels keep their history but the assistant is paused there.
+    from app.services.channel_secrets_service import is_channel_archived
+
+    if channel_id and is_channel_archived(channel_id):
+        emit_telemetry(
+            action="ARCHIVED_CHANNEL_IGNORED",
+            category="FILTER",
+            level="INFO",
+            thread_id=thread_ts,
+            event_id=event_id,
+            user_id=user_id,
+            message=f"Channel {channel_name} ({channel_id}) is archived; message not answered.",
+        )
+        try:
+            notice = {
+                "channel": channel_id,
+                "text": ":file_cabinet: This channel is archived in JTS PowerTool, so the assistant is paused here. A JTS admin can restore it on the client's page.",
+            }
+            if reply_in_thread and thread_ts and not thread_ts.startswith(("dm_", "channel_")):
+                notice["thread_ts"] = thread_ts
+            await _send_slack_post_message_with_fallback(token=token, payload=notice, team_id=team_id, channel_id=channel_id)
+        except Exception as ne:
+            logger.warning(f"[ARCHIVE] Could not post the archived-channel notice: {ne}")
+        mark_job_completed(job_id)
+        return
+
     try:
         # 1. Clean prompt and resolve user identity
         cleaned_prompt = re.sub(r"<@[A-Z0-9]+>", "", raw_text).strip()

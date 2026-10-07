@@ -257,7 +257,7 @@ export default function FoldersPage() {
   }
 
   async function handleDeleteFolder(folder: ChannelFolder) {
-    if (!confirm(`Are you sure you want to permanently delete folder '${folder.name}'?`)) {
+    if (!confirm(`Are you sure you want to delete the empty folder '${folder.name}'?`)) {
       return;
     }
     try {
@@ -435,7 +435,7 @@ export default function FoldersPage() {
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder); }}
                                   className="p-1.5 text-gray-500 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition"
-                                  title="Delete this folder (its channels are kept, just unassigned)"
+                                  title="Delete this folder (only possible when it has no channels; archive channels instead)"
                                   aria-label="Delete folder"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />

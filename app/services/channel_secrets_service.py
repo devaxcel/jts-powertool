@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import httpx
 from dotenv import load_dotenv
 
@@ -946,6 +946,95 @@ def update_channel_folder(folder_id: int, name: str, description: Optional[str] 
         conn.close()
 
 
+def _ensure_archive_columns(cur) -> None:
+    """channel_metadata.archived_at / archived_by: a channel is archived (paused, kept for the record), never deleted."""
+    cur.execute("ALTER TABLE channel_metadata ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE;")
+    cur.execute("ALTER TABLE channel_metadata ADD COLUMN IF NOT EXISTS archived_by VARCHAR(255);")
+
+
+_ARCHIVED_CACHE: Dict[str, Tuple[bool, float]] = {}
+_ARCHIVED_TTL = 20.0
+
+
+def is_channel_archived(channel_id: str) -> bool:
+    """True when a JTS Admin archived this channel. Cached briefly; never raises (fails open = not archived)."""
+    if not channel_id:
+        return False
+    key = str(channel_id).upper()
+    hit = _ARCHIVED_CACHE.get(key)
+    if hit and time.time() < hit[1]:
+        return hit[0]
+    result = False
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                _ensure_archive_columns(cur)
+                conn.commit()
+                cur.execute(
+                    "SELECT 1 FROM channel_metadata WHERE UPPER(channel_id) = ANY(%s) AND archived_at IS NOT NULL LIMIT 1;",
+                    (channel_id_variants(channel_id),),
+                )
+                result = cur.fetchone() is not None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug(f"[ARCHIVE] Could not check archive state for {channel_id}: {e}")
+    _ARCHIVED_CACHE[key] = (result, time.time() + _ARCHIVED_TTL)
+    return result
+
+
+def set_channel_archived(channel_id: str, archived: bool, actor: str = "admin") -> Dict[str, Any]:
+    """Archives or restores a channel. Nothing is deleted: messages, usage, approvals and keys stay as they were."""
+    if not channel_id or not channel_id.strip():
+        raise ValueError("channel_id is required")
+    channel_id = canonical_channel_id(channel_id.strip())
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            _ensure_archive_columns(cur)
+            cur.execute("SELECT channel_name FROM channel_metadata WHERE channel_id = %s;", (channel_id,))
+            row = cur.fetchone()
+            if not row:
+                name = resolve_slack_channel_name(channel_id)
+                ctype = "dm" if channel_id.startswith("D") else "channel"
+                cur.execute(
+                    "INSERT INTO channel_metadata (channel_id, channel_name, channel_type, updated_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP);",
+                    (channel_id, name, ctype),
+                )
+                channel_name = name
+            else:
+                channel_name = row["channel_name"]
+            if archived:
+                cur.execute(
+                    "UPDATE channel_metadata SET archived_at = CURRENT_TIMESTAMP, archived_by = %s, updated_at = CURRENT_TIMESTAMP WHERE channel_id = %s;",
+                    (actor, channel_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE channel_metadata SET archived_at = NULL, archived_by = NULL, updated_at = CURRENT_TIMESTAMP WHERE channel_id = %s;",
+                    (channel_id,),
+                )
+            conn.commit()
+    finally:
+        conn.close()
+    _ARCHIVED_CACHE.clear()
+    try:
+        from app.log_stream import emit_telemetry
+
+        emit_telemetry(
+            action="CHANNEL_ARCHIVED" if archived else "CHANNEL_RESTORED",
+            category="DATABASE",
+            level="INFO",
+            channel_id=channel_id,
+            channel_name=channel_name,
+            message=f"{actor} {'archived' if archived else 'restored'} channel {channel_name} ({channel_id}).",
+        )
+    except Exception:
+        pass
+    return {"channel_id": channel_id, "channel_name": channel_name, "archived": archived}
+
+
 def delete_channel_folder(folder_id: int) -> bool:
     """
     Deletes a folder from PostgreSQL.
@@ -957,10 +1046,13 @@ def delete_channel_folder(folder_id: int) -> bool:
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            try:
-                cur.execute("UPDATE channel_metadata SET folder_id = NULL WHERE folder_id = %s;", (folder_id,))
-            except Exception:
-                pass
+            cur.execute("SELECT COUNT(*) AS n FROM channel_metadata WHERE folder_id = %s;", (folder_id,))
+            held = cur.fetchone()
+            if held and int(held["n"] if isinstance(held, dict) else held[0]) > 0:
+                raise ValueError(
+                    "This client still has channels. Channels are never deleted: archive them instead "
+                    "(they stay linked for the record), or move them to another client first."
+                )
 
             cur.execute("DELETE FROM channel_folders WHERE id = %s RETURNING id;", (folder_id,))
             row = cur.fetchone()
@@ -1029,6 +1121,8 @@ def get_channel_folder(folder_id: int) -> Optional[Dict[str, Any]]:
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
+            _ensure_archive_columns(cur)
+            conn.commit()
             cur.execute("""
                 SELECT id, name, description, created_at, updated_at
                 FROM channel_folders
@@ -1046,7 +1140,7 @@ def get_channel_folder(folder_id: int) -> Optional[Dict[str, Any]]:
 
             # Query channels assigned to this folder
             cur.execute("""
-                SELECT cm.channel_id, cm.channel_name, cm.channel_type, cm.folder_id,
+                SELECT cm.channel_id, cm.channel_name, cm.channel_type, cm.folder_id, cm.archived_at, cm.archived_by,
                        COALESCE(sw.team_id, cm.workspace_id, 'T5ZMF56H5') as workspace_id,
                        COALESCE(sw.team_name, cm.workspace_name, 'Axcel World') as workspace_name,
                        COUNT(cs.id) as secret_count,
@@ -1056,7 +1150,7 @@ def get_channel_folder(folder_id: int) -> Optional[Dict[str, Any]]:
                 LEFT JOIN channel_secret_mappings cs ON cm.channel_id = cs.channel_id AND cs.status = 'active'
                 WHERE cm.folder_id = %s
                   AND cm.channel_id NOT IN ('C0BMV3EM9PY', 'C0BV6S5UJ0P', 'D0BSLP9LXUZ')
-                GROUP BY cm.channel_id, cm.channel_name, cm.channel_type, cm.folder_id, sw.team_id, cm.workspace_id, sw.team_name, cm.workspace_name
+                GROUP BY cm.channel_id, cm.channel_name, cm.channel_type, cm.folder_id, cm.archived_at, cm.archived_by, sw.team_id, cm.workspace_id, sw.team_name, cm.workspace_name
                 ORDER BY cm.channel_name ASC;
             """, (folder_id,))
             ch_rows = cur.fetchall()
@@ -1083,6 +1177,7 @@ def get_channel_folder(folder_id: int) -> Optional[Dict[str, Any]]:
                 ch["secret_count"] = int(ch.get("secret_count") or 0)
                 ch["providers"] = list(set(ch.get("providers") or []))
                 ch["folder_name"] = folder["name"]
+                ch["archived_at"] = ch["archived_at"].isoformat() if ch.get("archived_at") else None
                 channels.append(ch)
 
             folder["channels"] = channels
