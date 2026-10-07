@@ -35,6 +35,7 @@ from app.slack_router import (
     TENANT_ID,
 )
 from app.file_extractor import extract_file_content
+from app.services.transcription_service import is_audio_file, transcribe_audio
 from app.file_generator import (
     extract_file_generation_requests,
     strip_file_generation_blocks,
@@ -56,13 +57,14 @@ logger = logging.getLogger("jts_worker")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 
-async def process_slack_files(files: list, token: str) -> tuple[list[dict], list[str]]:
+async def process_slack_files(files: list, token: str, transcripts: Optional[list] = None) -> tuple[list[dict], list[str]]:
     """
     Downloads Slack files using the bot token and converts them into Anthropic content blocks:
     - PDF documents (Anthropic native document block)
     - Images: PNG, JPEG, GIF, WebP (Anthropic native image block)
     - Word documents (.docx, .doc), Spreadsheets (.xlsx, .xls, .csv), Presentations (.pptx, .ppt),
       Archives (.zip, .tar), Code, and Text files: parsed into text content blocks
+    - Voice messages / audio: transcribed to text (the transcripts are also appended to `transcripts` when given)
     - Any other file format: universal text extraction with fallback informative context
     """
     content_blocks = []
@@ -122,6 +124,20 @@ async def process_slack_files(files: list, token: str) -> tuple[list[dict], list
                         }
                     })
                     logger.info(f"Loaded image '{name}' ({len(content_bytes)} bytes) for Claude.")
+
+                # 2b. Voice message / audio: transcribe so it works like a typed message
+                elif is_audio_file(name, mimetype, filetype):
+                    text, err = await transcribe_audio(content_bytes, name)
+                    if text:
+                        if transcripts is not None:
+                            transcripts.append(text)
+                        content_blocks.append({
+                            "type": "text",
+                            "text": f"[Voice message transcript from the user (speech-to-text, may contain small errors)]:\n{text}",
+                        })
+                        logger.info(f"Transcribed voice message '{name}' ({len(content_bytes)} bytes, {len(text)} chars).")
+                    else:
+                        notices.append(f"[{err}]")
 
                 # 3. Universal Extractor for ALL other files:
                 # Word (.docx/.doc), Excel (.xlsx/.xls/.csv), PowerPoint (.pptx/.ppt),
@@ -288,7 +304,11 @@ async def process_job(job: dict):
             return
 
         if not cleaned_prompt and raw_files:
-            cleaned_prompt = "Please analyze the attached file(s)."
+            cleaned_prompt = (
+                "The user sent a voice message. Treat its transcript as their message and respond to it."
+                if all(is_audio_file(f.get("name", ""), f.get("mimetype", ""), f.get("filetype", "")) for f in raw_files)
+                else "Please analyze the attached file(s)."
+            )
 
         token = get_slack_bot_token(team_id)
         profile = await get_slack_user_profile(user_id, token)
@@ -299,7 +319,8 @@ async def process_job(job: dict):
             user_annotated_prompt = cleaned_prompt
 
         # Process any attached files
-        file_blocks, file_notices = await process_slack_files(raw_files, token)
+        voice_transcripts: list = []
+        file_blocks, file_notices = await process_slack_files(raw_files, token, voice_transcripts)
 
         prompt_str = user_annotated_prompt
         if file_notices:
@@ -341,6 +362,20 @@ async def process_job(job: dict):
                     logger.info(f"[DEBUG_WORKER] Posted thinking status message: ts='{thinking_ts}', channel='{channel_id}'")
             except Exception as te:
                 logger.warning(f"[DEBUG_WORKER] Failed to post thinking status message: {te}")
+
+        # 1c. Show what was heard, so people can see (and correct) the transcription
+        if voice_transcripts and channel_id:
+            try:
+                heard = "\n".join(f"> {t[:1500]}" for t in voice_transcripts)
+                heard_payload = {
+                    "channel": channel_id,
+                    "text": f":microphone: *I heard:*\n{heard}\n_If this is wrong, reply with the correction._",
+                }
+                if target_thread:
+                    heard_payload["thread_ts"] = target_thread
+                await _send_slack_post_message_with_fallback(token=token, payload=heard_payload, team_id=team_id, channel_id=channel_id)
+            except Exception as he:
+                logger.warning(f"[DEBUG_WORKER] Failed to post voice transcript: {he}")
 
         # 2. Lookup existing Claude session
         conv_id = f"slack-{channel_id}"
