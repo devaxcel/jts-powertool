@@ -689,6 +689,66 @@ async def process_job(job: dict):
             elif isinstance(message, str):
                 accumulated_text += message
 
+        # Safety net: the reply says a Jira change was sent for approval, but the tool was never called (no card exists).
+        try:
+            from app.services import jira_service as _jira
+
+            if (
+                _jira.automation_prompt(tool_adapter.jira_connection(), channel_id)
+                and not tool_adapter.approval_card_posted
+                and _jira.claims_approval(accumulated_text)
+            ):
+                emit_telemetry(
+                    action="JIRA_CLAIM_WITHOUT_TOOL", category="TOOL", level="WARN", thread_id=thread_id, event_id=message_id,
+                    user_id=user_id, channel_id=channel_id, channel_name=channel_name,
+                    message="Reply claimed a Jira approval without calling the tool; asking the assistant to call it now.",
+                )
+                retry_context = list(history_messages or []) + [
+                    {"role": "user", "content": cleaned_prompt, "user_name": user_display},
+                    {"role": "assistant", "content": accumulated_text, "user_name": "Bot"},
+                ]
+                retry_text = ""
+                async for rmsg in stream(
+                    user_message=_jira.RETRY_NOTE,
+                    system_prompt=active_system_prompt,
+                    session_id=None,
+                    model=active_model,
+                    context_messages=retry_context,
+                    tool_adapter=tool_adapter,
+                    tool_callback=on_tool_event,
+                    api_key=channel_anthropic_key,
+                    key_source=key_source,
+                    channel_id=channel_id,
+                    channel_name=channel_name,
+                    user_id=user_id,
+                    workspace_id=team_id,
+                    workspace_name=workspace_name,
+                    **stream_limits,
+                ):
+                    if hasattr(rmsg, "role"):
+                        if rmsg.role == "system" and isinstance(rmsg.content, dict):
+                            ru = rmsg.content.get("data", {}).get("usage")
+                            if isinstance(ru, dict):
+                                accumulated_usage["input_tokens"] += int(ru.get("input_tokens") or 0)
+                                accumulated_usage["output_tokens"] += int(ru.get("output_tokens") or 0)
+                                accumulated_usage["total_tokens"] += int(ru.get("total_tokens") or 0)
+                                accumulated_usage["cost_usd"] += float(ru.get("cost_usd") or 0.0)
+                        elif rmsg.role == "assistant" and isinstance(rmsg.content, str):
+                            retry_text += rmsg.content
+                    elif isinstance(rmsg, str):
+                        retry_text += rmsg
+                if tool_adapter.approval_card_posted:
+                    accumulated_text = retry_text.strip() or "I've sent that for approval."
+                elif retry_text.strip().upper().startswith("NOOP"):
+                    pass  # it was only talking about approvals, not proposing anything: leave the reply as it was
+                else:
+                    accumulated_text = (
+                        f"{accumulated_text}\n\n:warning: _I haven't actually sent anything to Jira for approval yet. "
+                        f"Reply \"create it\" and I'll submit it._"
+                    )
+        except Exception as ge:
+            logger.warning(f"[JIRA] Claim guard failed: {ge}")
+
         # Show the client on the dashboard whether their key is working
         if key_folder_id:
             set_folder_key_health(key_folder_id, client_key_fallback_reason)

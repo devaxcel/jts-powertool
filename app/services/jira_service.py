@@ -325,6 +325,28 @@ def recent_linked_issues(channel_id: str, limit: int = 8) -> List[Dict[str, Any]
         return []
 
 
+_CLAIMS_APPROVAL = re.compile(
+    r"(awaiting|pending|waiting\s+for)\s+(your\s+|human\s+)?approval"
+    r"|(sent|submitted|posted|asked|requested)\s+(it\s+|this\s+|that\s+)?(for|to)\s+(your\s+)?approval"
+    r"|(i\'?m|i\s+am|i\s+will|i\'?ll)\s+(now\s+)?(proposing|propose|creating|create)\s+(a\s+|the\s+)?(jira\s+)?(ticket|issue)"
+    r"|proposing\s+to\s+(create|update|add|move|comment)",
+    re.IGNORECASE,
+)
+
+
+def claims_approval(text: str) -> bool:
+    """True when a reply talks about sending something for approval (used to catch a claim made without calling the tool)."""
+    return bool(text and _CLAIMS_APPROVAL.search(text))
+
+
+RETRY_NOTE = (
+    "[SYSTEM NOTE] Your last reply described a Jira proposal, but you did NOT call the tool, so NO approval card was created and "
+    "nothing was sent. Call the matching jira_* tool now (jira_create_issue, jira_update_issue, jira_add_comment or "
+    "jira_transition_issue) with the details you described. Then reply with ONE short line. "
+    "If you did not actually intend to propose any Jira change, reply with exactly: NOOP"
+)
+
+
 AUTOMATION_RULES = (
     "\n\nJIRA AUTOMATION RULES (this client has them switched on). Jira is the system of record for tasks, decisions, goals and "
     "requirements. Use the `jira_*` tools on your own initiative, following these rules. Every change still goes to a person for "
@@ -339,6 +361,11 @@ AUTOMATION_RULES = (
     "'Blocker:' with what is blocking and who can unblock it). Only update a ticket you know the key of (see the list below, "
     "the conversation, or search for it).\n"
     "COMMENTS must capture context and the 'why' (what was decided, what changed, what is next), not just 'status updated'.\n"
+    "HOW TO PROPOSE: proposing means CALLING the tool (`jira_create_issue`, `jira_update_issue`, `jira_add_comment`, `jira_transition_issue`) "
+    "in this same reply. The approval card appears only because you called it. NEVER write that you are 'proposing', 'awaiting approval' "
+    "or 'asking for approval' unless you have just called the tool; do not describe the ticket and wait for the user to say 'ok'. "
+    "Call the tool first, then add the one-line note. If you are missing a detail, make a sensible choice (default project, type Task) "
+    "rather than asking.\n"
     "After proposing, say in ONE short line what you proposed (e.g. 'I've asked for approval to create a ticket: ...'). "
     "Mention ticket keys like KAN-12 whenever you refer to a ticket. If no project is set and none was named, ask for the project key once."
 )
