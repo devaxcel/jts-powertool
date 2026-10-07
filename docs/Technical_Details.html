@@ -49,9 +49,10 @@
   <div style="font-size:20pt;font-weight:600;">Technical Details</div>
   <div class="sub">Project flow, setup, connections, file structure and technology stack</div>
   <div class="meta">
-    Updated to the current production setup &middot; 5 October 2026<br>
-    Replaces the earlier version of this document (adds Keys &amp; Connections, GitHub App, Jira, website builder,<br>
-    Slack key capture, billing and invoices)
+    Updated to the current build &middot; 7 October 2026<br>
+    Replaces the 5 October version (adds voice messages, channel rules, archiving, Jira and GitHub rules,<br>
+    two-step verification, network limits, access end dates, login lockout, inactivity timeout,<br>
+    monthly budgets, QuickBooks, and a progress table against the Scope of Work)
   </div>
 </section>
 
@@ -69,7 +70,13 @@
     <tr><td><b>Website builder</b> <span class="tag new">NEW</span></td><td>The bot asks for the stack, builds a complete site as a draft, and after one approval creates the repository in the client's GitHub (and publishes it on GitHub Pages where possible). Later edits go through pull requests.</td></tr>
     <tr><td><b>Client API keys</b> <span class="tag new">NEW</span></td><td>Each client manages its own keys in <i>Keys &amp; Connections</i> or by posting <code>KEY_NAME = value</code> in Slack. The client's Anthropic key is used for its replies so JTS does not bill them.</td></tr>
     <tr><td><b>Approvals (human in the loop)</b></td><td>Every action that changes something outside the chat (GitHub, Jira, websites) posts an approval card. It is approved in Slack or on the dashboard.</td></tr>
-    <tr><td><b>Usage &amp; billing</b></td><td>Token use and USD cost are logged per message and channel. JTS can generate invoices per client and mark them paid.</td></tr>
+    <tr><td><b>Usage &amp; billing</b></td><td>Token use and USD cost are logged per message and channel. JTS can generate invoices per client, mark them paid, and send them to QuickBooks. <span class="tag new">NEW</span></td></tr>
+    <tr><td><b>Voice messages</b> <span class="tag new">NEW</span></td><td>A voice clip or audio file is turned into text (OpenAI Whisper, or Whisper on the server) and answered like a typed message. The bot posts "I heard: ..." so people can check it.</td></tr>
+    <tr><td><b>Channel rules</b> <span class="tag new">NEW</span></td><td>One person plus the bot (and every DM): the bot answers everything. Two or more people: only when tagged. Each channel can be forced either way, can collect messages and answer them together (batch mode), or can read along and remember more (observe mode).</td></tr>
+    <tr><td><b>Jira and GitHub rules</b> <span class="tag new">NEW</span></td><td>The bot proposes Jira tickets and updates on its own (always with approval) and never creates a duplicate. Commits and pull requests carry the Jira ticket number, bigger changes go through a pull request, and the bot can never force-push or merge.</td></tr>
+    <tr><td><b>Security</b> <span class="tag new">NEW</span></td><td>Two-step verification for admins, per-client network limits, access end dates, instant revocation, login lockout and a 15-minute inactivity timeout.</td></tr>
+    <tr><td><b>Budgets and guards</b> <span class="tag new">NEW</span></td><td>A monthly AI budget per client with alerts, an optional hard stop, a per-reply cost cap, and guards against loops that burn tokens.</td></tr>
+    <tr><td><b>Archive</b> <span class="tag new">NEW</span></td><td>Channels are archived (the bot pauses, everything is kept) and never deleted.</td></tr>
   </table>
 
   <h3>Who uses what</h3>
@@ -111,13 +118,29 @@
     <li>All other messages continue below.</li>
   </ul>
 
-  <div class="step"><div class="num">5</div><div><h3>Fast answer and queue hand-off</h3></div></div>
+  <div class="step"><div class="num">5</div><div><h3>Should the bot answer? (reply rule) <span class="tag new">NEW</span></h3></div></div>
+  <ul>
+    <li><b>Solo or group.</b> The bot asks Slack who is in the channel (cached 5 minutes). One person plus bots, and every direct message, is <i>solo</i>: the bot answers every message. Two or more people is a <i>group</i>: it answers only when tagged. If Slack can't be asked, the channel is treated as a group.</li>
+    <li><b>Per-channel override</b> (Clients &amp; Channels, sliders icon): <i>Automatic</i> (default), <i>Always</i>, or <i>Only when tagged</i>.</li>
+    <li><b>Batch mode</b> (solo channels): messages are collected silently and answered together as one input when the person sends <code>go</code> (or attaches a file). Tagging the bot answers at once.</li>
+    <li><b>Observe mode</b> (group channels): the bot stays silent, but when finally tagged it remembers about 40 earlier messages instead of 6.</li>
+    <li>Messages starting <code>//</code> or <code>(note)</code>, and messages that tag a colleague but not the bot, are saved to memory and never answered.</li>
+  </ul>
+
+  <div class="step"><div class="num">6</div><div><h3>Fast answer and queue hand-off</h3></div></div>
   <ul>
     <li>The backend returns <code>200 OK</code> within milliseconds and stores a job in the PostgreSQL <code>job_queue</code> table.</li>
     <li>The separate <code>jts-worker</code> service polls the queue (about once a second), claims a job and does the slow AI work. (The earlier version of this document mentioned Redis; the queue is now PostgreSQL.)</li>
   </ul>
 
-  <div class="step"><div class="num">6</div><div><h3>Context, history and memory</h3></div></div>
+  <div class="step"><div class="num">7</div><div><h3>Gates before the AI runs <span class="tag new">NEW</span></h3></div></div>
+  <ul>
+    <li><b>Archived channel:</b> the bot posts one short notice and stops. History, usage, approvals and keys are untouched.</li>
+    <li><b>Monthly budget (hard stop):</b> if the client's budget is used up and "stop at the limit" is on, the bot says so and stops. Clients on their own Anthropic key are never stopped (nothing of ours is being spent).</li>
+    <li><b>Voice and audio:</b> a voice clip or audio file is sent to speech-to-text; the transcript replaces the clip and is shown in the thread as "I heard: ...". Language is detected automatically.</li>
+  </ul>
+
+  <div class="step"><div class="num">8</div><div><h3>Context, history and memory</h3></div></div>
   <ul>
     <li>Recent conversation turns for the thread or channel (default rolling window of 6) come from PostgreSQL.</li>
     <li>Semantic memory uses local embeddings (<code>BAAI/bge-small-en-v1.5</code>, 384 dimensions) to bring back relevant past knowledge.</li>
@@ -125,7 +148,7 @@
     <li>Anything that looks like a key is replaced with <code>[hidden]</code> before it is saved and when old messages are loaded. <span class="tag new">NEW</span></li>
   </ul>
 
-  <div class="step"><div class="num">7</div><div><h3>Client and key selection <span class="tag new">NEW</span></h3></div></div>
+  <div class="step"><div class="num">9</div><div><h3>Client and key selection <span class="tag new">NEW</span></h3></div></div>
   <ul>
     <li>The channel is matched to its client folder (<code>channel_metadata</code>). Slack's real channel id and a stored legacy alias are treated as the same channel.</li>
     <li>Which Anthropic key answers: the channel's own key, then the client's key, then the JTS key. Only usage on the JTS key is billed to the client.</li>
@@ -134,7 +157,7 @@
 </section>
 
 <section class="page">
-  <div class="step"><div class="num">8</div><div><h3>Permission check and Claude's tools <span class="tag new">NEW</span></h3></div></div>
+  <div class="step"><div class="num">10</div><div><h3>Permission check and Claude's tools <span class="tag new">NEW</span></h3></div></div>
   <p>Claude decides which tool to use. The set of tools depends on what the client has connected:</p>
   <table>
     <tr><th style="width:27%">Tool group</th><th>Tools</th><th style="width:22%">Runs</th></tr>
@@ -148,20 +171,24 @@
   <ul>
     <li>Clear requests (for example "create a Jira task" or "list the keys") force a real tool call, so the bot never only promises to do something.</li>
     <li>The bot is told to prefer Jira tools for Jira project keys such as <code>KAN-12</code> and GitHub tools only for repositories.</li>
+    <li><b>Jira rules</b> <span class="tag new">NEW</span> (client switch on the Jira card, on by default): the bot proposes a ticket when a task is confirmed or a project starts, and proposes updates when work starts or finishes, a decision is made or something is blocked. Comments explain the why. Before any create, the code searches the project for a similar open ticket and refuses a duplicate (the bot can override only when the user clearly asks for a separate ticket). Tickets it raised are remembered per channel. If a reply says "sent for approval" without calling the tool, the system makes the bot try once more and otherwise says plainly that nothing was sent.</li>
+    <li><b>GitHub rules</b> <span class="tag new">NEW</span> (client switch on the GitHub card, on by default): commit messages and pull request titles must carry the Jira ticket number when the client uses Jira; a change bigger than a small single-file edit or a docs change cannot go straight to <code>main</code> (branch, then pull request; the very first commit of an empty repository is allowed); force-push is refused; the bot has no merge tool, so a person reviews and merges on GitHub. Pull requests get a footer saying so.</li>
+    <li><b>Loop guards</b> <span class="tag new">NEW</span>: the same tool call with identical inputs runs at most twice per reply, three failing steps in a row stop the reply, each reply has a cost cap (default $1.00; website builds $2.00) and a maximum number of steps (5; builds 40). When a guard stops a reply the person gets a plain explanation.</li>
   </ul>
 
-  <div class="step"><div class="num">9</div><div><h3>Human approval</h3></div></div>
+  <div class="step"><div class="num">11</div><div><h3>Human approval</h3></div></div>
   <ul>
     <li>Every change posts an approval card in the Slack conversation with <b>Approve &amp; Apply</b> and <b>Reject</b>. The same request appears on the dashboard <i>Approvals</i> page.</li>
     <li>A request is valid for 24 hours and can be claimed once, so two people cannot approve it twice.</li>
     <li>After approval the action runs with the <b>client's own</b> GitHub or Jira connection, never with a shared JTS credential (unless the JTS fallback for GitHub is still allowed).</li>
   </ul>
 
-  <div class="step"><div class="num">10</div><div><h3>Reply and cost logging</h3></div></div>
+  <div class="step"><div class="num">12</div><div><h3>Reply and cost logging</h3></div></div>
   <ul>
     <li>The final answer is posted to the Slack thread with <code>chat.postMessage</code>.</li>
     <li>Telemetry stores input and output tokens and the USD cost per message; this feeds <i>Usage &amp; Billing</i>. Replies made with a client's own Anthropic key are stored with zero billable cost.</li>
-    <li>Security-relevant actions (key saved or removed, connections changed) are written to the activity log. Key values are never logged.</li>
+    <li>Security-relevant actions (key saved or removed, connections changed, channel archived, settings changed) are written to the activity log. Key values are never logged.</li>
+    <li><b>Budget alerts</b> <span class="tag new">NEW</span>: after a billed reply, if usage has crossed a new level (50%, 80%, 100% by default) this month, an email goes to the JTS admins and the client's admins and a notice is posted in the channel, once per level per month.</li>
   </ul>
 
   <div class="note"><b>Who is asking is checked first.</b> Before a GitHub or Jira tool runs, the bot matches the person's Slack email to a dashboard user and checks the nine permission checkboxes on the Users page (section 5). A refused request stops there: no approval card is posted and the bot tells the person why. The approval card is the second safety layer for anything that changes data.</div>
@@ -171,7 +198,7 @@
 <section class="page">
   <h2>3. System Architecture Diagram</h2>
   <p class="lead">Request, queue, worker, approval and secret flow.</p>
-  <svg viewBox="0 0 900 640" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif" font-size="13">
+  <svg viewBox="0 0 940 720" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif" font-size="13">
     <defs>
       <marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#475569"/></marker>
       <style>
@@ -213,6 +240,10 @@
     <rect class="b" x="740" y="440" width="140" height="56"/><text class="t" x="810" y="464" text-anchor="middle" font-weight="600">Jira Cloud</text><text class="s" x="810" y="481" text-anchor="middle">client's own site</text>
     <rect class="b" x="740" y="510" width="140" height="56"/><text class="t" x="810" y="534" text-anchor="middle" font-weight="600">Web search / URLs</text><text class="s" x="810" y="551" text-anchor="middle">public pages only</text>
 
+    <rect class="b" x="740" y="580" width="140" height="56"/><text class="t" x="810" y="604" text-anchor="middle" font-weight="600">Speech-to-text</text><text class="s" x="810" y="621" text-anchor="middle">OpenAI Whisper / local</text>
+    <rect class="b" x="520" y="580" width="170" height="56"/><text class="t" x="605" y="604" text-anchor="middle" font-weight="600">QuickBooks Online</text><text class="s" x="605" y="621" text-anchor="middle">invoices sent by JTS Admin</text>
+    <path class="l" d="M690,262 L716,262 L716,232 L915,232 L915,608 L880,608"/>
+    <path class="d" d="M450,566 L520,606"/>
     <!-- Approvals + secrets -->
     <rect class="o" x="520" y="400" width="170" height="80"/><text class="t" x="605" y="428" text-anchor="middle" font-weight="600">Human approval</text><text class="s" x="605" y="446" text-anchor="middle">card in Slack and</text><text class="s" x="605" y="462" text-anchor="middle">dashboard Approvals page</text>
     <rect class="g" x="20" y="300" width="190" height="76"/><text class="t" x="115" y="326" text-anchor="middle" font-weight="600">AWS Secrets Manager</text><text class="s" x="115" y="345" text-anchor="middle">keys &amp; tokens (encrypted)</text><text class="s" x="115" y="361" text-anchor="middle">read when needed</text>
@@ -258,7 +289,7 @@
     <tr><td>Event Subscriptions URL</td><td><code>https://journeys.pe/api/slack/events</code></td></tr>
     <tr><td>Interactivity URL</td><td><code>https://journeys.pe/api/slack/interactive</code></td></tr>
     <tr><td>OAuth redirect URL</td><td><code>https://journeys.pe/api/slack/oauth/callback</code></td></tr>
-    <tr><td>Bot token scopes</td><td><code>app_mentions:read, channels:history, channels:read, chat:write, files:read, files:write, groups:history, groups:read, im:history, im:read, mpim:history, mpim:read, users:read</code> (the app also has <code>users:read.email</code>)</td></tr>
+    <tr><td>Bot token scopes</td><td><code>app_mentions:read, channels:history, channels:read, chat:write, files:read, files:write, groups:history, groups:read, im:history, im:read, mpim:history, mpim:read, users:read, users:read.email</code>. <b>users:read.email</b> <span class="tag new">NEW</span> is required: without it Slack hides people's emails and nobody can be matched to a dashboard user (the permission checks then refuse changes). A workspace installed before this must be allowed again through <code>/api/slack/install</code>.</td></tr>
     <tr><td>User token scope <span class="tag new">NEW</span></td><td><code>chat:write</code> under <b>User Token Scopes</b>, used only so the bot can delete a message that contains a key</td></tr>
   </table>
 
@@ -322,6 +353,35 @@
     <li>These boxes decide who may <i>ask</i>. They do not change who may <i>approve</i>; approving is still done by an approver in Slack or on the dashboard.</li>
   </ul>
 
+  <h3>Channel behaviour: reply rule, batch and observe <span class="tag new">NEW</span></h3>
+  <p>On a client's page, <b>Channels</b> tab, the sliders icon on a channel opens the settings (JTS Admin):</p>
+  <table>
+    <tr><th style="width:26%">Setting</th><th>Effect</th></tr>
+    <tr><td>Automatic (default)</td><td>One person in the channel: answer everything. Two or more: only when tagged.</td></tr>
+    <tr><td>Always / Only when tagged</td><td>Forces the rule whatever the number of people.</td></tr>
+    <tr><td>Batch mode</td><td>Collect messages; answer them together after <code>go</code> or an attached file. The first collected message gets one short notice.</td></tr>
+    <tr><td>Observe mode</td><td>Read along silently; when tagged, remember about 40 messages instead of 6.</td></tr>
+  </table>
+  <p class="small">The member count is remembered for 5 minutes and settings for about 20 seconds, so a change can take that long to show.</p>
+
+  <h3>Archiving channels <span class="tag new">NEW</span></h3>
+  <ul>
+    <li>The archive icon on a channel row pauses the assistant there. Messages, usage, approvals, keys and the link to the client are all kept, so invoices still work. The channel moves to an <b>Archived channels</b> list with <b>View history</b> and <b>Restore</b>.</li>
+    <li>Channels are never deleted. A client with channels cannot be deleted, and the Database page refuses to clear the channels table. Archive and restore are written to the activity log with the admin's name. Archiving does not touch the channel in Slack.</li>
+  </ul>
+
+  <h3>Monthly AI budget <span class="tag new">NEW</span></h3>
+  <ul>
+    <li>Client page, <b>Budget</b> tab. A JTS Admin sets a monthly limit in dollars and/or tokens, the alert levels (default 50, 80, 100) and an optional <b>stop answering at the limit</b>. A Client Admin sees the same page read-only.</li>
+    <li>Only usage billed on the JTS key counts, for the calendar month (UTC). Alerts go out once per level per month (email to JTS admins and the client's admins, plus a notice in the channel). Extra recipients: <code>BUDGET_ALERT_EMAILS</code>. Email uses the SMTP settings; without SMTP the alert is only logged.</li>
+  </ul>
+
+  <h3>Network limit per client <span class="tag new">NEW</span></h3>
+  <ul>
+    <li>Client page, <b>Security</b> tab (JTS Admin): a list of allowed IP addresses or ranges (for example <code>203.0.113.7</code> or <code>198.51.100.0/24</code>). When the list has entries, that client's people can sign in and use the dashboard only from those addresses, including people already signed in. JTS Admins are never limited. Slack is not affected (messages come from Slack's servers).</li>
+    <li>The page shows <b>Your address right now</b>. Check it before saving: if it shows the server's own address instead of yours, the proxy is not passing the real address and a list would lock the client out.</li>
+  </ul>
+
   <h3>Approvals visible to a Client Admin</h3>
   <p>A client user sees only approvals from the channels of their own client. If the Approvals page is empty for a client admin, check in <b>Users</b> that the user's client is the one that owns the channel. The server log line <code>[APPROVALS_SCOPE]</code> explains exactly what was hidden and why.</p>
 </section>
@@ -374,6 +434,21 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
     <li>Each is stored in AWS Secrets Manager as <code>jts-powertool/vault/&lt;name&gt;</code>; the database keeps only the name and who added it.</li>
     <li>Lookup order when the code needs a secret: the shared bundle (<code>AWS_SECRET_NAME</code>), then the individual vault secret, then an environment variable.</li>
   </ul>
+
+  <h3>F. Voice messages (speech-to-text) <span class="tag new">NEW</span></h3>
+  <ul>
+    <li>Default provider is OpenAI Whisper: save <code>OPENAI_API_KEY</code>. The key is looked up in this order: the channel's own key, the client's key (so a client can pay for its own voice use), then the global key. Cost is about $0.006 per minute of audio and is <b>not yet included in client billing</b>.</li>
+    <li>Option: <code>TRANSCRIPTION_PROVIDER=local</code> runs Whisper on the server (needs <code>pip install faster-whisper</code> and memory; size set by <code>TRANSCRIPTION_LOCAL_MODEL</code>). Nothing leaves the server in that mode.</li>
+    <li>Limits: 25 MB per file. Errors are explained to the person (no key, no credit left, rate limit, rejected key, no speech heard). The OpenAI account needs billing credit; a 429 "no credit" is the usual first-time problem.</li>
+  </ul>
+
+  <h3>G. QuickBooks Online <span class="tag new">NEW</span></h3>
+  <ul>
+    <li><b>One-time setup (JTS Admin):</b> create an app at developer.intuit.com (Accounting scope), add the redirect link <code>https://journeys.pe/api/quickbooks/callback</code>, and save <code>QUICKBOOKS_CLIENT_ID</code> and <code>QUICKBOOKS_CLIENT_SECRET</code>. It starts in the Intuit <b>sandbox</b>; add <code>QUICKBOOKS_ENVIRONMENT = production</code> to use the real company. Then <b>System Settings &rarr; Integrations &rarr; Connect QuickBooks</b>.</li>
+    <li>One QuickBooks company is connected for the whole platform. The rotating refresh token is stored encrypted in the database (<code>quickbooks_connection</code>).</li>
+    <li><b>Sending an invoice:</b> on <b>Usage &amp; Billing &rarr; Invoices</b>, the <b>QuickBooks</b> button creates the customer (found by name, created if missing), a service item "JTS PowerTool AI usage", and the invoice (number, dates, one line per channel with the markup included and exact totals). The button then becomes <b>In QuickBooks</b>. An invoice can be sent once; a voided one cannot.</li>
+    <li><b>One-way:</b> marking an invoice paid in PowerTool does not change QuickBooks, and payments in QuickBooks do not come back. USD is assumed.</li>
+  </ul>
 </section>
 
 <!-- ============================== 7. WEBSITE BUILDER ============================== -->
@@ -404,6 +479,7 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
     <li>An invoice covers the billable (JTS key) usage of the channels in the client's folder, plus the chats of any Slack workspace linked to that client that are not in another client's folder.</li>
     <li><b>Usage &amp; Billing</b> shows usage per client and channel for a chosen period (week, month or custom range), with CSV export.</li>
     <li>Invoices are generated per client and period (<code>client_invoices</code>); a JTS Admin marks an invoice paid manually.</li>
+    <li><b>Budgets</b> <span class="tag new">NEW</span>: each client can have a monthly limit and alerts (section 5). <b>Send to QuickBooks</b> <span class="tag new">NEW</span>: see section 6G.</li>
     <li>When an invoice is made, <b>Bill to (organization)</b> is filled in from the client automatically: first the organization linked to the client (Clients &amp; Channels, edit the client, <i>Billed as</i>), otherwise the organization of a Client Admin assigned to the client. Linking a Client Admin to an organization also links their client if it had none. It can still be changed by hand, and switching client picks up the new client's organization.</li>
   </ul>
 </section>
@@ -426,6 +502,7 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
 |   |-- site_router.py                # Website drafts, previews, client websites
 |   |-- usage_router.py, invoice_router.py   # Usage, billing, invoices
 |   |-- channel_secrets_router.py     # Clients & channels, vault (API Keys) endpoints
+|   |-- quickbooks_router.py          # QuickBooks connect/callback, status, send invoice (NEW)
 |   |-- global_settings_router.py, organizations_router.py, logs_router.py, db_router.py, context_router.py
 |   |-- memory_manager.py, vector_memory.py  # Chat history, semantic memory, key hiding
 |   |-- teams/                        # Microsoft Teams webhook
@@ -438,6 +515,16 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
 |   |   |-- secret_redaction.py            # Hides key values in text
 |   |   |-- tool_permissions.py            # GitHub / Jira permission checkboxes and the bot's check
 |   |   |-- usage_service.py, invoice_service.py, email_service.py
+|   |   |-- transcription_service.py       # Voice messages: Whisper (OpenAI or local)          (NEW)
+|   |   |-- channel_behavior.py            # Solo/group rules, batch and observe modes          (NEW)
+|   |   |-- github_rules.py                # Ticket in commits, pull requests, no force-push    (NEW)
+|   |   |-- budget_service.py              # Monthly budgets, alerts, hard stop                 (NEW)
+|   |   |-- quickbooks_service.py          # QuickBooks OAuth and invoice sending               (NEW)
+|   |   |-- mfa_service.py                 # Two-step verification (TOTP, recovery codes)       (NEW)
+|   |   |-- ip_allowlist.py                # Per-client network limit                           (NEW)
+|   |   |-- access_control.py              # End dates, disable, sign out everywhere            (NEW)
+|   |   |-- login_security.py              # Login lockout                                      (NEW)
+|   |   |-- session_activity.py            # Inactivity timeout                                 (NEW)
 |   |-- tools/
 |   |   |-- tool_adapter.py           # Tool dispatcher and safety gate (GitHub, Jira, site, keys)
 |   |   |-- slack_approval_ui.py      # Approval cards
@@ -450,7 +537,8 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
 |       |-- components/               # Sidebar, Header, DashboardShell, DataTable, ui,
 |       |                             # GithubConnectionCard, JiraConnectionCard,
 |       |                             # ClientApiKeyCard, WebsitesCard, InvoicesPanel,
-|       |                             # UserPermissionsTab, WorkspaceClientsCard
+|       |                             # UserPermissionsTab, WorkspaceClientsCard,
+|       |                             # BudgetCard, QuickBooksCard, MfaStatusCard, IdleGuard (NEW)
 |       `-- app/                      # Pages (see section 10)
 |-- docs/plans, docs/setup            # Plans and setup guides (GitHub App, Jira, Slack key messages)
 |-- .github/workflows/deploy.yml      # Deploy to EC2 on push to main
@@ -465,16 +553,16 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
     <tr><td>Dashboard</td><td><code>/</code></td><td>JTS, Client Admin</td><td>System overview and statistics</td></tr>
     <tr><td>My Activity</td><td><code>/my-tasks</code></td><td>Team Member</td><td>Their own requests</td></tr>
     <tr><td>Approvals</td><td><code>/approvals</code></td><td>All roles</td><td>Review, approve or reject GitHub, Jira and website changes; previews and diffs</td></tr>
-    <tr><td>Usage &amp; Billing</td><td><code>/billing</code></td><td>JTS, Client Admin</td><td>Usage by client/channel, periods, CSV, invoices</td></tr>
-    <tr><td>Clients &amp; Channels</td><td><code>/folders</code></td><td>JTS, Client Admin</td><td>Client folders (name, description and the organization a client is billed as), channels, the Slack workspaces table (link a workspace to a client), GitHub / Jira cards, client websites</td></tr>
+    <tr><td>Usage &amp; Billing</td><td><code>/billing</code></td><td>JTS, Client Admin</td><td>Usage by client/channel, periods, CSV, invoices, send to QuickBooks <span class="tag new">NEW</span></td></tr>
+    <tr><td>Clients &amp; Channels</td><td><code>/folders</code></td><td>JTS, Client Admin</td><td>Client folders. A client page has tabs: <b>Channels</b> (reply rules, archive), <b>Keys &amp; connections</b>, <b>Websites</b>, <b>Budget</b> and <b>Security</b> (network limit, JTS Admin). The folders list also has the Slack workspaces table (link a workspace to a client) <span class="tag new">NEW</span></td></tr>
     <tr><td>Keys &amp; Connections</td><td><code>/client-keys</code></td><td>All (edit: Client Admin, JTS)</td><td>GitHub and Jira connections, client and channel keys</td></tr>
-    <tr><td>Users &amp; Organizations</td><td><code>/users</code>, <code>/organizations</code></td><td>JTS</td><td><b>Users</b> tab: accounts, roles, client assignment. <b>Permissions</b> tab: the GitHub / Jira checkboxes for each person</td></tr>
+    <tr><td>Users &amp; Organizations</td><td><code>/users</code>, <code>/organizations</code></td><td>JTS</td><td><b>Users</b> tab: accounts, roles, client assignment, access end date, badges (two-step, disabled, locked), and buttons to sign out everywhere, disable, unlock and reset two-step verification <span class="tag new">NEW</span>. <b>Permissions</b> tab: the GitHub / Jira checkboxes for each person</td></tr>
     <tr><td>API Keys</td><td><code>/keys</code></td><td>JTS</td><td>Global secrets stored in AWS</td></tr>
-    <tr><td>System Settings</td><td><code>/global-settings</code></td><td>JTS</td><td>Timezone and default tool rules</td></tr>
+    <tr><td>System Settings</td><td><code>/global-settings</code></td><td>JTS</td><td>Tabs: Time zone, Format &amp; alerts, Tool permissions, <b>Integrations</b> (QuickBooks) <span class="tag new">NEW</span></td></tr>
     <tr><td>Activity Log</td><td><code>/logs</code></td><td>JTS</td><td>Live telemetry and security events</td></tr>
     <tr><td>Conversation Inspector</td><td><code>/context</code></td><td>JTS</td><td>Stored conversations and prompts</td></tr>
     <tr><td>Database</td><td><code>/database</code></td><td>JTS</td><td>Read-only database view</td></tr>
-    <tr><td>Profile Settings</td><td><code>/settings</code></td><td>All</td><td>Personal timezone ("System Time")</td></tr>
+    <tr><td>Profile Settings</td><td><code>/settings</code></td><td>All</td><td>Personal timezone ("System Time") and, for admins, the two-step verification status</td></tr>
   </table>
 
   <h2 style="margin-top:16pt;">11. Database Tables</h2>
@@ -494,7 +582,13 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
     <tr><td><code>site_drafts</code>, <code>site_draft_files</code>, <code>site_draft_base_files</code>, <code>client_websites</code> <span class="tag new">NEW</span></td><td>Website drafts, their files, the base for edits, and each client's published sites</td></tr>
     <tr><td><code>api_usage_logs</code>, <code>client_invoices</code></td><td>Token and cost analytics; generated invoices</td></tr>
     <tr><td><code>telemetry_logs</code>, <code>global_system_settings</code>, <code>claude_context_snapshots</code></td><td>Activity and security events, system settings, saved prompt snapshots</td></tr>
+    <tr><td><code>user_mfa</code> <span class="tag new">NEW</span></td><td>Per person: encrypted two-step secret, hashed recovery codes, last code used</td></tr>
+    <tr><td><code>login_attempts</code>, <code>session_activity</code> <span class="tag new">NEW</span></td><td>Wrong-password counts and locks; the last real activity of each signed-in session</td></tr>
+    <tr><td><code>client_budgets</code>, <code>client_budget_alerts</code> <span class="tag new">NEW</span></td><td>Each client's monthly limit and alert levels; which alerts were already sent each month</td></tr>
+    <tr><td><code>jira_linked_issues</code> <span class="tag new">NEW</span></td><td>Tickets the bot raised, per channel, so later messages update the right ticket</td></tr>
+    <tr><td><code>quickbooks_connection</code>, <code>quickbooks_connect_links</code> <span class="tag new">NEW</span></td><td>The connected QuickBooks company (token encrypted) and single-use connect links</td></tr>
   </table>
+  <p class="small">New columns on existing tables <span class="tag new">NEW</span>: <code>channel_metadata</code> (<code>archived_at/by</code>, <code>response_mode</code>, <code>batch_mode</code>, <code>observe_mode</code>), <code>channel_folders.ip_allowlist</code>, <code>dashboard_users</code> (<code>disabled</code>, <code>access_expires_at</code>, <code>sessions_valid_after</code>), <code>github_connections.rules_enabled</code>, <code>jira_connections.auto_rules</code>, <code>client_invoices</code> (<code>qbo_invoice_id</code>, <code>qbo_synced_at</code>). All are created automatically.</p>
 </section>
 
 <!-- ============================== 12. STACK ============================== -->
@@ -513,6 +607,9 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
     <tr><td>Secrets</td><td>AWS Secrets Manager (boto3)</td><td>Every key and token, encrypted</td></tr>
     <tr><td>Chat platform</td><td>Slack API (Events, Interactivity, OAuth v2); Microsoft Teams webhook</td><td>Mentions, threads, cards, buttons</td></tr>
     <tr><td>Integrations</td><td>GitHub App (REST + Git Data API), Atlassian OAuth 2.0 + Jira Cloud REST API</td><td>Repositories, pull requests, issues, tickets</td></tr>
+    <tr><td>Voice <span class="tag new">NEW</span></td><td>OpenAI Whisper API, or <code>faster-whisper</code> on the server</td><td>Speech-to-text for voice messages</td></tr>
+    <tr><td>Security <span class="tag new">NEW</span></td><td>TOTP (RFC 6238), Fernet encryption, <code>qrcode</code> (setup screen)</td><td>Two-step verification, encrypted secrets</td></tr>
+    <tr><td>Accounting <span class="tag new">NEW</span></td><td>QuickBooks Online API (OAuth 2.0)</td><td>Client invoices</td></tr>
     <tr><td>Proxy and process</td><td>Nginx, systemd</td><td>HTTPS, routing, service restarts on Ubuntu (AWS EC2)</td></tr>
     <tr><td>Deployment</td><td>GitHub Actions to EC2 over SSH</td><td>Push to <code>main</code> deploys and restarts the three services</td></tr>
   </table>
@@ -521,20 +618,90 @@ MY_TOKEN = abc12345xyz789 for this channel only</pre>
   <h3>Deploy and services</h3>
   <ul>
     <li>Pushing to <code>main</code> on GitHub runs <code>.github/workflows/deploy.yml</code>, which updates the server and restarts <code>jts-worker</code>, <code>jts-powertool</code> and <code>jts-frontend</code>.</li>
-    <li>Logs: <code>sudo journalctl -u jts-powertool</code> (API) and <code>-u jts-worker</code> (worker). Log times are UTC.</li>
+    <li>Logs: <code>sudo journalctl -u jts-powertool</code> (API) and <code>-u jts-worker</code> (worker). Log times are UTC. Without the pager: <code>journalctl -u jts-worker --since "-5 min" --no-pager -o cat</code>.</li>
     <li>If a deploy seems to have no effect, check for a second service holding port 8000 (<code>sudo ss -ltnp | grep :8000</code>). An old leftover <code>jts-backend.service</code> once served stale code and has been disabled.</li>
-    <li>Useful log tags: <code>[JIRA]</code>, <code>[SLACK_KEYS]</code>, <code>[APPROVALS_SCOPE]</code>, <code>[GITHUB_APP]</code>.</li>
+    <li>Useful log tags: <code>[JIRA]</code>, <code>[SLACK_KEYS]</code>, <code>[APPROVALS_SCOPE]</code>, <code>[GITHUB_APP]</code>, <code>[PERMISSIONS]</code>, <code>[LOOP_GUARD]</code>, <code>[BUDGET]</code>, <code>[MFA]</code>, <code>[ACCESS]</code>, <code>[IP_ALLOWLIST]</code>.</li>
   </ul>
+
+  <h3>Settings you can change without code (API Keys page or AWS) <span class="tag new">NEW</span></h3>
+  <table>
+    <tr><th style="width:36%">Name</th><th style="width:16%">Default</th><th>Effect</th></tr>
+    <tr><td><code>MFA_REQUIRED_FOR_ADMINS</code></td><td>true</td><td>Two-step verification for JTS and Client Admins. Set <b>false</b> in an emergency (anyone who already turned it on still needs the code)</td></tr>
+    <tr><td><code>LOGIN_MAX_FAILURES</code>, <code>LOGIN_LOCK_MINUTES</code></td><td>5, 15</td><td>Wrong passwords before an account is locked, and for how long</td></tr>
+    <tr><td><code>SESSION_IDLE_MINUTES</code></td><td>15</td><td>Inactivity timeout (minimum 1)</td></tr>
+    <tr><td><code>REPLY_COST_CAP_USD</code></td><td>1.0</td><td>Spending limit for one reply</td></tr>
+    <tr><td><code>MAX_AGENT_TURNS</code>, <code>MAX_IDENTICAL_TOOL_CALLS</code>, <code>MAX_TOOL_ERROR_TURNS</code></td><td>5, 2, 3</td><td>Loop guards</td></tr>
+    <tr><td><code>BUDGET_ALERT_EMAILS</code></td><td>(none)</td><td>Extra budget-alert recipients, comma separated</td></tr>
+    <tr><td><code>OPENAI_API_KEY</code>, <code>TRANSCRIPTION_PROVIDER</code>, <code>TRANSCRIPTION_MODEL</code></td><td>-, openai, whisper-1</td><td>Voice messages</td></tr>
+    <tr><td><code>QUICKBOOKS_CLIENT_ID</code>, <code>QUICKBOOKS_CLIENT_SECRET</code>, <code>QUICKBOOKS_ENVIRONMENT</code></td><td>-, -, sandbox</td><td>QuickBooks connection</td></tr>
+    <tr><td><code>TOOL_PERMISSIONS_ENFORCE</code>, <code>TOOL_PERMISSIONS_UNMATCHED</code></td><td>true, block</td><td>GitHub / Jira permission checks (section 5)</td></tr>
+  </table>
+
   <h3>Known gaps</h3>
   <ul>
-    <li>The GitHub and Jira permission checkboxes depend on the Slack email matching the Users page. Someone whose emails differ is treated as "not matched" (read-only) until the email is corrected.</li>
-    <li>The Global Settings default checkboxes (stored in the browser) are not used by this check; the per-user boxes and the role defaults are.</li>
+    <li><b>Chat happens in Slack</b>, not in a custom chat screen, so the "Enter = new line, Ctrl+Enter = send" input and a running session total in a chat UI do not exist. Cost is shown on the dashboard.</li>
+    <li><b>Cloud and HIPAA:</b> the system runs on AWS with a Python backend. The Scope of Work describes Azure and a full HIPAA programme (BAAs, PHI masking, immutable logs, named officers, risk analysis); none of that is built.</li>
+    <li>Voice cost is not added to client billing. QuickBooks sending is one-way and was tested against a simulated Intuit only until the Intuit app is connected.</li>
+    <li>The network limit covers the dashboard only (Slack requests come from Slack). It depends on the proxy passing the caller's real address; check "Your address right now" before saving a list.</li>
+    <li>Changing your own password on My profile does not sign out your other sessions (admin-made password changes do).</li>
+    <li>The code still contains a default session-signing key and a default admin password as fallbacks if <code>DASHBOARD_SECRET_KEY</code> and <code>DASHBOARD_ADMIN_PASSWORD</code> are not set in AWS. Make sure both are set.</li>
+    <li>The GitHub and Jira permission checkboxes depend on the Slack email matching the Users page, which needs the <code>users:read.email</code> Slack scope in every workspace. Someone unmatched is treated as read-only.</li>
     <li>Framework website stacks (React and others) are built but not yet tested live.</li>
     <li>Any member of a client channel can save keys by Slack message (an owner decision); each save is logged by name.</li>
     <li>The Jira search call uses Atlassian's newer search endpoint; if Atlassian changes it, search is the first thing to re-check.</li>
-    <li>Old test messages stored before the key-hiding was added may still show in the Conversation Inspector (the bot itself no longer repeats them).</li>
+    <li>Old test messages stored before the key-hiding was added may still show in the Conversation Inspector.</li>
   </ul>
-  <div class="footer-note">This document describes the production system as of 5 October 2026. Setup guides: <code>docs/setup/github-app-setup.md</code>, <code>docs/setup/jira-app-setup.md</code>, <code>docs/setup/slack-key-messages.md</code>.</div>
+</section>
+
+<!-- ============================== 14. SECURITY ============================== -->
+<section class="page">
+  <h2>14. Security and Access <span class="tag new">NEW</span></h2>
+  <p class="lead">How people are kept in, and kept out.</p>
+  <table>
+    <tr><th style="width:24%">Control</th><th>How it works</th></tr>
+    <tr><td><b>Two-step verification</b></td><td>JTS Admins and Client Admins enter a 6-digit code from an authenticator app after the password. First sign-in: scan a QR code (or type the key), confirm a code, and save 8 one-time recovery codes (shown once). Codes cannot be reused; 5 wrong codes lock that account for 15 minutes. Secrets are stored encrypted, recovery codes hashed. A JTS Admin can reset someone who lost their phone (Users page); they set it up again at their next sign-in. The step between password and code is a short-lived token that is not accepted as a session.</td></tr>
+    <tr><td><b>Login lockout</b></td><td>5 wrong passwords lock the account for 15 minutes, even the right password is refused meanwhile. A made-up username behaves identically (nothing to learn). One network address failing 25 times is paused too. A JTS Admin can unlock at once; a new password also unlocks. Applies to the built-in admin as well.</td></tr>
+    <tr><td><b>Inactivity timeout</b></td><td>After 15 minutes without real use (mouse, keys, touch) the person is signed out; a "Still there?" notice appears 1 minute before. The browser sends a heartbeat at most once a minute while the person is active; pages refreshing in the background do not count. The server refuses every request of a session whose last heartbeat is too old, and a timed-out session cannot be revived.</td></tr>
+    <tr><td><b>Access end date</b></td><td>An account can have a last day. After it (UTC), sign-in and open sessions stop by themselves.</td></tr>
+    <tr><td><b>Instant revocation</b></td><td>Every request is checked against the account (3-second cache). A deleted, disabled, expired or "signed out everywhere" person is refused on the very next click and sent to the login page. A new password, role or client also ends open sessions. The same check stops someone from making GitHub or Jira changes through Slack. The built-in admin cannot be locked out this way; nobody can disable themselves.</td></tr>
+    <tr><td><b>Network limit per client</b></td><td>Section 5. Applies to Client Admins and Team Members of that client; the caller's address is read safely from the proxy headers.</td></tr>
+    <tr><td><b>Permissions and approvals</b></td><td>Section 2, steps 10 and 11, and section 5: per-person GitHub and Jira checkboxes, then an approval card for every change.</td></tr>
+    <tr><td><b>Secrets</b></td><td>Keys live in AWS Secrets Manager. Keys pasted in Slack are saved, the message is deleted, and values never reach the database, logs or Claude. Key-shaped text is hidden in stored history.</td></tr>
+    <tr><td><b>Audit</b></td><td>Activity Log and Conversation Inspector record bot actions, approvals, key saves, archives, settings changes and blocked requests (permission, budget, loop guard).</td></tr>
+  </table>
+</section>
+
+<!-- ============================== 15. SCOPE PROGRESS ============================== -->
+<section class="page">
+  <h2>15. Progress Against the Scope of Work <span class="tag new">NEW</span></h2>
+  <p class="lead">The May 2026 Scope of Work (v0.1) compared with what exists on 7 October 2026. "Tested live" means checked by the team on the real system; "built" means finished and covered by automatic tests but not yet confirmed live.</p>
+  <table>
+    <tr><th style="width:30%">Scope item</th><th style="width:16%">Status</th><th>Notes</th></tr>
+    <tr><td>Cost visibility (per message, channel, client, period)</td><td>Done</td><td>Usage &amp; Billing with CSV. No running session total in a chat window (chat is Slack)</td></tr>
+    <tr><td>Token and session scoping, three roles, impersonation</td><td>Done</td><td>Per-channel keys and context; JTS Admin, Client Admin, Team Member</td></tr>
+    <tr><td>Folders and channels</td><td>Done</td><td>Plus workspace-to-client links</td></tr>
+    <tr><td>Archive channels, never delete</td><td>Built</td><td>Archive and restore, history kept, delete blocked</td></tr>
+    <tr><td>Solo vs group rules, batch mode, observe mode</td><td>Tested live</td><td>Per-channel override from the dashboard</td></tr>
+    <tr><td>Jira: tickets created and updated by the bot</td><td>Tested live</td><td>Always with approval; duplicates refused; per-client switch</td></tr>
+    <tr><td>GitHub: ticket in commits, pull requests, no force-push, human merge</td><td>Built</td><td>Per-client switch; the bot has no merge tool</td></tr>
+    <tr><td>Token optimisation: loop prevention</td><td>Built</td><td>Repeat and error guards, per-reply cost cap</td></tr>
+    <tr><td>Token optimisation: cheaper model for simple queries</td><td>Not started</td><td></td></tr>
+    <tr><td>Audio transcription</td><td>Built</td><td>Waiting for OpenAI billing credit for a live test</td></tr>
+    <tr><td>Secrets vault, no plaintext keys</td><td>Done</td><td>AWS Secrets Manager; keys from Slack hidden</td></tr>
+    <tr><td>MFA for admins</td><td>Tested live</td><td>Authenticator app with recovery codes</td></tr>
+    <tr><td>IP allowlisting per client</td><td>Tested live</td><td>Dashboard only</td></tr>
+    <tr><td>Time-limited access, instant revocation</td><td>Built</td><td>End dates, disable, sign out everywhere</td></tr>
+    <tr><td>HIPAA: 15-minute timeout, 5-attempt lockout</td><td>Built</td><td>Section 14</td></tr>
+    <tr><td>Client billing: per client / channel / user, invoices, CSV</td><td>Done</td><td></td></tr>
+    <tr><td>Token budget limits and alerts</td><td>Built</td><td>Monthly, dollars and/or tokens, optional hard stop</td></tr>
+    <tr><td>QuickBooks</td><td>Built</td><td>Needs the Intuit app to be connected; one-way</td></tr>
+    <tr><td>Monthly billing report as PDF; markup stored per client</td><td>Not started</td><td>CSV exists; markup is typed per invoice</td></tr>
+    <tr><td>RBAC by folder and channel</td><td>Partly</td><td>Roles plus GitHub / Jira checkboxes; no per-channel permissions</td></tr>
+    <tr><td>Backups, disaster recovery, Production/Staging/Development, containers, auto-scaling</td><td>Not started</td><td>Infrastructure work</td></tr>
+    <tr><td>Custom chat input (Enter / Ctrl+Enter)</td><td>Changed</td><td>Chat is Slack</td></tr>
+    <tr><td>Azure and the HIPAA programme (section 11 of the scope)</td><td>Not started</td><td>Runs on AWS today; decision and paperwork needed</td></tr>
+  </table>
+  <div class="footer-note">This document describes the system as of 7 October 2026. Setup guides: <code>docs/setup/github-app-setup.md</code>, <code>docs/setup/jira-app-setup.md</code>, <code>docs/setup/slack-key-messages.md</code>.</div>
 </section>
 
 </body>
