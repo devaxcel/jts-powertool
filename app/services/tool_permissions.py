@@ -163,6 +163,11 @@ async def slack_email(slack_user_id: str, bot_token: str) -> Optional[str]:
             data = resp.json()
             if data.get("ok"):
                 email = ((data.get("user") or {}).get("profile") or {}).get("email") or None
+                if not email:
+                    logger.warning(
+                        f"[PERMISSIONS] Slack returned no email for {slack_user_id}. The Slack app probably lacks the "
+                        "users:read.email scope (add it under OAuth & Permissions and reinstall), or this person hides their email."
+                    )
             else:
                 logger.warning(f"[PERMISSIONS] users.info failed for {slack_user_id}: {data.get('error')}")
         except Exception as e:
@@ -198,6 +203,9 @@ async def check_tool(tool_name: str, slack_user_id: str, channel_id: str, bot_to
         return (perm in READ_KEYS), "I couldn't check your permissions just now, so I can't make changes. Please try again in a minute."
 
     if not user:
+        if email:
+            masked = (email[:2] + "***@" + email.split("@")[-1]) if "@" in email else "***"
+            logger.warning(f"[PERMISSIONS] Slack email {masked} for {slack_user_id} matches no dashboard user (check the email on the Users page).")
         if perm in READ_KEYS or _flag("TOOL_PERMISSIONS_UNMATCHED", "block") == "allow":
             return True, ""
         return False, (

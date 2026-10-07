@@ -54,7 +54,7 @@ async def slack_install_redirect(delete_messages: bool = False):
     from fastapi.responses import RedirectResponse
     client_id = get_secret("SLACK_CLIENT_ID", "203729176583.11900714527686").strip() or "203729176583.11900714527686"
     redirect_uri = "https://journeys.pe/api/slack/oauth/callback"
-    scopes = "app_mentions:read,channels:history,channels:read,chat:write,files:read,files:write,groups:history,groups:read,im:history,im:read,mpim:history,mpim:read,users:read"
+    scopes = "app_mentions:read,channels:history,channels:read,chat:write,files:read,files:write,groups:history,groups:read,im:history,im:read,mpim:history,mpim:read,users:read,users:read.email"
     install_url = f"https://slack.com/oauth/v2/authorize?client_id={client_id}&scope={scopes}&redirect_uri={redirect_uri}"
     if delete_messages:
         # An admin of the workspace also allows the bot to delete messages that contain a key (their user token is kept
