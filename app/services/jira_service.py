@@ -559,6 +559,61 @@ def _summarise(issue: Dict[str, Any], base_url: str) -> str:
     )
 
 
+# --------------------------------------------------------------------------- duplicate check
+
+_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "into", "are", "was", "has", "have", "need", "needs", "fix", "fixes",
+    "add", "make", "let", "lets", "please", "should", "would", "could", "can", "our", "your", "not", "but", "all", "any",
+    "new", "ticket", "issue", "task", "jira", "create", "update", "about", "when", "then", "than", "its", "it's",
+}
+
+
+def _tokens(text: str) -> set:
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return {w for w in words if len(w) >= 3 and w not in _STOPWORDS}
+
+
+def similarity(a: str, b: str) -> float:
+    """0..1: how much two ticket titles overlap (word sets). 'Fix login page error on mobile' vs 'Login error on mobile page' is high."""
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return 0.0
+    inter = len(ta & tb)
+    return max(inter / len(ta | tb), inter / min(len(ta), len(tb)) * 0.9)
+
+
+DUPLICATE_THRESHOLD = 0.6
+
+
+async def find_similar_open_issues(channel_id: str, project: str, summary: str) -> List[Dict[str, str]]:
+    """Open tickets in the project whose title is very close to `summary`. Never raises (a Jira hiccup must not block creation)."""
+    try:
+        words = sorted(_tokens(summary), key=len, reverse=True)[:6]
+        if not words:
+            return []
+        clauses = " OR ".join(f'summary ~ "{w}"' for w in words)
+        jql = f'project = {_check_project(project)} AND statusCategory != Done AND ({clauses}) ORDER BY updated DESC'
+        conn = await resolve_connection(channel_id)
+        resp = await _api(conn, "GET", "/search/jql", params={"jql": jql, "maxResults": 20, "fields": "summary,status"})
+        if resp.status_code != 200:
+            return []
+        base = (conn.get("site_url") or "").rstrip("/")
+        found = []
+        for issue in resp.json().get("issues") or []:
+            f = issue.get("fields") or {}
+            score = similarity(summary, f.get("summary") or "")
+            if score >= DUPLICATE_THRESHOLD:
+                found.append({
+                    "key": issue.get("key"), "summary": f.get("summary") or "", "status": (f.get("status") or {}).get("name") or "",
+                    "url": f"{base}/browse/{issue.get('key')}", "score": round(score, 2),
+                })
+        found.sort(key=lambda x: -x["score"])
+        return found[:3]
+    except Exception as e:
+        logger.debug(f"[JIRA] Duplicate check skipped: {e}")
+        return []
+
+
 # --------------------------------------------------------------------------- tools (read)
 
 async def run_read_tool(channel_id: str, tool: str, args: Dict[str, Any]) -> Tuple[str, bool]:

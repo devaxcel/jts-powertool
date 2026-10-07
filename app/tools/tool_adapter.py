@@ -409,6 +409,7 @@ JIRA_TOOL_SCHEMAS = [
                 "issue_type": {"type": "string", "description": "Task, Bug, Story... (default Task)"},
                 "priority": {"type": "string"},
                 "labels": {"type": "array", "items": {"type": "string"}},
+                "allow_duplicate": {"type": "boolean", "description": "Only true when the user clearly asked for a SEPARATE new ticket after being told a similar open ticket exists"},
             },
             "required": ["summary"],
         },
@@ -759,6 +760,17 @@ class ControlledToolAdapter:
             effective = jira.clean_write_args(tool_name, args, self.jira_connection().get("default_project"))
         except jira.JiraError as e:
             return (f"Error: {e}", True)
+        if tool_name == "jira_create_issue" and not args.get("allow_duplicate"):
+            dupes = await jira.find_similar_open_issues(self.channel_id, effective["project"], effective["summary"])
+            if dupes:
+                lines = "\n".join(f"- {d['key']} ({d['status']}): {d['summary']} {d['url']}" for d in dupes)
+                return (
+                    "DUPLICATE: a very similar open ticket already exists, so NO new ticket was created and NO approval card was sent:\n"
+                    f"{lines}\n"
+                    "Tell the user about it (with the key and link) and offer to add a comment or update it instead. Only if the user "
+                    "clearly asks for a separate, new ticket, call jira_create_issue again with allow_duplicate=true.",
+                    False,
+                )
         if not self.require_approval_for_writes:
             return await jira.execute_write(self.channel_id, tool_name, effective)
         return await self._submit_for_approval(tool_name, effective)
