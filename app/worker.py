@@ -741,6 +741,9 @@ async def process_job(job: dict):
                     accumulated_text = retry_text.strip() or "I've sent that for approval."
                 elif retry_text.strip().upper().startswith("NOOP"):
                     pass  # it was only talking about approvals, not proposing anything: leave the reply as it was
+                elif retry_text.strip() and not _jira.claims_approval(retry_text):
+                    # The tool was called but no card was needed (for example a similar ticket already exists): its explanation is the answer.
+                    accumulated_text = retry_text.strip()
                 else:
                     accumulated_text = (
                         f"{accumulated_text}\n\n:warning: _I haven't actually sent anything to Jira for approval yet. "
