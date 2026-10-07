@@ -49,8 +49,34 @@ def _provider() -> str:
     return (get_secret("TRANSCRIPTION_PROVIDER", "openai") or "openai").strip().lower()
 
 
-async def _transcribe_openai(data: bytes, name: str) -> Tuple[Optional[str], Optional[str]]:
-    key = get_secret("OPENAI_API_KEY", "")
+def resolve_openai_key(channel_id: str = "") -> str:
+    """The channel's own OpenAI key, else the client's, else the system-wide one (in that order)."""
+    if channel_id:
+        try:
+            from app.services.channel_secrets_service import (
+                canonical_channel_id,
+                get_channel_secret_value,
+                get_folder_api_key_value,
+                get_folder_id_for_channel,
+            )
+
+            for provider in ("openai_api_key", "openai"):
+                key = get_channel_secret_value(channel_id, provider)
+                if key:
+                    return key
+            folder_id = get_folder_id_for_channel(canonical_channel_id(channel_id))
+            if folder_id:
+                for provider in ("openai_api_key", "openai"):
+                    key = get_folder_api_key_value(folder_id, provider)
+                    if key:
+                        return key
+        except Exception as e:
+            logger.warning("Client OpenAI key lookup failed, using the system key: %s", e)
+    return get_secret("OPENAI_API_KEY", "")
+
+
+async def _transcribe_openai(data: bytes, name: str, channel_id: str = "") -> Tuple[Optional[str], Optional[str]]:
+    key = resolve_openai_key(channel_id)
     if not key:
         return None, "Voice messages need an OpenAI key. A JTS admin can add OPENAI_API_KEY on the API Keys page (or set TRANSCRIPTION_PROVIDER=local)."
     model = get_secret("TRANSCRIPTION_MODEL", "whisper-1") or "whisper-1"
@@ -98,7 +124,7 @@ def _transcribe_local_sync(data: bytes, name: str) -> Tuple[Optional[str], Optio
         return None, "The voice message could not be transcribed right now. Please try again."
 
 
-async def transcribe_audio(data: bytes, name: str = "voice.m4a") -> Tuple[Optional[str], Optional[str]]:
+async def transcribe_audio(data: bytes, name: str = "voice.m4a", channel_id: str = "") -> Tuple[Optional[str], Optional[str]]:
     """Returns (text, None) on success or (None, short_reason_for_the_user)."""
     if not data:
         return None, "The voice message was empty."
@@ -107,7 +133,7 @@ async def transcribe_audio(data: bytes, name: str = "voice.m4a") -> Tuple[Option
     if _provider() == "local":
         text, err = await asyncio.to_thread(_transcribe_local_sync, data, name)
     else:
-        text, err = await _transcribe_openai(data, name)
+        text, err = await _transcribe_openai(data, name, channel_id)
     if err:
         return None, err
     if not text:

@@ -57,7 +57,7 @@ logger = logging.getLogger("jts_worker")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 
-async def process_slack_files(files: list, token: str, transcripts: Optional[list] = None) -> tuple[list[dict], list[str]]:
+async def process_slack_files(files: list, token: str, transcripts: Optional[list] = None, channel_id: str = "") -> tuple[list[dict], list[str]]:
     """
     Downloads Slack files using the bot token and converts them into Anthropic content blocks:
     - PDF documents (Anthropic native document block)
@@ -127,7 +127,7 @@ async def process_slack_files(files: list, token: str, transcripts: Optional[lis
 
                 # 2b. Voice message / audio: transcribe so it works like a typed message
                 elif is_audio_file(name, mimetype, filetype):
-                    text, err = await transcribe_audio(content_bytes, name)
+                    text, err = await transcribe_audio(content_bytes, name, channel_id)
                     if text:
                         if transcripts is not None:
                             transcripts.append(text)
@@ -320,7 +320,7 @@ async def process_job(job: dict):
 
         # Process any attached files
         voice_transcripts: list = []
-        file_blocks, file_notices = await process_slack_files(raw_files, token, voice_transcripts)
+        file_blocks, file_notices = await process_slack_files(raw_files, token, voice_transcripts, channel_id)
 
         prompt_str = user_annotated_prompt
         if file_notices:
