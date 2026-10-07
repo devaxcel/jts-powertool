@@ -29,6 +29,7 @@ import {
   Archive,
   ArchiveRestore,
   SlidersHorizontal,
+  Network,
 } from "lucide-react";
 import {
   fetchFolder,
@@ -37,6 +38,8 @@ import {
   assignChannelFolder,
   setChannelArchived,
   setChannelBehavior,
+  fetchIpAllowlist,
+  saveIpAllowlist,
   canonicalChannelId,
   getAuthoritativeWorkspace,
   AUTHORITATIVE_CHANNEL_NAMES,
@@ -97,7 +100,7 @@ const AVAILABLE_TOOLS: ToolDefinition[] = [
 
 export default function FolderDetailPage() {
   const params = useParams();
-  const [tab, setTab] = useState<"channels" | "connections" | "websites">("channels");
+  const [tab, setTab] = useState<"channels" | "connections" | "websites" | "security">("channels");
   const folderId = params?.folderId as string;
 
   const [folder, setFolder] = useState<FolderDetails | null>(null);
@@ -253,6 +256,35 @@ export default function FolderDetailPage() {
       setFeedback({ type: "error", message: err?.message || "Failed to add channel to folder" });
     } finally {
       setAssigningChannelId(null);
+    }
+  }
+
+  // Networks this client's people may use the dashboard from (JTS Admin)
+  const [ipText, setIpText] = useState("");
+  const [yourIp, setYourIp] = useState("");
+  const [ipBusy, setIpBusy] = useState(false);
+
+  useEffect(() => {
+    if (tab !== "security" || !isMasterAdmin || !folderId) return;
+    fetchIpAllowlist(folderId)
+      .then((res) => {
+        setIpText(res.entries.join("\n"));
+        setYourIp(res.your_ip);
+      })
+      .catch((err: any) => setFeedback({ type: "error", message: err?.message || "We couldn't load the allowed networks." }));
+  }, [tab, isMasterAdmin, folderId]);
+
+  async function saveIps() {
+    if (!folderId) return;
+    setIpBusy(true);
+    try {
+      const res = await saveIpAllowlist(folderId, ipText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean));
+      setIpText(res.entries.join("\n"));
+      setFeedback({ type: "success", message: res.message });
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err?.message || "We couldn't save the allowed networks." });
+    } finally {
+      setIpBusy(false);
     }
   }
 
@@ -431,6 +463,7 @@ export default function FolderDetailPage() {
           { id: "channels" as const, label: "Channels", count: activeChannels.length, icon: Hash },
           { id: "connections" as const, label: "Keys & connections", icon: Plug },
           { id: "websites" as const, label: "Websites", icon: Globe2 },
+          ...(isMasterAdmin ? [{ id: "security" as const, label: "Security", icon: Network }] : []),
         ]}
       />
 
@@ -445,6 +478,49 @@ export default function FolderDetailPage() {
       )}
 
       {tab === "websites" && folderId && <WebsitesCard folderId={folderId} />}
+
+      {tab === "security" && isMasterAdmin && (
+        <Section
+          icon={Network}
+          title="Approved networks"
+          description="Limit where this client's people can use the dashboard from. Leave it empty for no limit. JTS Admins are never limited, and Slack is not affected (Slack messages come from Slack, not from a person's computer)."
+          bodyClassName="p-5 space-y-3"
+        >
+          <label className="block text-xs font-semibold text-gray-700" htmlFor="ip-list">
+            Allowed IP addresses or ranges (one per line)
+          </label>
+          <textarea
+            id="ip-list"
+            value={ipText}
+            onChange={(e) => setIpText(e.target.value)}
+            rows={6}
+            placeholder={"203.0.113.7\n198.51.100.0/24"}
+            className="w-full p-3 border border-gray-300 rounded-xl text-sm font-mono text-gray-800 focus:outline-none focus:border-[#088ADA] focus:ring-2 focus:ring-[#088ADA]/20"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-gray-500">
+              Your address right now: <span className="font-mono text-gray-800">{yourIp || "..."}</span>
+              {yourIp && (
+                <button
+                  type="button"
+                  onClick={() => setIpText((t) => (t.split(/\n/).map((s) => s.trim()).includes(yourIp) ? t : `${t.trim()}${t.trim() ? "\n" : ""}${yourIp}`))}
+                  className="ml-2 text-[#088ADA] font-semibold hover:underline"
+                >
+                  Add it
+                </button>
+              )}
+            </p>
+            <button onClick={saveIps} disabled={ipBusy} className={btn.primary}>
+              {ipBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              <span>Save</span>
+            </button>
+          </div>
+          <Alert type="warning">
+            Once the list has entries, anyone at this client signing in from another network is refused, including people already signed in.
+            Check the addresses first, because office and home addresses can change.
+          </Alert>
+        </Section>
+      )}
 
       {/* Content Area */}
       <div className="space-y-6 flex-1">

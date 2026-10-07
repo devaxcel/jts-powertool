@@ -155,6 +155,14 @@ export interface LoginResponse {
   message: string;
   token: string;
   user: AuthUser;
+  recovery_codes?: string[] | null;
+}
+
+/** The password was right but a second step is needed (admins). */
+export interface MfaChallenge {
+  status: "mfa_required" | "mfa_setup_required";
+  message: string;
+  mfa_token: string;
 }
 
 export interface VaultSecret {
@@ -249,6 +257,8 @@ export interface DashboardUser {
   created_at?: string;
   /** GitHub / Jira permissions in force for this user (role defaults + saved checkboxes) */
   tool_permissions?: Record<string, boolean>;
+  mfa_enabled?: boolean;
+  mfa_required?: boolean;
 }
 
 export interface VerifyTokenResponse {

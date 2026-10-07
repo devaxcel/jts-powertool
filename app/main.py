@@ -42,6 +42,10 @@ app.add_middleware(
 PUBLIC_EXEMPT_PREFIXES = (
     "/health",
     "/api/auth/login",
+    # Steps 2 of sign-in: protected by the short-lived token from the password step, not a session
+    "/api/auth/mfa/setup",
+    "/api/auth/mfa/enable",
+    "/api/auth/mfa/verify",
     "/api/auth/verify-setup-token",
     "/api/auth/set-password",
     "/api/slack",
@@ -82,11 +86,22 @@ async def enforce_dashboard_authentication(request: Request, call_next):
         token = request.cookies.get(SESSION_COOKIE_NAME)
             
     # 3. Require a valid signed session token. Role headers alone never grant access.
-    if not token or not verify_session_token(token):
+    session = verify_session_token(token) if token else None
+    if not session:
         return JSONResponse(
             status_code=401,
             content={"detail": "Authentication required. Please log in to access JTS Console."}
         )
+
+    # 4. A client limited to approved networks: its people can only use the dashboard from those (JTS Admins never are)
+    if session.get("role") in ("client_admin", "client_standard") and session.get("client_folder_id"):
+        from fastapi import HTTPException as _HTTPException
+        from app.services import ip_allowlist
+
+        try:
+            ip_allowlist.enforce(request, session.get("role"), session.get("client_folder_id"))
+        except _HTTPException as blocked:
+            return JSONResponse(status_code=blocked.status_code, content={"detail": blocked.detail})
         
     return await call_next(request)
 

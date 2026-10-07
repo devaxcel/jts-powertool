@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Users, UserPlus, Trash2, RefreshCw, Shield, Building, Building2, X, Pencil, Mail } from "lucide-react";
+import { Users, UserPlus, Trash2, RefreshCw, Shield, ShieldOff, Building, Building2, X, Pencil, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   fetchUsers,
@@ -11,11 +11,12 @@ import {
   fetchFolders,
   fetchOrganizations,
   sendUserSetupEmail,
+  resetUserMfa,
   extractErrorMessage,
 } from "@/lib/api";
 import { DataTable } from "@/components/DataTable";
 import { DashboardUser, ChannelFolder, Organization, formatLocalDateTime } from "@/lib/types";
-import { PageHeader, Alert, Tabs, btn } from "@/components/ui";
+import { PageHeader, Alert, Badge, Tabs, btn } from "@/components/ui";
 import { UserPermissionsTab } from "@/components/UserPermissionsTab";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -244,6 +245,17 @@ export default function UsersPage() {
     }
   };
 
+  const handleResetMfa = async (u: DashboardUser) => {
+    if (!confirm(`Reset two-step verification for ${u.name || u.username}? They will set it up again at their next sign-in (use this when they lose their phone).`)) return;
+    try {
+      const res = await resetUserMfa(u.id);
+      setSuccessMsg(res.message);
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, mfa_enabled: false } : x)));
+    } catch (err: any) {
+      setErrorMsg(err.message || "We couldn't reset that.");
+    }
+  };
+
   const handleDeleteUser = async (userId: number, uName: string) => {
     if (!confirm(`Are you sure you want to delete user '${uName}'?`)) return;
     try {
@@ -354,6 +366,15 @@ export default function UsersPage() {
                     {u.name && <span className="text-[11px] text-gray-400 font-mono">@{u.username}</span>}
                   </div>
                   {u.email && <div className="text-[11px] text-gray-400">{u.email}</div>}
+                  {u.mfa_required && (
+                    <div className="mt-1">
+                      {u.mfa_enabled ? (
+                        <Badge tone="green">2-step on</Badge>
+                      ) : (
+                        <Badge tone="amber">2-step not set up yet</Badge>
+                      )}
+                    </div>
+                  )}
                 </>
               ),
             },
@@ -423,6 +444,15 @@ export default function UsersPage() {
                   >
                     <Mail className={`h-4 w-4 ${sendingEmailId === u.id ? "animate-pulse text-indigo-400" : ""}`} />
                   </button>
+                  {u.mfa_enabled && (
+                    <button
+                      onClick={() => handleResetMfa(u)}
+                      className="p-1.5 rounded text-amber-600 hover:bg-amber-50 transition"
+                      title="Reset two-step verification (lost phone)"
+                    >
+                      <ShieldOff className="h-4 w-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => handleOpenEditModal(u)}
                     className="p-1.5 rounded text-[#088ADA] hover:bg-blue-50 transition"

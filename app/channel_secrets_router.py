@@ -419,6 +419,35 @@ def get_channels(request: Request):
     return {"channels": channels, "total": len(channels)}
 
 
+class IpAllowlistRequest(BaseModel):
+    entries: List[str] = Field(default_factory=list)
+
+
+@channel_secrets_router.get("/folders/{folder_id}/ip-allowlist", summary="Networks a client may use the dashboard from")
+def get_ip_allowlist_endpoint(folder_id: int, request: Request):
+    require_jts_admin(request)
+    from app.services import ip_allowlist
+
+    return {"entries": ip_allowlist.get_entries(folder_id, use_cache=False), "your_ip": ip_allowlist.client_ip(request)}
+
+
+@channel_secrets_router.put("/folders/{folder_id}/ip-allowlist", summary="Limit a client's dashboard users to approved networks")
+def set_ip_allowlist_endpoint(folder_id: int, payload: IpAllowlistRequest, request: Request):
+    """Empty list = no limit. JTS Admins are never limited and Slack is not affected."""
+    require_jts_admin(request)
+    from app.services import ip_allowlist
+
+    try:
+        entries = ip_allowlist.set_entries(folder_id, payload.entries)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except LookupError as le:
+        raise HTTPException(status_code=404, detail=str(le))
+    msg = ("Saved. This client's people can now sign in only from these networks." if entries
+           else "Saved. This client has no network limit.")
+    return {"status": "success", "message": msg, "entries": entries}
+
+
 class ArchiveChannelRequest(BaseModel):
     archived: bool = True
 

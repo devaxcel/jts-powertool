@@ -11,6 +11,7 @@ import {
   CreateSlackChannelPayload,
   SaveSecretPayload,
   LoginResponse,
+  MfaChallenge,
   AuthUser,
   VaultSecret,
   UsageSummary,
@@ -635,7 +636,22 @@ export async function deleteFolderApiKey(
   return res.json();
 }
 
-export async function login(username: string, password: string): Promise<LoginResponse> {
+/** Keeps the signed-in person in this tab only (per-tab isolation). */
+export function storeSession(data: LoginResponse): void {
+  if (typeof window !== "undefined") {
+    // Store credentials strictly in current tab's sessionStorage for 100% per-tab isolation
+    sessionStorage.setItem("jts_user", JSON.stringify(data.user));
+    sessionStorage.setItem("jts_token", data.token);
+    const tz = (data.user as { timezone?: string } | undefined)?.timezone;
+    if (tz) {
+      sessionStorage.setItem("jts_user_timezone", tz);
+    }
+    // Clear legacy cookie if present
+    document.cookie = "jts_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+  }
+}
+
+export async function login(username: string, password: string): Promise<LoginResponse | MfaChallenge> {
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -645,19 +661,73 @@ export async function login(username: string, password: string): Promise<LoginRe
     if (res.status === 401) {
       throw new Error("Incorrect username or password. Please try again.");
     }
+    if (res.status === 403) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(err, "You can't sign in from this network."));
+    }
     throw new Error("We can't reach the server right now. Please try again in a moment.");
   }
   const data = await res.json();
-  if (typeof window !== "undefined") {
-    // Store credentials strictly in current tab's sessionStorage for 100% per-tab isolation
-    sessionStorage.setItem("jts_user", JSON.stringify(data.user));
-    sessionStorage.setItem("jts_token", data.token);
-    if (data.user?.timezone) {
-      sessionStorage.setItem("jts_user_timezone", data.user.timezone);
-    }
-    // Clear legacy cookie if present
-    document.cookie = "jts_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
-  }
+  if (data.status === "success") storeSession(data as LoginResponse);
+  return data;
+}
+
+async function mfaPost<T>(path: string, body: unknown, fallback: string): Promise<T> {
+  const res = await fetch(`${API_BASE}/api/auth/mfa/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, fallback));
+  return data as T;
+}
+
+export function mfaSetup(mfaToken: string): Promise<{ secret: string; otpauth_uri: string }> {
+  return mfaPost("setup", { mfa_token: mfaToken }, "We couldn't start the setup. Please sign in again.");
+}
+
+export async function mfaEnable(mfaToken: string, code: string): Promise<LoginResponse> {
+  const data = await mfaPost<LoginResponse>("enable", { mfa_token: mfaToken, code }, "That code didn't work. Please try again.");
+  storeSession(data);
+  return data;
+}
+
+export async function mfaVerify(mfaToken: string, code: string): Promise<LoginResponse> {
+  const data = await mfaPost<LoginResponse>("verify", { mfa_token: mfaToken, code }, "That code didn't work. Please try again.");
+  storeSession(data);
+  return data;
+}
+
+export async function fetchMfaStatus(): Promise<{ required: boolean; enabled: boolean; recovery_codes_left: number }> {
+  const res = await fetch(`${API_BASE}/api/auth/mfa/status`, { headers: getAuthHeaders(), cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load this."));
+  return data;
+}
+
+export async function resetUserMfa(userId: number): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/api/users/${userId}/mfa/reset`, { method: "POST", headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't reset that."));
+  return data;
+}
+
+export async function fetchIpAllowlist(folderId: number | string): Promise<{ entries: string[]; your_ip: string }> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/ip-allowlist`, { headers: getAuthHeaders(), cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load the allowed networks."));
+  return data;
+}
+
+export async function saveIpAllowlist(folderId: number | string, entries: string[]): Promise<{ message: string; entries: string[] }> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/ip-allowlist`, {
+    method: "PUT",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ entries }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't save the allowed networks."));
   return data;
 }
 

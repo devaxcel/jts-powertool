@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Response, Request, status, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool
 
 from app.tools.secrets_manager import get_secret
@@ -76,8 +77,35 @@ def create_session_token(
     return f"{b64_payload}.{b64_sig}"
 
 
+MFA_TOKEN_SECONDS = 10 * 60
+
+
+def create_mfa_token(username: str, role: str, client_folder_id: Optional[int] = None) -> str:
+    """Short-lived token proving the password step was passed. It is NOT a session (verify_session_token rejects it)."""
+    payload = {
+        "purpose": "mfa", "user": username, "role": role, "client_folder_id": client_folder_id,
+        "exp": int(time.time()) + MFA_TOKEN_SECONDS, "nonce": secrets.token_hex(8),
+    }
+    b64_payload = base64.urlsafe_b64encode(json.dumps(payload, separators=(',', ':')).encode("utf-8")).decode("utf-8").rstrip("=")
+    sig = base64.urlsafe_b64encode(hmac.new(_SECRET_KEY, b64_payload.encode("utf-8"), hashlib.sha256).digest()).decode("utf-8").rstrip("=")
+    return f"{b64_payload}.{sig}"
+
+
+def verify_mfa_token(token: str) -> Optional[dict]:
+    payload = _decode_token(token)
+    return payload if payload and payload.get("purpose") == "mfa" else None
+
+
 def verify_session_token(token: str) -> Optional[dict]:
-    """Verifies HMAC signature and expiration of session token. Returns payload dict or None."""
+    """A real session token only. Tokens made for another purpose (the two-step sign-in token) are rejected."""
+    payload = _decode_token(token)
+    if payload and payload.get("purpose"):
+        return None
+    return payload
+
+
+def _decode_token(token: str) -> Optional[dict]:
+    """Verifies HMAC signature and expiration of a signed token. Returns payload dict or None."""
     if not token or "." not in token:
         return None
 
@@ -130,6 +158,7 @@ class LoginResponse(BaseModel):
     message: str
     token: str
     user: UserResponse
+    recovery_codes: Optional[List[str]] = None
 
 
 class CreateUserRequest(BaseModel):
@@ -206,6 +235,12 @@ def get_user_context(request: Request, ignore_simulation: bool = False) -> dict:
                 db_u = get_user_from_db(user)
                 if db_u and db_u.get("client_folder_id"):
                     client_folder_id = db_u["client_folder_id"]
+
+            # Clients can be limited to approved networks (JTS Admins never are)
+            if actual_role in ("client_admin", "client_standard"):
+                from app.services import ip_allowlist
+
+                ip_allowlist.enforce(request, actual_role, client_folder_id)
 
             # Allow JTS Admin to simulate other roles in UI preview mode unless ignore_simulation is set
             if not ignore_simulation and actual_role == "jts_admin" and sim_role:
@@ -477,72 +512,154 @@ def get_user_from_db(username: str) -> Optional[dict]:
 
 
 # --- Endpoints ---
-@auth_router.post("/login", response_model=LoginResponse, summary="Sign in to JTS Console")
-def login(req: LoginRequest, response: Response):
+def _issue_session(response: Response, username: str, message: Optional[str] = None, recovery_codes: Optional[List[str]] = None) -> LoginResponse:
+    """Creates the real session for a person who has passed every sign-in step."""
+    expected_admin_user, _ = get_admin_credentials()
+    if secrets.compare_digest(username.strip(), expected_admin_user):
+        token = create_session_token(username=expected_admin_user, role="jts_admin", client_folder_id=None)
+        db_admin = get_user_from_db(expected_admin_user)
+        user = UserResponse(
+            name=(db_admin.get("name") if db_admin else None) or "JTS Admin",
+            username=expected_admin_user, role="jts_admin",
+            timezone=(db_admin.get("timezone") if db_admin else None) or "UTC",
+        )
+        msg = message or "Login successful as JTS Admin"
+    else:
+        db_user = get_user_from_db(username.strip())
+        if not db_user:
+            raise HTTPException(status_code=401, detail="Please sign in again.")
+        token = create_session_token(username=db_user["username"], role=db_user["role"], client_folder_id=db_user["client_folder_id"])
+        user = UserResponse(
+            id=db_user["id"], name=db_user.get("name"), username=db_user["username"], email=db_user["email"],
+            role=db_user["role"], timezone=db_user.get("timezone") or "UTC",
+            client_folder_id=db_user["client_folder_id"], client_folder_name=db_user.get("client_folder_name"),
+        )
+        msg = message or f"Login successful as {db_user['role']}"
+    response.set_cookie(key=SESSION_COOKIE_NAME, value=token, httponly=False, samesite="lax", secure=False, path="/")
+    return LoginResponse(status="success", message=msg, token=token, user=user, recovery_codes=recovery_codes)
+
+
+def _after_password(request: Request, response: Response, username: str, role: str, folder_id: Optional[int]):
+    """Steps after a correct password: the client's network rule, then two-step verification for admins."""
+    from app.services import ip_allowlist, mfa_service as mfa
+
+    ip_allowlist.enforce(request, role, folder_id)
+    try:
+        needs_mfa = mfa.required_for(role) or mfa.is_enabled(username)
+    except Exception as e:  # never lock everyone out because of a database hiccup in the MFA table
+        logger.error(f"[MFA] Could not check two-step status for '{username}': {e}")
+        needs_mfa = False
+    if needs_mfa:
+        enabled = mfa.is_enabled(username)
+        return JSONResponse(content={
+            "status": "mfa_required" if enabled else "mfa_setup_required",
+            "message": "Enter the 6-digit code from your authenticator app." if enabled
+                       else "Set up two-step verification to finish signing in.",
+            "mfa_token": create_mfa_token(username, role, folder_id),
+        })
+    return _issue_session(response, username)
+
+
+@auth_router.post("/login", summary="Sign in to JTS Console")
+def login(req: LoginRequest, request: Request, response: Response):
     """
-    Authenticates user (JTS Admin, Client Admin, or Client Standard).
+    Authenticates user (JTS Admin, Client Admin, or Client Standard). Admins then pass two-step verification.
     """
     expected_admin_user, expected_admin_pwd = get_admin_credentials()
 
     # 1. Check Default JTS Master Admin
     if secrets.compare_digest(req.username.strip(), expected_admin_user) and secrets.compare_digest(req.password.strip(), expected_admin_pwd):
-        token = create_session_token(username=expected_admin_user, role="jts_admin", client_folder_id=None)
-        response.set_cookie(
-            key=SESSION_COOKIE_NAME,
-            value=token,
-            httponly=False,
-            samesite="lax",
-            secure=False,
-            path="/",
-        )
-        db_admin = get_user_from_db(expected_admin_user)
-        admin_tz = (db_admin.get("timezone") if db_admin else None) or "UTC"
-        admin_name = (db_admin.get("name") if db_admin else None) or "JTS Admin"
-        return LoginResponse(
-            status="success",
-            message="Login successful as JTS Admin",
-            token=token,
-            user=UserResponse(name=admin_name, username=expected_admin_user, role="jts_admin", timezone=admin_tz),
-        )
+        return _after_password(request, response, expected_admin_user, "jts_admin", None)
 
     # 2. Check Database Users
     db_user = get_user_from_db(req.username.strip())
     if db_user:
         input_hash = hash_password(req.password.strip())
         if secrets.compare_digest(input_hash, db_user["password_hash"]):
-            token = create_session_token(
-                username=db_user["username"],
-                role=db_user["role"],
-                client_folder_id=db_user["client_folder_id"]
-            )
-            response.set_cookie(
-                key=SESSION_COOKIE_NAME,
-                value=token,
-                httponly=False,
-                samesite="lax",
-                secure=False,
-                path="/",
-            )
-            return LoginResponse(
-                status="success",
-                message=f"Login successful as {db_user['role']}",
-                token=token,
-                user=UserResponse(
-                    id=db_user["id"],
-                    name=db_user.get("name"),
-                    username=db_user["username"],
-                    email=db_user["email"],
-                    role=db_user["role"],
-                    timezone=db_user.get("timezone") or "UTC",
-                    client_folder_id=db_user["client_folder_id"],
-                    client_folder_name=db_user.get("client_folder_name")
-                ),
-            )
+            return _after_password(request, response, db_user["username"], db_user["role"], db_user["client_folder_id"])
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid User ID or Password.",
     )
+
+
+class MfaTokenRequest(BaseModel):
+    mfa_token: str
+
+
+class MfaCodeRequest(BaseModel):
+    mfa_token: str
+    code: str = Field(..., max_length=32)
+
+
+def _mfa_username(token: str) -> str:
+    payload = verify_mfa_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Your sign-in timed out. Please sign in again.")
+    return payload["user"]
+
+
+def _mfa_http(e) -> HTTPException:
+    return HTTPException(status_code=e.status, detail=e.message)
+
+
+@auth_router.post("/mfa/setup", summary="Start two-step verification setup (returns the secret and QR link)")
+def mfa_setup(req: MfaTokenRequest):
+    from app.services import mfa_service as mfa
+
+    username = _mfa_username(req.mfa_token)
+    try:
+        return mfa.start_setup(username)
+    except mfa.MfaError as e:
+        raise _mfa_http(e)
+
+
+@auth_router.post("/mfa/enable", summary="Confirm the first code, turn two-step verification on and sign in")
+def mfa_enable(req: MfaCodeRequest, response: Response):
+    from app.services import mfa_service as mfa
+
+    username = _mfa_username(req.mfa_token)
+    try:
+        codes = mfa.confirm_setup(username, req.code)
+    except mfa.MfaError as e:
+        raise _mfa_http(e)
+    logger.info(f"[MFA] Two-step verification turned on for '{username}'")
+    return _issue_session(response, username, "Two-step verification is on.", recovery_codes=codes)
+
+
+@auth_router.post("/mfa/verify", summary="Second sign-in step: the 6-digit code (or a recovery code)")
+def mfa_verify(req: MfaCodeRequest, response: Response):
+    from app.services import mfa_service as mfa
+
+    username = _mfa_username(req.mfa_token)
+    try:
+        ok = mfa.verify_login(username, req.code)
+    except mfa.MfaError as e:
+        raise _mfa_http(e)
+    if not ok:
+        raise HTTPException(status_code=401, detail="That code isn't right. Check your authenticator app and try again.")
+    return _issue_session(response, username)
+
+
+@auth_router.get("/mfa/status", summary="Is two-step verification on for me?")
+def mfa_status(request: Request):
+    from app.services import mfa_service as mfa
+
+    ctx = require_session(request)
+    username = ctx.get("username") or ""
+    return {
+        "required": mfa.required_for(ctx.get("actual_role") or ctx.get("role")),
+        "enabled": mfa.is_enabled(username),
+        "recovery_codes_left": mfa.recovery_codes_left(username),
+    }
+
+
+@auth_router.get("/my-ip", summary="The address this request comes from")
+def my_ip(request: Request):
+    from app.services import ip_allowlist
+
+    return {"ip": ip_allowlist.client_ip(request)}
 
 
 @auth_router.post("/logout", summary="Log out of JTS Console")
@@ -795,11 +912,16 @@ def list_users(request: Request):
                     ORDER BY u.id DESC;
                 """)
             rows = cur.fetchall() or []
+            from app.services import mfa_service
+
+            mfa_on = mfa_service.enabled_usernames()
             users = []
             for r in rows:
                 d = dict(r)
                 # The dashboard gets the permissions that are actually in force (role defaults + saved checkboxes).
                 d["tool_permissions"] = effective_permissions(d.get("tool_permissions"), d.get("role"))
+                d["mfa_enabled"] = (d.get("username") or "").strip().lower() in mfa_on
+                d["mfa_required"] = mfa_service.required_for(d.get("role"))
                 users.append(d)
             return {"users": users}
     except Exception as e:
@@ -1185,6 +1307,27 @@ ROLE_NAMES = {"jts_admin": "JTS Admin", "client_admin": "Client Admin", "client_
 class UpdatePermissionsRequest(BaseModel):
     # null = go back to the role's defaults; an object = exactly these checkboxes
     tool_permissions: Optional[Dict[str, StrictBool]] = None
+
+
+@users_router.post("/{user_id}/mfa/reset", summary="Reset a person's two-step verification (JTS Admin)")
+def reset_user_mfa(user_id: int, request: Request):
+    """For a lost phone: they set two-step verification up again at their next sign-in."""
+    require_jts_admin(request)
+    from app.services import mfa_service
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT username FROM dashboard_users WHERE id = %s;", (user_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found.")
+    username = row["username"] if isinstance(row, dict) else row[0]
+    removed = mfa_service.reset(username)
+    logger.info(f"[MFA] Two-step verification reset for '{username}' by an admin (had it on: {removed})")
+    return {"ok": True, "message": f"Two-step verification was reset for {username}. They will set it up again at their next sign-in."}
 
 
 @users_router.put("/{user_id}/permissions", summary="Set a user's GitHub / Jira permission checkboxes")
