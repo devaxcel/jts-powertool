@@ -313,6 +313,18 @@ async def stream(
         full_assistant_reply = ""
         spent_usd = 0.0  # cost of this request so far (for the optional cap)
         stopped_for_cost = False
+        # Loop guards: stop the agent from burning tokens by repeating itself
+        if not cost_cap_usd:
+            try:
+                cost_cap_usd = float(get_secret("REPLY_COST_CAP_USD", "1.0") or 1.0)
+            except ValueError:
+                cost_cap_usd = 1.0
+        max_same_call = int(get_secret("MAX_IDENTICAL_TOOL_CALLS", "2") or 2)
+        max_error_turns = int(get_secret("MAX_TOOL_ERROR_TURNS", "3") or 3)
+        call_counts: Dict[str, int] = {}
+        blocked_repeats = 0
+        error_turns = 0
+        stopped_for_loop = ""
 
         try:
             async with httpx.AsyncClient(timeout=request_timeout) as client:
@@ -465,7 +477,27 @@ async def stream(
                                     is_error=False,
                                 )
 
-                            tool_output, is_error = await tool_adapter.execute_tool(tool_name, tool_args)
+                            call_key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True, default=str)}"
+                            call_counts[call_key] = call_counts.get(call_key, 0) + 1
+                            if call_counts[call_key] > max_same_call:
+                                blocked_repeats += 1
+                                tool_output = (
+                                    f"LOOP GUARD: you already made this exact '{tool_name}' call {call_counts[call_key] - 1} times in this "
+                                    "reply. It will not run again. Use the results you already have and answer the user now, or ask them "
+                                    "for what is missing."
+                                )
+                                is_error = True
+                                logger.warning(f"[LOOP_GUARD] Blocked repeated '{tool_name}' call (#{call_counts[call_key]}) in channel={channel_id}")
+                                if tool_callback:
+                                    await tool_callback(
+                                        action="LOOP_GUARD_BLOCKED",
+                                        tool_name=tool_name,
+                                        tool_args=tool_args,
+                                        output=tool_output,
+                                        is_error=True,
+                                    )
+                            else:
+                                tool_output, is_error = await tool_adapter.execute_tool(tool_name, tool_args)
                             output_preview = str(tool_output)[:200].replace("\n", " ")
                             logger.info(
                                 f"[DEBUG_CLAUDE] Turn {turn_count} tool result: tool='{tool_name}', is_error={is_error}, "
@@ -490,6 +522,16 @@ async def stream(
 
                         # Append user turn with tool results
                         current_messages.append({"role": "user", "content": tool_results})
+
+                        # Loop guards: repeated blocked calls, or turn after turn where every tool call failed
+                        error_turns = error_turns + 1 if tool_results and all(r.get("is_error") for r in tool_results) else 0
+                        if blocked_repeats >= 2:
+                            stopped_for_loop = "repeat"
+                        elif error_turns >= max_error_turns:
+                            stopped_for_loop = "errors"
+                        if stopped_for_loop:
+                            logger.warning(f"[LOOP_GUARD] Stopping the agent loop ({stopped_for_loop}) at turn {turn_count} in channel={channel_id}")
+                            break
 
                         # Short-circuit if an interactive approval card was already posted to Slack.
                         # Continuing to the next turn would redundantly call Claude to generate
@@ -523,12 +565,17 @@ async def stream(
                         )
                         break
 
-                if (stopped_for_cost or turn_count >= max_agent_turns) and not full_assistant_reply and not getattr(tool_adapter, "approval_card_posted", False):
-                    note = (
-                        f"I paused because this request reached its cost limit (${cost_cap_usd:.2f}). "
-                        if stopped_for_cost
-                        else "I paused because this request reached its step limit. "
-                    ) + "My work so far is saved. Reply \"continue\" and I'll pick up where I left off."
+                if (stopped_for_loop or stopped_for_cost or turn_count >= max_agent_turns) and not full_assistant_reply and not getattr(tool_adapter, "approval_card_posted", False):
+                    if stopped_for_loop == "repeat":
+                        note = "I stopped because I was repeating the same step and getting nowhere. Tell me what you'd like me to do differently, or give me the missing detail."
+                    elif stopped_for_loop == "errors":
+                        note = "I stopped because my last few steps all failed. Nothing was changed. Please check the connection or details and try again."
+                    else:
+                        note = (
+                            f"I paused because this request reached its cost limit (${cost_cap_usd:.2f}). "
+                            if stopped_for_cost
+                            else "I paused because this request reached its step limit. "
+                        ) + "My work so far is saved. Reply \"continue\" and I'll pick up where I left off."
                     full_assistant_reply = note
                     yield Message(role="assistant", content=note)
                 if turn_count >= max_agent_turns and not full_assistant_reply:
