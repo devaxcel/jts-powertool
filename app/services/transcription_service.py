@@ -89,7 +89,18 @@ async def _transcribe_openai(data: bytes, name: str, channel_id: str = "") -> Tu
                 files={"file": (name or "voice.m4a", data)},
             )
         if resp.status_code != 200:
-            logger.warning("OpenAI transcription failed: HTTP %s", resp.status_code)
+            code = ""
+            try:
+                code = str((resp.json().get("error") or {}).get("code") or "")
+            except Exception:
+                pass
+            logger.warning("OpenAI transcription failed: HTTP %s %s", resp.status_code, code)
+            if code == "insufficient_quota":
+                return None, "The OpenAI account for this key has no credit left. Add a payment method or credit at platform.openai.com/settings/organization/billing, then send the voice message again."
+            if resp.status_code == 429:
+                return None, "OpenAI is limiting requests right now. Wait a minute and send the voice message again."
+            if resp.status_code in (401, 403):
+                return None, "OpenAI rejected the saved OpenAI key. Check that it is a valid key and save it again."
             return None, f"The voice message could not be transcribed (speech service returned HTTP {resp.status_code})."
         return (resp.json().get("text") or "").strip(), None
     except Exception as e:  # network, timeout, bad JSON
