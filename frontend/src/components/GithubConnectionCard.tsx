@@ -8,6 +8,7 @@ import {
   disconnectGithub,
   fetchGithubStatus,
   setGithubDefaultRepo,
+  setGithubRules,
 } from "@/lib/api";
 import { formatLocalDateTime } from "@/lib/types";
 import { Alert, Badge, ConfirmDialog, Section, btn, inputClass } from "@/components/ui";
@@ -61,6 +62,24 @@ export function GithubConnectionCard({ folderId, canEdit }: { folderId: number |
     try {
       await setGithubDefaultRepo(id, value || null);
       setFeedback({ type: "success", message: value ? `The bot will use ${value} unless told otherwise.` : "No default repository: the bot will ask which one to use." });
+      await load();
+    } catch (e: any) {
+      setFeedback({ type: "error", message: e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRules(enabled: boolean) {
+    setBusy(true);
+    try {
+      await setGithubRules(id, enabled);
+      setFeedback({
+        type: "success",
+        message: enabled
+          ? "GitHub rules are on: commits name their Jira ticket and bigger changes go through a pull request."
+          : "GitHub rules are off for this client.",
+      });
       await load();
     } catch (e: any) {
       setFeedback({ type: "error", message: e.message });
@@ -187,6 +206,24 @@ export function GithubConnectionCard({ folderId, canEdit }: { folderId: number |
               {status!.repos.length > 12 && <li className="text-[11px] text-gray-500">+{status!.repos.length - 12} more</li>}
             </ul>
           )}
+
+          <label className="flex items-start gap-2.5 p-3 rounded-lg border border-gray-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={status?.rules_enabled !== false}
+              onChange={(e) => handleRules(e.target.checked)}
+              disabled={!canEdit || busy}
+              className="mt-0.5 rounded text-[#088ADA]"
+            />
+            <span>
+              <span className="block text-xs font-semibold text-gray-800">GitHub rules</span>
+              <span className="block text-[11px] text-gray-500">
+                Commits and pull requests name their Jira ticket (when Jira is connected). Anything bigger than a small edit goes on a
+                branch and into a pull request instead of straight to main. The assistant never force-pushes and cannot merge: a person
+                reviews and merges on GitHub.
+              </span>
+            </span>
+          </label>
 
           {canEdit && (
             <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-100">

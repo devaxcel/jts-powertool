@@ -139,6 +139,7 @@ async def github_status(folder_id: int, request: Request):
     if not conn:
         return JSONResponse(content=out)
     out["connected"] = conn.get("status") == "active"
+    out["rules_enabled"] = conn.get("rules_enabled") is not False
     out["connection"] = {
         k: conn.get(k)
         for k in ("account_login", "account_type", "repository_selection", "repo_count", "default_repo",
@@ -174,6 +175,20 @@ async def github_default_repo(folder_id: int, payload: DefaultRepoPayload, reque
             raise HTTPException(status_code=400, detail="That repository isn't part of this GitHub connection.")
     gh.set_default_repo(folder_id, payload.full_name or None)
     return {"ok": True, "default_repo": payload.full_name or None}
+
+
+class RulesPayload(BaseModel):
+    enabled: bool
+
+
+@github_folder_router.put("/{folder_id}/github/rules")
+async def github_rules(folder_id: int, payload: RulesPayload, request: Request):
+    _authorize(request, folder_id, manage=True)
+    conn = gh.get_connection(folder_id)
+    if not conn or conn.get("status") != "active":
+        raise HTTPException(status_code=400, detail="Connect GitHub first.")
+    gh.set_rules_enabled(folder_id, payload.enabled)
+    return {"ok": True, "rules_enabled": payload.enabled}
 
 
 @github_folder_router.delete("/{folder_id}/github")

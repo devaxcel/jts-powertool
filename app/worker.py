@@ -634,6 +634,10 @@ async def process_job(job: dict):
                 active_system_prompt = f"{active_system_prompt}{jira_rules}"
         except Exception as je:
             logger.warning(f"[JIRA] Could not add the automation rules: {je}")
+        if github_ctx.get("rules_enabled") is not False:
+            from app.services import github_rules
+
+            active_system_prompt = f"{active_system_prompt}{github_rules.RULES_PROMPT}"
 
         full_agent_messages = []
         async for message in stream(

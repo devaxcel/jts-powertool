@@ -84,6 +84,7 @@ def _ensure_tables(cur) -> None:
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE github_connections ADD COLUMN IF NOT EXISTS rules_enabled BOOLEAN DEFAULT TRUE;
         CREATE INDEX IF NOT EXISTS idx_github_connections_installation ON github_connections (installation_id);
         CREATE TABLE IF NOT EXISTS github_connect_links (
             nonce VARCHAR(80) PRIMARY KEY,
@@ -391,6 +392,17 @@ async def complete_connection(state: str, installation_id: Optional[str], code: 
     }
 
 
+def set_rules_enabled(folder_id: int, enabled: bool) -> None:
+    """Turns the GitHub rules (ticket in commits, pull requests for big changes) on or off for a client."""
+    def run(cur):
+        cur.execute(
+            "UPDATE github_connections SET rules_enabled = %s, updated_at = CURRENT_TIMESTAMP WHERE folder_id = %s;",
+            (bool(enabled), folder_id),
+        )
+
+    _db(run)
+
+
 def set_default_repo(folder_id: int, full_name: Optional[str]) -> None:
     def run(cur):
         cur.execute(
@@ -486,7 +498,7 @@ async def resolve_github_token(channel_id: str, **channel_ctx) -> Dict[str, Any]
     """
     from app.services.channel_secrets_service import get_channel_secret_value, get_folder_id_for_channel
 
-    result: Dict[str, Any] = {"token": None, "source": "none", "folder_id": None, "default_repo": None, "account_login": None, "error": None}
+    result: Dict[str, Any] = {"token": None, "source": "none", "folder_id": None, "default_repo": None, "account_login": None, "error": None, "rules_enabled": True}
     try:
         legacy = get_channel_secret_value(channel_id, "github", **channel_ctx)
     except Exception:
@@ -509,6 +521,7 @@ async def resolve_github_token(channel_id: str, **channel_ctx) -> Dict[str, Any]
             source="client_app",
             default_repo=conn.get("default_repo"),
             account_login=conn.get("account_login"),
+            rules_enabled=conn.get("rules_enabled") is not False,
         )
     except GitHubAppError as e:
         result["error"] = str(e)

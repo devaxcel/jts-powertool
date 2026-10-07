@@ -233,6 +233,7 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 "message": {"type": "string", "description": "Git commit message describing the file creation or update"},
                 "branch": {"type": "string", "description": "Branch name (defaults to 'main')"},
                 "sha": {"type": "string", "description": "Blob SHA if replacing an existing file"},
+                "no_jira_ticket": {"type": "boolean", "description": "Only true when the user clearly said this change has no Jira ticket"},
             },
             "required": ["path", "content", "message", "branch"],
         },
@@ -259,6 +260,7 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "description": "Files to push",
                 },
                 "message": {"type": "string", "description": "Commit message"},
+                "no_jira_ticket": {"type": "boolean", "description": "Only true when the user clearly said this change has no Jira ticket"},
             },
             "required": ["branch", "files", "message"],
         },
@@ -275,6 +277,7 @@ DEFAULT_GITHUB_TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 "body": {"type": "string", "description": "Pull request description"},
                 "head": {"type": "string", "description": "Branch containing new changes"},
                 "base": {"type": "string", "description": "Branch to merge changes into (e.g. 'main')"},
+                "no_jira_ticket": {"type": "boolean", "description": "Only true when the user clearly said this change has no Jira ticket"},
             },
             "required": ["title", "head", "base"],
         },
@@ -732,6 +735,36 @@ class ControlledToolAdapter:
         except Exception:
             pass
         return f"PERMISSION DENIED: {message} Tell the user this plainly and do not try another way to do it."
+
+    async def _github_rule_denial(self, tool_name: str, args: Dict[str, Any]) -> Optional[str]:
+        """The GitHub rules. Returns the refusal text (for the assistant) or None. Also adds the review footer to pull requests."""
+        from app.services import github_rules as rules
+
+        if rules.force_requested(args):
+            return "RULE: force-pushing is never allowed. Make a normal commit on a branch and open a pull request instead."
+        if tool_name not in rules.RULED_TOOLS:
+            return None
+        if self.github_context.get("rules_enabled") is False:
+            return None
+        try:
+            from app.services import jira_service as jira
+
+            jira_conn = self.jira_connection()
+            linked = jira.recent_linked_issues(self.channel_id) if jira_conn else []
+            if jira_conn and jira.auto_rules_enabled(jira_conn) and not args.get("no_jira_ticket"):
+                denial = rules.ticket_denial(tool_name, args, linked)
+                if denial:
+                    return denial
+            token = self.github_context.get("token") or ""
+            denial = await rules.pull_request_denial(tool_name, args, token)
+            if denial:
+                return denial
+            if tool_name == "create_pull_request":
+                tickets = rules.tickets_in(str(args.get("title") or "") + " " + str(args.get("body") or ""))
+                args["body"] = (str(args.get("body") or "").rstrip() + "\n" + rules.pr_footer(tickets)).strip()
+        except Exception as e:
+            logger.warning(f"[GITHUB_RULES] Rule check skipped: {e}")
+        return None
 
     def jira_connection(self) -> Optional[Dict[str, Any]]:
         """The client's active Jira connection for this channel (loaded once per request), or None."""
@@ -1351,6 +1384,13 @@ class ControlledToolAdapter:
                     "client's websites use list_my_websites / start_site_edit.",
                     True,
                 )
+
+        # 3.95. GitHub rules: never force-push; ticket number in commits / PRs; pull requests for non-trivial changes
+        if tool_name in ALLOWED_WRITE_TOOLS:
+            rule_error = await self._github_rule_denial(tool_name, effective_args)
+            if rule_error:
+                return (rule_error, True)
+            effective_args.pop("no_jira_ticket", None)
 
         # 4. Human-in-the-loop approval interception for write actions
         if self.require_approval_for_writes and tool_name in ALLOWED_WRITE_TOOLS:

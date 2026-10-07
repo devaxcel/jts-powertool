@@ -1401,6 +1401,7 @@ export interface GithubConnectionStatus {
     updated_at?: string;
   } | null;
   repos: Array<{ full_name: string; private: boolean; default_branch: string }>;
+  rules_enabled?: boolean;
   error: string | null;
 }
 
@@ -1425,6 +1426,10 @@ export function createGithubConnectLink(folderId: number): Promise<{ url: string
 
 export function setGithubDefaultRepo(folderId: number, fullName: string | null): Promise<{ ok: boolean; default_repo: string | null }> {
   return githubRequest(folderId, "/default-repo", { method: "PUT", body: JSON.stringify({ full_name: fullName }) }, "We couldn't save the default repository.");
+}
+
+export function setGithubRules(folderId: number, enabled: boolean): Promise<{ ok: boolean; rules_enabled: boolean }> {
+  return githubRequest(folderId, "/rules", { method: "PUT", body: JSON.stringify({ enabled }) }, "We couldn't save that setting.");
 }
 
 export function disconnectGithub(folderId: number): Promise<{ ok: boolean; message: string }> {
