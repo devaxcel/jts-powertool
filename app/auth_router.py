@@ -562,6 +562,13 @@ def _issue_session(response: Response, username: str, message: Optional[str] = N
         )
         msg = message or f"Login successful as {db_user['role']}"
     response.set_cookie(key=SESSION_COOKIE_NAME, value=token, httponly=False, samesite="lax", secure=False, path="/")
+    try:
+        from app.services import session_activity
+
+        fresh = _decode_token(token) or {}
+        session_activity.touch(str(fresh.get("nonce") or ""), user.username)
+    except Exception as e:
+        logger.warning(f"[IDLE] Could not start the inactivity clock: {type(e).__name__}")
     return LoginResponse(status="success", message=msg, token=token, user=user, recovery_codes=recovery_codes)
 
 
@@ -598,9 +605,19 @@ def login(req: LoginRequest, request: Request, response: Response):
     Authenticates user (JTS Admin, Client Admin, or Client Standard). Admins then pass two-step verification.
     """
     expected_admin_user, expected_admin_pwd = get_admin_credentials()
+    from app.services import ip_allowlist, login_security as ls
+
+    ip = ip_allowlist.client_ip(request)
+    ukey = req.username.strip().lower()
+
+    # 0. A locked account (or an address that keeps failing) is refused before the password is even looked at
+    wait = ls.locked_for(ls.user_key(ukey), ls.ip_key(ip))
+    if wait:
+        raise HTTPException(status_code=429, detail=ls.lock_message(wait))
 
     # 1. Check Default JTS Master Admin
     if secrets.compare_digest(req.username.strip(), expected_admin_user) and secrets.compare_digest(req.password.strip(), expected_admin_pwd):
+        ls.clear(ukey)
         return _after_password(request, response, expected_admin_user, "jts_admin", None)
 
     # 2. Check Database Users
@@ -608,12 +625,19 @@ def login(req: LoginRequest, request: Request, response: Response):
     if db_user:
         input_hash = hash_password(req.password.strip())
         if secrets.compare_digest(input_hash, db_user["password_hash"]):
+            ls.clear(ukey)
+            ls.clear(db_user["username"])
             return _after_password(request, response, db_user["username"], db_user["role"], db_user["client_folder_id"], db_row=db_user)
 
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid User ID or Password.",
-    )
+    # 3. Wrong: count it. Same answer whether or not the account exists (nothing for a guesser to learn).
+    result = ls.record_failure(ukey, ip)
+    if result["locked_seconds"]:
+        raise HTTPException(status_code=429, detail=ls.lock_message(result["locked_seconds"]))
+    detail = "Invalid User ID or Password."
+    if result["attempts_left"] <= 2:
+        n = result["attempts_left"]
+        detail += f" {n} attempt{'s' if n != 1 else ''} left before sign-in is locked for a while."
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
 
 class MfaTokenRequest(BaseModel):
@@ -685,6 +709,23 @@ def mfa_status(request: Request):
         "enabled": mfa.is_enabled(username),
         "recovery_codes_left": mfa.recovery_codes_left(username),
     }
+
+
+@auth_router.post("/activity", summary="Heartbeat: the person is still at the screen (keeps the inactivity timer from running out)")
+def session_heartbeat(request: Request):
+    from app.services import session_activity
+
+    token = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+    payload = verify_session_token(token) if token else None
+    if not payload:
+        raise HTTPException(status_code=401, detail="Please sign in again.")
+    session_activity.touch(str(payload.get("nonce") or ""), str(payload.get("user") or ""))
+    return {"ok": True, "idle_minutes": session_activity.idle_seconds() // 60}
 
 
 @auth_router.get("/my-ip", summary="The address this request comes from")
@@ -944,9 +985,10 @@ def list_users(request: Request):
                     ORDER BY u.id DESC;
                 """)
             rows = cur.fetchall() or []
-            from app.services import mfa_service
+            from app.services import mfa_service, login_security
 
             mfa_on = mfa_service.enabled_usernames()
+            locked_now = login_security.locked_accounts()
             users = []
             for r in rows:
                 d = dict(r)
@@ -957,6 +999,7 @@ def list_users(request: Request):
                 d["access_status"] = access_control.inactive_reason(d.get("disabled"), d.get("access_expires_at")) or "active"
                 d["disabled"] = bool(d.get("disabled"))
                 d["access_expires_at"] = d["access_expires_at"].isoformat() if d.get("access_expires_at") else None
+                d["locked_seconds"] = locked_now.get((d.get("username") or "").strip().lower(), 0)
                 d["mfa_enabled"] = (d.get("username") or "").strip().lower() in mfa_on
                 d["mfa_required"] = mfa_service.required_for(d.get("role"))
                 users.append(d)
@@ -1323,9 +1366,10 @@ def set_password(req: SetPasswordRequest):
                 SET used_at = now()
                 WHERE id = %s;
             """, (t_id,))
-            from app.services import access_control
+            from app.services import access_control, login_security
 
             access_control.revoke_sessions(cur, user_id)
+            login_security.clear(username)
 
             conn.commit()
             logger.info(f"[AUTH] User '{username}' (#{user_id}) successfully set new password via token.")
@@ -1398,6 +1442,25 @@ def change_user_access(user_id: int, req: AccessRequest, request: Request):
     access_control.invalidate()
     logger.info(f"[ACCESS] '{ctx.get('username')}' did '{req.action}' on '{username}'")
     return {"ok": True, "message": msg}
+
+
+@users_router.post("/{user_id}/unlock", summary="Unlock an account locked by too many wrong passwords (JTS Admin)")
+def unlock_user(user_id: int, request: Request):
+    require_jts_admin(request)
+    from app.services import login_security
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT username FROM dashboard_users WHERE id = %s;", (user_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found.")
+    username = row["username"] if isinstance(row, dict) else row[0]
+    was_locked = login_security.unlock(username)
+    return {"ok": True, "message": f"{username} was unlocked." if was_locked else f"{username} wasn't locked."}
 
 
 @users_router.post("/{user_id}/mfa/reset", summary="Reset a person's two-step verification (JTS Admin)")
@@ -1579,6 +1642,10 @@ def update_user(user_id: int, req: UpdateUserRequest, request: Request):
                 except ValueError as ve:
                     raise HTTPException(status_code=400, detail=str(ve))
             # A new password, role or client ends the person's open sessions: they sign in again under the new rules.
+            if clean_password:
+                from app.services import login_security
+
+                login_security.clear(user_row["username"] if isinstance(user_row, dict) else user_row[1])
             if clean_password or (prev_row and (prev_row.get("role") != role or prev_row.get("client_folder_id") != folder_id)):
                 access_control.revoke_sessions(cur, user_id)
 

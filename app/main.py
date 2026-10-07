@@ -105,6 +105,12 @@ async def enforce_dashboard_authentication(request: Request, call_next):
     if problem:
         return JSONResponse(status_code=401, content={"detail": access_control.reason_message(problem), "code": f"access_{problem}"})
 
+    # 3c. Away from the screen too long: signed out (the browser sends a heartbeat while someone is really there)
+    from app.services import session_activity
+
+    if session_activity.idle_problem(session):
+        return JSONResponse(status_code=401, content={"detail": access_control.reason_message("idle"), "code": "access_idle"})
+
     # 4. A client limited to approved networks: its people can only use the dashboard from those (JTS Admins never are)
     if session.get("role") in ("client_admin", "client_standard") and session.get("client_folder_id"):
         from fastapi import HTTPException as _HTTPException

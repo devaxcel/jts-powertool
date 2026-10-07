@@ -57,6 +57,7 @@ def reason_message(reason: str) -> str:
         "expired": "Your access has ended. Please contact your administrator if you still need it.",
         "revoked": "Your access has been ended. Please sign in again or contact your administrator.",
         "removed": "This account no longer exists. Please contact your administrator.",
+        "idle": "You were signed out after a period of inactivity. Please sign in again.",
     }.get(reason, "Your access has ended. Please contact your administrator.")
 
 

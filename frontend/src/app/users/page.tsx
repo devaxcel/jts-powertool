@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Users, UserPlus, Trash2, RefreshCw, Shield, ShieldOff, Building, Building2, X, Pencil, Mail, LogOut, UserX, UserCheck } from "lucide-react";
+import { Users, UserPlus, Trash2, RefreshCw, Shield, ShieldOff, Building, Building2, X, Pencil, Mail, LogOut, UserX, UserCheck, LockOpen } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   fetchUsers,
@@ -13,6 +13,7 @@ import {
   sendUserSetupEmail,
   resetUserMfa,
   changeUserAccess,
+  unlockUser,
   extractErrorMessage,
 } from "@/lib/api";
 import { DataTable } from "@/components/DataTable";
@@ -263,6 +264,16 @@ export default function UsersPage() {
     }
   };
 
+  const handleUnlock = async (u: DashboardUser) => {
+    try {
+      const res = await unlockUser(u.id);
+      setSuccessMsg(res.message);
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, locked_seconds: 0 } : x)));
+    } catch (err: any) {
+      setErrorMsg(err.message || "We couldn't unlock that account.");
+    }
+  };
+
   const handleAccess = async (u: DashboardUser, action: "revoke" | "disable" | "enable") => {
     const who = u.name || u.username;
     const ask =
@@ -395,6 +406,11 @@ export default function UsersPage() {
                     {u.name && <span className="text-[11px] text-gray-400 font-mono">@{u.username}</span>}
                   </div>
                   {u.email && <div className="text-[11px] text-gray-400">{u.email}</div>}
+                  {(u.locked_seconds ?? 0) > 0 && (
+                    <div className="mt-1">
+                      <Badge tone="amber">Locked: too many wrong passwords</Badge>
+                    </div>
+                  )}
                   {(u.access_status === "disabled" || u.access_status === "expired" || u.access_expires_at) && (
                     <div className="mt-1">
                       {u.access_status === "disabled" ? (
@@ -491,6 +507,11 @@ export default function UsersPage() {
                       title="Reset two-step verification (lost phone)"
                     >
                       <ShieldOff className="h-4 w-4" />
+                    </button>
+                  )}
+                  {(u.locked_seconds ?? 0) > 0 && (
+                    <button onClick={() => handleUnlock(u)} className="p-1.5 rounded text-amber-600 hover:bg-amber-50 transition" title="Unlock this account now">
+                      <LockOpen className="h-4 w-4" />
                     </button>
                   )}
                   <button

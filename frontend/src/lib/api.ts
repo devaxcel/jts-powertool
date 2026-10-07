@@ -659,7 +659,13 @@ export async function login(username: string, password: string): Promise<LoginRe
   });
   if (!res.ok) {
     if (res.status === 401) {
-      throw new Error("Incorrect username or password. Please try again.");
+      const err = await res.json().catch(() => ({}));
+      const detail = extractErrorMessage(err, "");
+      throw new Error(detail && detail.startsWith("Invalid User ID") ? detail.replace("Invalid User ID or Password.", "Incorrect username or password.") : "Incorrect username or password. Please try again.");
+    }
+    if (res.status === 429) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(err, "Too many attempts. Please wait a few minutes and try again."));
     }
     if (res.status === 403) {
       const err = await res.json().catch(() => ({}));
@@ -714,6 +720,19 @@ export async function changeUserAccess(userId: number, action: "revoke" | "disab
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't change that person's access."));
+  return data;
+}
+
+export async function sendHeartbeat(): Promise<{ ok: boolean; idle_minutes: number }> {
+  const res = await fetch(`${API_BASE}/api/auth/activity`, { method: "POST", headers: getAuthHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error("heartbeat refused");
+  return res.json();
+}
+
+export async function unlockUser(userId: number): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/api/users/${userId}/unlock`, { method: "POST", headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't unlock that account."));
   return data;
 }
 

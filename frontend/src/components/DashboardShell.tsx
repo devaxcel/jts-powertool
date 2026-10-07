@@ -1,5 +1,6 @@
 "use client";
 
+import { IdleGuard } from "@/components/IdleGuard";
 import React, { useEffect, useState, createContext, useContext } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
@@ -153,6 +154,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         closeMobile: () => setIsMobileOpen(false),
       }}
     >
+      <IdleGuard />
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 ml-0 lg:ml-64 bg-[#f5f7fa] h-screen overflow-hidden text-gray-800 print:ml-0 print:h-auto print:overflow-visible print:bg-white">
         <Header />

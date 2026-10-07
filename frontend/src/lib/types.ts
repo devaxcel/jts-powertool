@@ -260,6 +260,7 @@ export interface DashboardUser {
   mfa_enabled?: boolean;
   mfa_required?: boolean;
   disabled?: boolean;
+  locked_seconds?: number;
   access_expires_at?: string | null;
   access_status?: "active" | "disabled" | "expired";
 }
