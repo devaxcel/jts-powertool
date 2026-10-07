@@ -7,6 +7,7 @@ import {
   createJiraConnectLink,
   disconnectJira,
   fetchJiraStatus,
+  setJiraAutoRules,
   setJiraDefaultProject,
 } from "@/lib/api";
 import { formatLocalDateTime } from "@/lib/types";
@@ -61,6 +62,24 @@ export function JiraConnectionCard({ folderId, canEdit }: { folderId: number | s
     try {
       await setJiraDefaultProject(id, value || null);
       setFeedback({ type: "success", message: value ? `New Jira issues go to ${value} unless told otherwise.` : "No default project: the bot will ask which project to use." });
+      await load();
+    } catch (e: any) {
+      setFeedback({ type: "error", message: e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAutoRules(enabled: boolean) {
+    setBusy(true);
+    try {
+      await setJiraAutoRules(id, enabled);
+      setFeedback({
+        type: "success",
+        message: enabled
+          ? "Automatic tickets are on. The assistant will propose tickets and updates by itself; you still approve each one."
+          : "Automatic tickets are off. The assistant only touches Jira when asked.",
+      });
       await load();
     } catch (e: any) {
       setFeedback({ type: "error", message: e.message });
@@ -170,6 +189,23 @@ export function JiraConnectionCard({ folderId, canEdit }: { folderId: number | s
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="flex items-start gap-2.5 p-3 rounded-lg border border-gray-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={status?.auto_rules !== false}
+              onChange={(e) => handleAutoRules(e.target.checked)}
+              disabled={!canEdit || busy}
+              className="mt-0.5 rounded text-[#088ADA]"
+            />
+            <span>
+              <span className="block text-xs font-semibold text-gray-800">Automatic tickets and updates</span>
+              <span className="block text-[11px] text-gray-500">
+                The assistant proposes a ticket when a task is confirmed or a project starts, and proposes updates when work starts or finishes,
+                a decision is made, or something is blocked. Comments explain the why. Every change still waits for your approval.
+              </span>
+            </span>
           </label>
 
           {canEdit && (

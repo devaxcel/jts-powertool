@@ -85,6 +85,17 @@ def _ensure_tables(cur) -> None:
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE jira_connections ADD COLUMN IF NOT EXISTS auto_rules BOOLEAN DEFAULT TRUE;
+        CREATE TABLE IF NOT EXISTS jira_linked_issues (
+            id SERIAL PRIMARY KEY,
+            folder_id INTEGER NOT NULL,
+            channel_id VARCHAR(255) NOT NULL,
+            issue_key VARCHAR(40) NOT NULL,
+            summary VARCHAR(300),
+            created_by VARCHAR(255),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (channel_id, issue_key)
+        );
         CREATE TABLE IF NOT EXISTS jira_connect_links (
             nonce VARCHAR(80) PRIMARY KEY,
             folder_id INTEGER NOT NULL,
@@ -261,6 +272,90 @@ def _set_status(folder_id: int, status: str) -> None:
         cur.execute("UPDATE jira_connections SET status = %s, updated_at = CURRENT_TIMESTAMP WHERE folder_id = %s;", (status, folder_id))
 
     _db(run)
+
+
+def set_auto_rules(folder_id: int, enabled: bool) -> None:
+    """Turns the automatic ticket rules on or off for a client (changes still need approval either way)."""
+    def run(cur):
+        cur.execute("UPDATE jira_connections SET auto_rules = %s, updated_at = CURRENT_TIMESTAMP WHERE folder_id = %s;", (bool(enabled), folder_id))
+
+    _db(run)
+
+
+def auto_rules_enabled(conn: Optional[Dict[str, Any]]) -> bool:
+    return bool(conn) and conn.get("auto_rules") is not False
+
+
+def record_linked_issue(folder_id: int, channel_id: str, issue_key: str, summary: str = "", created_by: str = "") -> None:
+    """Remembers a ticket the assistant raised from this channel, so later messages can update the right ticket."""
+    if not (folder_id and channel_id and issue_key):
+        return
+
+    def run(cur):
+        cur.execute(
+            """
+            INSERT INTO jira_linked_issues (folder_id, channel_id, issue_key, summary, created_by)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (channel_id, issue_key) DO UPDATE SET summary = EXCLUDED.summary;
+            """,
+            (folder_id, channel_id, issue_key, (summary or "")[:300], created_by or None),
+        )
+
+    try:
+        _db(run)
+    except Exception as e:
+        logger.warning(f"[JIRA] Could not remember {issue_key} for {channel_id}: {e}")
+
+
+def recent_linked_issues(channel_id: str, limit: int = 8) -> List[Dict[str, Any]]:
+    if not channel_id:
+        return []
+
+    def run(cur):
+        cur.execute(
+            "SELECT issue_key, summary FROM jira_linked_issues WHERE channel_id = %s ORDER BY id DESC LIMIT %s;",
+            (channel_id, limit),
+        )
+        return cur.fetchall() or []
+
+    try:
+        return [dict(r) for r in _db(run)]
+    except Exception as e:
+        logger.debug(f"[JIRA] Could not read linked issues for {channel_id}: {e}")
+        return []
+
+
+AUTOMATION_RULES = (
+    "\n\nJIRA AUTOMATION RULES (this client has them switched on). Jira is the system of record for tasks, decisions, goals and "
+    "requirements. Use the `jira_*` tools on your own initiative, following these rules. Every change still goes to a person for "
+    "approval, so proposing is safe, but do not spam.\n"
+    "CREATE a ticket (`jira_create_issue`) when: (a) a task is confirmed (the user agrees to do something, e.g. 'yes, let's do that', "
+    "'go ahead', 'assign it to me'), (b) a multi-step project or piece of work starts, or (c) the user explicitly asks. "
+    "Do NOT create tickets for casual questions, brainstorming, or things that are already finished in this reply. "
+    "Before creating, call `jira_search_issues` for similar open tickets; if one exists, use or update it instead of creating a duplicate. "
+    "Never create more than 3 tickets in one reply. Write a clear summary and a description that explains the goal and the 'why'.\n"
+    "UPDATE tickets when: (a) status changes (work started -> `jira_transition_issue` to In Progress; finished -> Done), "
+    "(b) a decision is made (add a comment with the decision and the reason), or (c) a blocker is identified (add a comment starting "
+    "'Blocker:' with what is blocking and who can unblock it). Only update a ticket you know the key of (see the list below, "
+    "the conversation, or search for it).\n"
+    "COMMENTS must capture context and the 'why' (what was decided, what changed, what is next), not just 'status updated'.\n"
+    "After proposing, say in ONE short line what you proposed (e.g. 'I've asked for approval to create a ticket: ...'). "
+    "Mention ticket keys like KAN-12 whenever you refer to a ticket. If no project is set and none was named, ask for the project key once."
+)
+
+
+def automation_prompt(conn: Optional[Dict[str, Any]], channel_id: str) -> str:
+    """Extra system-prompt text that turns the Jira rules on for this channel (empty when they are off)."""
+    if not conn or conn.get("status") != "active" or not auto_rules_enabled(conn):
+        return ""
+    text = AUTOMATION_RULES
+    if conn.get("default_project"):
+        text += f"\nDefault project for new tickets: {conn['default_project']}."
+    linked = recent_linked_issues(channel_id)
+    if linked:
+        lines = "\n".join(f"- {r['issue_key']}: {r.get('summary') or ''}".rstrip() for r in linked)
+        text += f"\nTickets already raised from this channel (newest first):\n{lines}"
+    return text
 
 
 def set_default_project(folder_id: int, key: Optional[str]) -> None:
@@ -546,6 +641,7 @@ async def execute_write(channel_id: str, tool: str, args: Dict[str, Any]) -> Tup
             if resp.status_code not in (200, 201):
                 return (f"[Jira Error]: Couldn't create the issue: {_err_text(resp)}", True)
             key = resp.json().get("key")
+            record_linked_issue(conn.get("folder_id"), channel_id, key, a["summary"])
             return (f"Created {key}: {base}/browse/{key}", False)
         if tool == "jira_update_issue":
             fields = {}

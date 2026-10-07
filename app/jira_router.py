@@ -79,6 +79,7 @@ async def jira_status(folder_id: int, request: Request):
     if not conn:
         return JSONResponse(content=out)
     out["connected"] = conn.get("status") == "active"
+    out["auto_rules"] = jira.auto_rules_enabled(conn)
     out["connection"] = {
         k: conn.get(k) for k in ("site_url", "site_name", "default_project", "connected_by", "status", "created_at", "updated_at")
     }
@@ -116,6 +117,20 @@ async def jira_default_project(folder_id: int, payload: DefaultProjectPayload, r
             raise HTTPException(status_code=400, detail="That project isn't part of this Jira connection.")
     jira.set_default_project(folder_id, key)
     return {"ok": True, "default_project": key}
+
+
+class AutoRulesPayload(BaseModel):
+    enabled: bool
+
+
+@jira_folder_router.put("/{folder_id}/jira/auto-rules")
+async def jira_auto_rules(folder_id: int, payload: AutoRulesPayload, request: Request):
+    _authorize(request, folder_id, manage=True)
+    conn = jira.get_connection(folder_id)
+    if not conn or conn.get("status") != "active":
+        raise HTTPException(status_code=400, detail="Connect Jira first.")
+    jira.set_auto_rules(folder_id, payload.enabled)
+    return {"ok": True, "auto_rules": payload.enabled}
 
 
 @jira_folder_router.delete("/{folder_id}/jira")

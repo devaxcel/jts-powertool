@@ -1446,6 +1446,7 @@ export interface JiraConnectionStatus {
     updated_at?: string;
   } | null;
   projects: Array<{ key: string; name: string }>;
+  auto_rules?: boolean;
   error: string | null;
 }
 
@@ -1470,6 +1471,10 @@ export function createJiraConnectLink(folderId: number): Promise<{ url: string; 
 
 export function setJiraDefaultProject(folderId: number, key: string | null): Promise<{ ok: boolean; default_project: string | null }> {
   return jiraRequest(folderId, "/default-project", { method: "PUT", body: JSON.stringify({ key }) }, "We couldn't save the default project.");
+}
+
+export function setJiraAutoRules(folderId: number, enabled: boolean): Promise<{ ok: boolean; auto_rules: boolean }> {
+  return jiraRequest(folderId, "/auto-rules", { method: "PUT", body: JSON.stringify({ enabled }) }, "We couldn't save that setting.");
 }
 
 export function disconnectJira(folderId: number): Promise<{ ok: boolean; message: string }> {

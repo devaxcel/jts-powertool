@@ -624,6 +624,17 @@ async def process_job(job: dict):
                 extra={"tool_name": tool_name, "args": tool_args, "is_error": is_error},
             )
 
+        # Jira automation rules (create / update tickets on its own, always with approval) when the client has them on
+        try:
+            from app.services import jira_service
+
+            jira_conn = tool_adapter.jira_connection()
+            jira_rules = jira_service.automation_prompt(jira_conn, channel_id)
+            if jira_rules:
+                active_system_prompt = f"{active_system_prompt}{jira_rules}"
+        except Exception as je:
+            logger.warning(f"[JIRA] Could not add the automation rules: {je}")
+
         full_agent_messages = []
         async for message in stream(
             user_message=user_message_to_send,
