@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import { ChannelFolder, Invoice, InvoicePreview } from "@/lib/types";
 import { DataTable } from "@/components/DataTable";
+import { MonthlyReportCard } from "@/components/MonthlyReportCard";
 import { Alert, ConfirmDialog, EmptyState, LoadingState, btn, inputClass } from "@/components/ui";
 import { describeRange, formatUsd, isoDay, lastMonthRange, monthRange } from "@/lib/periods";
 
@@ -452,6 +453,7 @@ export function InvoicesPanel({ isMasterAdmin }: { isMasterAdmin: boolean }) {
 
   return (
     <div className="space-y-4">
+      <MonthlyReportCard isMasterAdmin={isMasterAdmin} />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl p-1 overflow-x-auto">
           {STATUS_FILTERS.map((f) => (

@@ -1,8 +1,9 @@
+import asyncio
 from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from app.auth_router import require_session, require_jts_admin
@@ -62,6 +63,27 @@ async def list_client_invoices(request: Request, status: Optional[str] = None, f
     if own_folder is not None:
         folder_id = own_folder
     return JSONResponse(content={"invoices": list_invoices(folder_id=folder_id, status=status)})
+
+
+@invoice_router.get("/monthly-report")
+async def monthly_billing_report(request: Request, month: Optional[str] = None, folder_id: Optional[int] = None):
+    """The month's usage and billing as a PDF. JTS Admin: one client (folder_id) or all clients. Client Admin: their own client."""
+    from app.services import report_service
+
+    ctx = require_session(request)
+    own_folder = _client_folder_for_invoices(ctx)
+    if own_folder is not None:
+        folder_id = own_folder
+    try:
+        report = await asyncio.to_thread(report_service.build_report, folder_id, month)
+        pdf = await asyncio.to_thread(report_service.render_pdf, report)
+    except report_service.ReportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{report_service.report_filename(report)}"'},
+    )
 
 
 @invoice_router.get("/preview")

@@ -973,6 +973,27 @@ export async function downloadUsageCsv(
   URL.revokeObjectURL(url);
 }
 
+export async function downloadMonthlyReport(month: string, folderId?: number): Promise<void> {
+  const q = new URLSearchParams({ month });
+  if (folderId) q.set("folder_id", String(folderId));
+  const res = await fetch(`${API_BASE}/api/invoices/monthly-report?${q.toString()}`, { headers: getAuthHeaders(), cache: "no-store" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(data, "We couldn't create the report."));
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = match ? match[1] : `jts-billing-report-${month}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export async function recalculateUsageCosts(): Promise<{ status: string; updated_count: number }> {
   const res = await fetch(`${API_BASE}/api/usage/recalculate`, {
     method: "POST",
