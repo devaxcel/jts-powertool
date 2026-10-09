@@ -573,8 +573,8 @@ def _issue_session(response: Response, username: str, message: Optional[str] = N
 
 
 def _after_password(request: Request, response: Response, username: str, role: str, folder_id: Optional[int], db_row: Optional[dict] = None):
-    """Steps after a correct password: the client's network rule, then two-step verification for admins."""
-    from app.services import ip_allowlist, mfa_service as mfa
+    """Steps after a correct password: the client's network rule, then the session starts."""
+    from app.services import ip_allowlist
 
     ip_allowlist.enforce(request, role, folder_id)
     if username != get_admin_credentials()[0]:
@@ -583,19 +583,7 @@ def _after_password(request: Request, response: Response, username: str, role: s
         blocked = access_control.inactive_reason(db_row.get("disabled") if db_row else None, db_row.get("access_expires_at") if db_row else None)
         if blocked:
             raise HTTPException(status_code=403, detail=access_control.reason_message(blocked))
-    try:
-        needs_mfa = mfa.required_for(role) or mfa.is_enabled(username)
-    except Exception as e:  # never lock everyone out because of a database hiccup in the MFA table
-        logger.error(f"[MFA] Could not check two-step status for '{username}': {e}")
-        needs_mfa = False
-    if needs_mfa:
-        enabled = mfa.is_enabled(username)
-        return JSONResponse(content={
-            "status": "mfa_required" if enabled else "mfa_setup_required",
-            "message": "Enter the 6-digit code from your authenticator app." if enabled
-                       else "Set up two-step verification to finish signing in.",
-            "mfa_token": create_mfa_token(username, role, folder_id),
-        })
+    # Two-step verification is switched off: username + password is the whole sign-in.
     return _issue_session(response, username)
 
 
@@ -1000,8 +988,8 @@ def list_users(request: Request):
                 d["disabled"] = bool(d.get("disabled"))
                 d["access_expires_at"] = d["access_expires_at"].isoformat() if d.get("access_expires_at") else None
                 d["locked_seconds"] = locked_now.get((d.get("username") or "").strip().lower(), 0)
-                d["mfa_enabled"] = (d.get("username") or "").strip().lower() in mfa_on
-                d["mfa_required"] = mfa_service.required_for(d.get("role"))
+                d["mfa_enabled"] = False  # two-step verification is switched off
+                d["mfa_required"] = False
                 users.append(d)
             return {"users": users}
     except Exception as e:

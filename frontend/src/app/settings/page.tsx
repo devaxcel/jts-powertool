@@ -20,7 +20,6 @@ import {
 import { fetchMyProfile, updateMyProfile, fetchGlobalSettings } from "@/lib/api";
 import { PageHeader, Alert, LoadingState } from "@/components/ui";
 import { DashboardUser } from "@/lib/types";
-import { MfaStatusCard } from "@/components/MfaStatusCard";
 
 const TIMEZONE_OPTIONS = [
   { value: "UTC", label: "UTC (Coordinated Universal Time)", offset: "UTC+00:00" },
@@ -599,7 +598,6 @@ export default function SettingsPage() {
         </form>
       )}
 
-      <MfaStatusCard />
     </div>
   );
 }
