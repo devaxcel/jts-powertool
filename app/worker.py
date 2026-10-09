@@ -664,6 +664,16 @@ async def process_job(job: dict):
             from app.services import github_rules
 
             active_system_prompt = f"{active_system_prompt}{github_rules.RULES_PROMPT}"
+        wp_conn = None
+        try:
+            from app.services import wordpress_service
+
+            wp_conn = tool_adapter.wordpress_connection()
+            wp_rules = wordpress_service.prompt_text(wp_conn)
+            if wp_rules:
+                active_system_prompt = f"{active_system_prompt}{wp_rules}"
+        except Exception as we:
+            logger.warning(f"[WORDPRESS] Could not add the WordPress rules: {we}")
 
         full_agent_messages = []
         async for message in stream(
@@ -724,7 +734,7 @@ async def process_job(job: dict):
             from app.services import jira_service as _jira
 
             if (
-                _jira.automation_prompt(tool_adapter.jira_connection(), channel_id)
+                (_jira.automation_prompt(tool_adapter.jira_connection(), channel_id) or wp_conn)
                 and not tool_adapter.approval_card_posted
                 and _jira.claims_approval(accumulated_text)
             ):

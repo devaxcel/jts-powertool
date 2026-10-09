@@ -1,9 +1,9 @@
 """
-Per-user tool permissions (GitHub and Jira checkboxes on the Users page) and the check the bot runs before it
+Per-user tool permissions (GitHub, Jira and WordPress checkboxes on the Users page) and the check the bot runs before it
 reads or changes anything for someone.
 
 How it works
-  * Each dashboard user has nine permissions (stored as JSON in dashboard_users.tool_permissions; empty = role defaults).
+  * Each dashboard user has twelve permissions (stored as JSON in dashboard_users.tool_permissions; empty = role defaults).
   * When someone asks the bot for a GitHub / Jira action, we look up their Slack email and match it to a dashboard user.
   * JTS Admins may do everything. Client users may only act in channels of their own client, and only with the
     permissions ticked for them.
@@ -32,10 +32,13 @@ PERMISSIONS = [
     ("jira_create", "Jira", "Can create tickets", "Create new Jira tickets"),
     ("jira_edit", "Jira", "Can edit and comment", "Change a ticket's title, description, priority, labels and add comments"),
     ("jira_close", "Jira", "Can move or close tickets", "Change a ticket's status (for example to Done)"),
+    ("wp_read", "WordPress", "Can read the website", "Read pages and posts"),
+    ("wp_edit", "WordPress", "Can edit and create pages and posts", "Change page and post content and create new pages and posts as drafts"),
+    ("wp_publish", "WordPress", "Can publish, schedule or trash", "Make a draft live, schedule it, or move a page or post to the Trash"),
 ]
 PERMISSION_KEYS = [p[0] for p in PERMISSIONS]
 LABELS = {p[0]: p[2] for p in PERMISSIONS}
-READ_KEYS = {"github_read", "jira_read"}
+READ_KEYS = {"github_read", "jira_read", "wp_read"}
 
 # Before the GitHub change-permissions were split, one box "github_write" covered all of these. Saved settings that still
 # carry it are expanded, so nobody gains or loses access when the boxes were split.
@@ -59,6 +62,11 @@ TOOL_PERMISSION: Dict[str, str] = {
     "jira_create_issue": "jira_create",
     "jira_update_issue": "jira_edit", "jira_add_comment": "jira_edit",
     "jira_transition_issue": "jira_close",
+    # WordPress
+    "wp_list_content": "wp_read", "wp_get_content": "wp_read",
+    "wp_update_content": "wp_edit", "wp_create_content": "wp_edit", "wp_update_elementor_text": "wp_edit",
+    "wp_set_status": "wp_publish",
+    "wp_publish_gate": "wp_publish",  # used when a new page is created already live / scheduled / private
 }
 
 _column_ready = False

@@ -15,6 +15,7 @@ import {
 import { ChannelFolder, formatLocalDateTime } from "@/lib/types";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
 import { JiraConnectionCard } from "@/components/JiraConnectionCard";
+import { WordPressConnectionCard } from "@/components/WordPressConnectionCard";
 import { Alert, Badge, ConfirmDialog, EmptyState, LoadingState, PageHeader, Section, Tabs, btn, inputClass, tbl } from "@/components/ui";
 
 export default function ClientKeysPage() {
@@ -202,9 +203,12 @@ export default function ClientKeysPage() {
           />
 
           {tab === "connections" && (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
-              <GithubConnectionCard folderId={data.folder.id} canEdit={canEdit} />
-              <JiraConnectionCard folderId={data.folder.id} canEdit={canEdit} />
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+                <GithubConnectionCard folderId={data.folder.id} canEdit={canEdit} />
+                <JiraConnectionCard folderId={data.folder.id} canEdit={canEdit} />
+              </div>
+              <WordPressConnectionCard folderId={data.folder.id} canEdit={canEdit} />
             </div>
           )}
 

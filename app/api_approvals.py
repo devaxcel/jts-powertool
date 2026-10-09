@@ -22,6 +22,7 @@ from app.db.repositories import (
     get_system_stats,
 )
 from app.services.jira_service import JiraError
+from app.services.wordpress_service import WordPressError
 from app.services.github_app_service import GitHubAppError, github_client_for_channel, resolve_github_token
 from app.services.site_builder_service import check_can_publish, execute_publish_approval, execute_update_approval, update_diff_text
 from app.tools.secrets_manager import get_secret
@@ -93,6 +94,42 @@ def _full_file_preview(path: str, content: str) -> str:
     return "\n".join(lines)
 
 
+WP_DIFF_TOOLS = ("wp_update_content", "wp_create_content", "wp_update_elementor_text")
+
+
+def _wp_preview(tool_name: str, args: dict) -> str:
+    """Before / after for a WordPress change. Content is compared as readable text (not raw markup); '-' lines go, '+' lines come."""
+    from app.services.wordpress_service import strip_html
+    from app.tools.slack_approval_ui import wp_summary_lines
+
+    prev = args.get("previous") or {}
+    site = args.get("site_name") or "the website"
+    if tool_name == "wp_update_content":
+        label = prev.get("title") or args.get("title") or f"#{args.get('id')}"
+        lines = [f"--- {site}: \"{label}\" (now)", f"+++ {site}: \"{args.get('title') or label}\" (after approval)"]
+        for field, name in (("title", "Title"), ("slug", "Address ending"), ("excerpt", "Excerpt")):
+            if field in args:
+                lines += [f"-{name}: {prev.get(field, '')}", f"+{name}: {args[field]}"]
+        if "content" in args:
+            old = strip_html(prev.get("content", "")).splitlines()
+            new = strip_html(args["content"]).splitlines()
+            body = list(difflib.unified_diff(old, new, lineterm="", n=2))[2:]
+            lines += body or ["(the text looks the same; only formatting changes)"]
+        return "\n".join(lines)
+    if tool_name == "wp_create_content":
+        lines = [f"--- (nothing yet)", f"+++ {site}: new {args.get('type') or 'page'} \"{args.get('title', '')}\" ({args.get('status', 'draft')})"]
+        lines += [f"+{l}" for l in strip_html(args.get("content", "")).splitlines()]
+        return "\n".join(lines)
+    if tool_name == "wp_update_elementor_text":
+        lines = [f"--- {site}: \"{prev.get('title') or args.get('title') or ''}\" (now)", f"+++ (after approval)"]
+        for c in args.get("changes") or []:
+            lines.append(f"@@ {c.get('widget')} / {c.get('path')} @@")
+            lines += [f"-{l}" for l in strip_html(c.get("old", "")).splitlines() or [""]]
+            lines += [f"+{l}" for l in strip_html(c.get("new_value", "")).splitlines() or [""]]
+        return "\n".join(lines)
+    return wp_summary_lines(tool_name, args, 2500)
+
+
 def format_diff_preview(tool_name: str, tool_args: dict) -> str:
     """Quick preview used in the list. For file tools the detail endpoint returns a real diff."""
     args = tool_args or {}
@@ -151,6 +188,9 @@ def format_diff_preview(tool_name: str, tool_args: dict) -> str:
     if tool_name.startswith("jira_"):
         from app.tools.slack_approval_ui import jira_summary_lines
         return jira_summary_lines(tool_name, args)
+
+    if tool_name.startswith("wp_"):
+        return _wp_preview(tool_name, args)
 
     if tool_name == "update_website":
         ch = args.get("changes") or {}
@@ -252,6 +292,8 @@ async def build_real_diff(tool_name: str, tool_args: dict, token: Optional[str] 
             return update_diff_text(int(args["draft_id"])), "diff"
         except Exception:
             return format_diff_preview(tool_name, args), "text"
+    if tool_name in WP_DIFF_TOOLS:
+        return format_diff_preview(tool_name, args), "diff"
     if tool_name not in FILE_TOOLS:
         return format_diff_preview(tool_name, args), "text"
 
@@ -343,12 +385,17 @@ def _describe_action(tool_name: str, args: dict) -> str:
         verb = {"jira_create_issue": "create a Jira issue in", "jira_update_issue": "update", "jira_add_comment": "comment on",
                 "jira_transition_issue": "move"}.get(tool_name, "change")
         return f"{verb} `{target}`"
+    if tool_name.startswith("wp_"):
+        label = (args.get("previous") or {}).get("title") or args.get("title") or "the website"
+        verb = {"wp_create_content": "create the page/post", "wp_update_content": "change", "wp_set_status": "change the status of",
+                "wp_update_elementor_text": "change the text on"}.get(tool_name, "change")
+        return f"{verb} \"{label}\""
     return f"run `{tool_name}`"
 
 
 def _slack_result_text(tool_name: str, args: dict, user_display: str, ok: bool) -> str:
     action = _describe_action(tool_name, args)
-    where = "Jira" if tool_name.startswith("jira_") else "GitHub"
+    where = "Jira" if tool_name.startswith("jira_") else "the website" if tool_name.startswith("wp_") else "GitHub"
     if ok:
         return f":white_check_mark: *{user_display}* approved the request to {action} from the web dashboard. Done on {where}."
     return (
@@ -402,7 +449,7 @@ async def list_approvals(request: Request, status: Optional[str] = None, limit: 
     await enrich_approval_user_names(approvals)
     for a in approvals:
         a["diff_preview"] = format_diff_preview(a.get("tool_name", ""), a.get("tool_arguments") or {})
-        a["diff_kind"] = "full" if a.get("tool_name") in FILE_TOOLS else "text"
+        a["diff_kind"] = "full" if (a.get("tool_name") in FILE_TOOLS or a.get("tool_name") in WP_DIFF_TOOLS) else "text"
 
     return JSONResponse(content={
         "approvals": serialize_data(approvals),
@@ -463,12 +510,18 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
                 from app.services.jira_service import resolve_connection
                 await resolve_connection(existing.get("channel_id") or "")
                 mcp_client = None
+            elif str(existing.get("tool_name") or "").startswith("wp_"):
+                from app.services.wordpress_service import resolve_connection as wp_resolve
+                await wp_resolve(existing.get("channel_id") or "")
+                mcp_client = None
             else:
                 mcp_client = await github_client_for_channel(existing.get("channel_id") or "")
         except GitHubAppError as e:
             return JSONResponse(status_code=409, content={"ok": False, "status": "github_not_connected", "message": str(e)})
         except JiraError as e:
             return JSONResponse(status_code=409, content={"ok": False, "status": "jira_not_connected", "message": str(e)})
+        except WordPressError as e:
+            return JSONResponse(status_code=409, content={"ok": False, "status": "wordpress_not_connected", "message": str(e)})
 
         claim_result, claimed_record = claim_approval_for_execution(approval_id, user_id=user_display)
         if claim_result != "claimed" or not claimed_record:
@@ -503,6 +556,9 @@ async def handle_approval_action(approval_id: str, payload: ApprovalActionPayloa
             elif str(exec_tool_name or "").startswith("jira_"):
                 from app.services.jira_service import execute_write
                 output, is_error = await execute_write(claimed_record.get("channel_id") or "", exec_tool_name, exec_tool_args)
+            elif str(exec_tool_name or "").startswith("wp_"):
+                from app.services.wordpress_service import execute_write as wp_execute
+                output, is_error = await wp_execute(claimed_record.get("channel_id") or "", exec_tool_name, exec_tool_args)
             else:
                 output = await mcp_client.execute_tool(exec_tool_name, exec_tool_args)
                 is_error = bool(output and (output.startswith("[GitHub MCP Error]:") or output.startswith("Error executing tool:")))

@@ -18,6 +18,8 @@ def build_approval_card_blocks(
         return _build_update_website_card(approval_id, tool_args)
     if tool_name.startswith("jira_"):
         return _build_jira_card(approval_id, tool_name, tool_args)
+    if tool_name.startswith("wp_"):
+        return _build_wp_card(approval_id, tool_name, tool_args)
 
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
@@ -145,6 +147,8 @@ def build_approved_card_blocks(
     if tool_name.startswith("jira_"):
         return _jira_result_blocks(approval_id, tool_name, tool_args, f"Approved by <@{approved_by}>" if approved_by else "Approved",
                                    execution_result)
+    if tool_name.startswith("wp_"):
+        return _wp_result_blocks(approval_id, tool_name, tool_args, f"Approved by <@{approved_by}>" if approved_by else "Approved", execution_result)
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
     full_repo = f"{owner}/{repo}" if (owner and repo) else default_repo
@@ -211,6 +215,8 @@ def build_rejected_card_blocks(
     """
     if tool_name.startswith("jira_"):
         return _jira_result_blocks(approval_id, tool_name, tool_args, f"Rejected by <@{rejected_by}>. Nothing was changed in Jira.", "")
+    if tool_name.startswith("wp_"):
+        return _wp_result_blocks(approval_id, tool_name, tool_args, f"Rejected by <@{rejected_by}>. Nothing was changed on the website.", "")
     owner = tool_args.get("owner", "")
     repo = tool_args.get("repo", "")
     full_repo = f"{owner}/{repo}" if (owner and repo) else default_repo
@@ -557,6 +563,104 @@ def _jira_result_blocks(approval_id: str, tool_name: str, tool_args: Dict[str, A
     blocks: List[Dict[str, Any]] = [
         {"type": "header", "text": {"type": "plain_text", "text": _JIRA_TITLES.get(tool_name, "Jira change"), "emoji": False}},
         *_jira_body(tool_name, tool_args),
+        {"type": "section", "text": {"type": "mrkdwn", "text": status}},
+    ]
+    if result:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Result:*\n```{result[:500]}```"}})
+    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Proposal ID: `{approval_id}`"}]})
+    return blocks
+
+
+# --------------------------------------------------------------------------- WordPress
+
+_WP_TITLES = {
+    "wp_update_content": "Change a WordPress page or post",
+    "wp_create_content": "Create a WordPress page or post",
+    "wp_set_status": "Change the status of a WordPress page or post",
+    "wp_update_elementor_text": "Change text on an Elementor page",
+}
+
+
+def _wp_plain(text: str, limit: int) -> str:
+    import html as _h
+    import re as _re
+
+    t = _re.sub(r"<!--.*?-->", "", text or "", flags=_re.S)
+    t = _re.sub(r"</(p|h[1-6]|li|div|blockquote)>|<br\s*/?>", "\n", t, flags=_re.I)
+    t = _re.sub(r"<[^>]+>", "", t)
+    t = _h.unescape(t)
+    t = _re.sub(r"\n{3,}", "\n\n", t).strip()
+    return t if len(t) <= limit else t[: limit - 3] + "..."
+
+
+def wp_summary_lines(tool_name: str, a: Dict[str, Any], limit: int = 600) -> str:
+    """Plain-text description of a WordPress change (used by the Slack card and the dashboard preview)."""
+    prev = a.get("previous") or {}
+    lines: List[str] = []
+    if a.get("site_name"):
+        lines.append(f"Site: {a['site_name']}")
+    kind = a.get("type") or "page"
+    if tool_name == "wp_create_content":
+        lines.append(f"New {kind}: {a.get('title', '')}")
+        lines.append(f"Status: {a.get('status', 'draft')}" + (f" (at {a['date']})" if a.get("date") else ""))
+        if a.get("slug"):
+            lines.append(f"Address ending: {a['slug']}")
+        if a.get("excerpt"):
+            lines.append(f"Excerpt: {a['excerpt']}")
+        lines.append("Text:\n" + _wp_plain(a.get("content", ""), limit))
+        return "\n".join(lines)
+    lines.append(f"{kind.title()}: {prev.get('title') or a.get('title') or ''} (#{a.get('id')}, now {prev.get('status', '?')})")
+    if tool_name == "wp_set_status":
+        word = {"publish": "Publish it (make it live)", "future": f"Schedule it for {a.get('date', '')}", "trash": "Move it to the Trash (it can be restored)",
+                "draft": "Make it a draft (take it offline)", "private": "Make it private", "pending": "Mark it as pending review"}.get(a.get("status"), a.get("status", ""))
+        lines.append(f"Change: {word}")
+    elif tool_name == "wp_update_elementor_text":
+        for c in (a.get("changes") or [])[:12]:
+            lines.append(f"- {c.get('widget')} / {c.get('path')}:\n    before: {_wp_plain(c.get('old', ''), 150)}\n    after:  {_wp_plain(c.get('new_value', ''), 150)}")
+        if len(a.get("changes") or []) > 12:
+            lines.append(f"... and {len(a['changes']) - 12} more")
+    else:
+        if "title" in a:
+            lines.append(f"Title: {prev.get('title', '')}  ->  {a['title']}")
+        if "slug" in a:
+            lines.append(f"Address ending: {prev.get('slug', '')}  ->  {a['slug']}")
+        if "excerpt" in a:
+            lines.append(f"Excerpt: changed")
+        if "content" in a:
+            lines.append(f"Text before:\n{_wp_plain(prev.get('content', ''), limit)}\n\nText after:\n{_wp_plain(a['content'], limit)}")
+    return "\n".join(lines)
+
+
+def _wp_body(tool_name: str, a: Dict[str, Any]) -> List[Dict[str, Any]]:
+    text = wp_summary_lines(tool_name, a, 450)
+    if len(text) > 2400:
+        text = text[:2400] + "\n..."
+    return [{"type": "section", "text": {"type": "mrkdwn", "text": f"```{text}```"}}]
+
+
+def _build_wp_card(approval_id: str, tool_name: str, tool_args: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [
+        {"type": "header", "text": {"type": "plain_text", "text": _WP_TITLES.get(tool_name, "WordPress change"), "emoji": False}},
+        *_wp_body(tool_name, tool_args),
+        {"type": "divider"},
+        {
+            "type": "actions",
+            "block_id": f"approval_actions_{approval_id}",
+            "elements": [
+                {"type": "button", "text": {"type": "plain_text", "text": "Approve & Apply", "emoji": False},
+                 "style": "primary", "action_id": "approve_github_action", "value": approval_id},
+                {"type": "button", "text": {"type": "plain_text", "text": "Reject", "emoji": False},
+                 "style": "danger", "action_id": "reject_github_action", "value": approval_id},
+            ],
+        },
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"Proposal ID: `{approval_id}` - Requires human confirmation before changing the website. WordPress keeps earlier versions under Revisions."}]},
+    ]
+
+
+def _wp_result_blocks(approval_id: str, tool_name: str, tool_args: Dict[str, Any], status: str, result: str) -> List[Dict[str, Any]]:
+    blocks: List[Dict[str, Any]] = [
+        {"type": "header", "text": {"type": "plain_text", "text": _WP_TITLES.get(tool_name, "WordPress change"), "emoji": False}},
+        *_wp_body(tool_name, tool_args),
         {"type": "section", "text": {"type": "mrkdwn", "text": status}},
     ]
     if result:

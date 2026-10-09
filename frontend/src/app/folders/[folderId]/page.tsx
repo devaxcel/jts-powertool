@@ -49,6 +49,7 @@ import { FolderDetails, ChannelProject, formatLocalDateTime } from "@/lib/types"
 import { ClientApiKeyCard } from "@/components/ClientApiKeyCard";
 import { GithubConnectionCard } from "@/components/GithubConnectionCard";
 import { JiraConnectionCard } from "@/components/JiraConnectionCard";
+import { WordPressConnectionCard } from "@/components/WordPressConnectionCard";
 import { WebsitesCard } from "@/components/WebsitesCard";
 import { BudgetCard } from "@/components/BudgetCard";
 import { PageHeader, Alert, Badge, ConfirmDialog, EmptyState, LoadingState, Section, Tabs, ComingSoonBadge, btn, tbl } from "@/components/ui";
@@ -477,6 +478,7 @@ export default function FolderDetailPage() {
             <GithubConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
             <JiraConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
           </div>
+          <WordPressConnectionCard folderId={folderId} canEdit={isMasterAdmin || userRole === "client_admin"} />
         </div>
       )}
 

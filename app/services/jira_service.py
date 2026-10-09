@@ -341,9 +341,9 @@ def claims_approval(text: str) -> bool:
 
 RETRY_NOTE = (
     "[SYSTEM NOTE] Your last reply described a Jira proposal, but you did NOT call the tool, so NO approval card was created and "
-    "nothing was sent. Call the matching jira_* tool now (jira_create_issue, jira_update_issue, jira_add_comment or "
-    "jira_transition_issue) with the details you described. Then reply with ONE short line. "
-    "If you did not actually intend to propose any Jira change, reply with exactly: NOOP"
+    "nothing was sent. Call the matching tool now (jira_create_issue, jira_update_issue, jira_add_comment, jira_transition_issue, "
+    "wp_update_content, wp_create_content, wp_set_status or wp_update_elementor_text) with the details you described. Then reply with ONE short line. "
+    "If you did not actually intend to propose any change, reply with exactly: NOOP"
 )
 
 

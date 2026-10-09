@@ -2435,7 +2435,7 @@ def resolve_anthropic_key(
     return None, "jts", None
 
 
-INTERNAL_FOLDER_PROVIDERS = {"github_user", "jira_oauth"}  # managed by the GitHub / Jira connections, never shown or edited as a key
+INTERNAL_FOLDER_PROVIDERS = {"github_user", "jira_oauth", "wordpress_app"}  # managed by the GitHub / Jira connections, never shown or edited as a key
 
 
 def list_folder_api_keys(folder_id: int) -> List[Dict[str, Any]]:

@@ -372,11 +372,11 @@ export interface SlackWorkspaceLink {
   can_delete_messages?: boolean;
 }
 
-export async function fetchWorkspaceClients(): Promise<{ workspaces: SlackWorkspaceLink[]; deleteLink: string }> {
+export async function fetchWorkspaceClients(): Promise<{ workspaces: SlackWorkspaceLink[]; deleteLink: string; installLink: string }> {
   const res = await fetch(`${API_BASE}/api/channels/workspaces`, { headers: getAuthHeaders(), cache: "no-store" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(extractErrorMessage(data, "We couldn't load the Slack workspaces."));
-  return { workspaces: data.workspaces || [], deleteLink: data.delete_permission_link || "" };
+  return { workspaces: data.workspaces || [], deleteLink: data.delete_permission_link || "", installLink: data.install_link || "" };
 }
 
 export async function setWorkspaceClient(teamId: string, folderId: number | null): Promise<{ ok: boolean; message: string }> {
@@ -1620,6 +1620,71 @@ export function setGithubRules(folderId: number, enabled: boolean): Promise<{ ok
 
 export function disconnectGithub(folderId: number): Promise<{ ok: boolean; message: string }> {
   return githubRequest(folderId, "", { method: "DELETE" }, "We couldn't disconnect GitHub.");
+}
+
+/* ------------------------------ WordPress connection (per client) ------------------------------ */
+
+export interface WordPressStatus {
+  connected: boolean;
+  connection: {
+    site_url: string;
+    site_name: string | null;
+    wp_user: string | null;
+    wp_user_name: string | null;
+    wp_roles: string | null;
+    status: string;
+    connected_by: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+    editors_checked_at?: string | null;
+  } | null;
+  editors: Record<string, number>;
+  connector: { installed: boolean; version: string | null; elementor: boolean; elementor_version: string | null } | null;
+  error: string | null;
+}
+
+async function wordpressRequest<T>(folderId: number, path: string, init: RequestInit = {}, fallback = "Something went wrong."): Promise<T> {
+  const res = await fetch(`${API_BASE}/api/channels/folders/${folderId}/wordpress${path}`, {
+    ...init,
+    headers: getAuthHeaders(init.body ? { "Content-Type": "application/json" } : {}),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(extractErrorMessage(data, fallback));
+  return data as T;
+}
+
+export function fetchWordPressStatus(folderId: number): Promise<WordPressStatus> {
+  return wordpressRequest(folderId, "", {}, "We couldn't load the WordPress connection.");
+}
+
+export function connectWordPress(folderId: number, body: { site_url: string; username: string; app_password: string }): Promise<{ ok: boolean; message: string }> {
+  return wordpressRequest(folderId, "", { method: "POST", body: JSON.stringify(body) }, "We couldn't connect to that site.");
+}
+
+export function checkWordPress(folderId: number): Promise<{ ok: boolean }> {
+  return wordpressRequest(folderId, "/check", { method: "POST" }, "We couldn't check the site.");
+}
+
+export function disconnectWordPress(folderId: number): Promise<{ ok: boolean; message: string }> {
+  return wordpressRequest(folderId, "", { method: "DELETE" }, "We couldn't disconnect WordPress.");
+}
+
+export async function downloadWordPressConnector(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/wordpress/connector.zip`, { headers: getAuthHeaders(), cache: "no-store" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(data, "We couldn't download the plugin."));
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "jts-powertool-connector.zip";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 /* ------------------------------ Jira connection (per client) ------------------------------ */

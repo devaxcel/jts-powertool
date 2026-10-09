@@ -367,7 +367,11 @@ def list_workspaces_endpoint(_: str = Depends(require_jts_admin)):
     for w in workspaces:
         w["can_delete_messages"] = has_delete_token(w.get("team_id"))
     # One link for every workspace: the admin signs in to the workspace they want to enable and clicks Allow.
-    return {"workspaces": workspaces, "delete_permission_link": f"{base}/api/slack/install?delete_messages=true"}
+    return {
+        "workspaces": workspaces,
+        "delete_permission_link": f"{base}/api/slack/install?delete_messages=true",
+        "install_link": f"{base}/api/slack/install",
+    }
 
 
 @channel_secrets_router.put("/workspaces/{team_id}", summary="Link a Slack workspace to a client (or unlink it)")

@@ -18,6 +18,7 @@ from app.invoice_router import invoice_router
 from app.github_router import github_public_router, github_folder_router
 from app.jira_router import jira_public_router, jira_folder_router
 from app.quickbooks_router import quickbooks_public_router, quickbooks_admin_router
+from app.wordpress_router import wordpress_folder_router, wordpress_plugin_router
 from app.site_router import site_preview_router, site_drafts_router, websites_router
 from app.client_keys_router import client_keys_router
 from app.organizations_router import organizations_router
@@ -190,6 +191,8 @@ app.include_router(jira_public_router)
 app.include_router(jira_folder_router)
 app.include_router(quickbooks_public_router)
 app.include_router(quickbooks_admin_router)
+app.include_router(wordpress_folder_router)
+app.include_router(wordpress_plugin_router)
 app.include_router(site_preview_router)
 app.include_router(site_drafts_router)
 app.include_router(websites_router)

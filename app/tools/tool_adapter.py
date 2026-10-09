@@ -13,6 +13,7 @@ from app.db.repositories import (
 from app.tools.slack_approval_ui import build_approval_card_blocks
 
 from app.services.jira_service import JIRA_READ_TOOLS, JIRA_WRITE_TOOLS
+from app.services.wordpress_service import WP_READ_TOOLS, WP_WRITE_TOOLS, WP_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +368,68 @@ ADD_KEY_SCHEMA = {
     },
 }
 
+WP_CONNECT_SCHEMA = {
+    "name": "connect_wordpress",
+    "description": (
+        "Explains how to connect this client's WordPress site (a site address, a username and an application password entered on the dashboard, never in Slack). "
+        "Use when the user asks to connect/link/add WordPress, or when a WordPress action fails because no site is connected."
+    ),
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+_WP_TYPE = {"type": "string", "description": "page (default), post, or the name of a custom post type"}
+
+WP_TOOL_SCHEMAS = [
+    {
+        "name": "wp_list_content",
+        "description": "WordPress: list the client's pages or posts (newest changes first) with id, status, editor and link. Read-only. Use it to find the id of a page.",
+        "input_schema": {"type": "object", "properties": {
+            "type": _WP_TYPE, "search": {"type": "string"}, "status": {"type": "string", "description": "any (default), publish, draft, pending, private, future"},
+            "per_page": {"type": "integer", "description": "1-20"}, "page": {"type": "integer"}}, "required": []},
+    },
+    {
+        "name": "wp_get_content",
+        "description": "WordPress: read one page or post (title, status, link and its content). For Elementor pages it lists the editable texts with their element ids. ALWAYS call this before changing a page.",
+        "input_schema": {"type": "object", "properties": {"id": {"type": "integer"}, "type": _WP_TYPE}, "required": ["id"]},
+    },
+    {
+        "name": "wp_update_content",
+        "description": ("WordPress: change a page or post made with Gutenberg or the Classic editor. 'content' must be the COMPLETE new content (the whole page body, "
+                        "with everything you were not asked to change kept exactly as read), not just the changed part. Sent to a human for approval first."),
+        "input_schema": {"type": "object", "properties": {
+            "id": {"type": "integer"}, "type": _WP_TYPE, "title": {"type": "string"}, "content": {"type": "string"},
+            "excerpt": {"type": "string"}, "slug": {"type": "string"}}, "required": ["id"]},
+    },
+    {
+        "name": "wp_create_content",
+        "description": ("WordPress: create a new page or post. It is created as a DRAFT unless the user clearly asked to publish or schedule it. "
+                        "Sent to a human for approval first."),
+        "input_schema": {"type": "object", "properties": {
+            "type": _WP_TYPE, "title": {"type": "string"}, "content": {"type": "string"},
+            "status": {"type": "string", "description": "draft (default), pending, private, publish, future"},
+            "date": {"type": "string", "description": "for future: 2026-11-03T09:00:00"}, "slug": {"type": "string"},
+            "excerpt": {"type": "string"}, "parent": {"type": "integer", "description": "parent page id (pages only)"}}, "required": ["title"]},
+    },
+    {
+        "name": "wp_set_status",
+        "description": ("WordPress: publish a draft, schedule it, make it a draft or private, or move it to the Trash (it can be restored; nothing is deleted for good). "
+                        "Only when the user clearly asks. Sent to a human for approval first."),
+        "input_schema": {"type": "object", "properties": {
+            "id": {"type": "integer"}, "type": _WP_TYPE, "status": {"type": "string", "description": "publish, draft, pending, private, future, trash"},
+            "date": {"type": "string", "description": "for future: 2026-11-03T09:00:00"}}, "required": ["id", "status"]},
+    },
+    {
+        "name": "wp_update_elementor_text",
+        "description": ("WordPress: change TEXT on a page built with Elementor (headings, paragraphs, buttons, tab and list text). Use the element_id and path exactly as "
+                        "listed by wp_get_content. Layout, images, links and styles cannot be changed. Sent to a human for approval first."),
+        "input_schema": {"type": "object", "properties": {
+            "id": {"type": "integer"}, "type": _WP_TYPE,
+            "changes": {"type": "array", "items": {"type": "object", "properties": {
+                "element_id": {"type": "string"}, "path": {"type": "string"}, "new_value": {"type": "string"}}, "required": ["element_id", "path", "new_value"]}}},
+            "required": ["id", "changes"]},
+    },
+]
+
 JIRA_CONNECT_SCHEMA = {
     "name": "connect_jira",
     "description": (
@@ -619,6 +682,8 @@ class ControlledToolAdapter:
         self.approval_card_posted: bool = False
         self._jira_conn: Optional[Dict[str, Any]] = None
         self._jira_loaded = False
+        self._wp_conn: Optional[Dict[str, Any]] = None
+        self._wp_loaded = False
 
     async def _list_saved_keys(self) -> Tuple[str, bool]:
         """Names + last 4 characters of the keys saved for this channel's client. Never a value."""
@@ -780,6 +845,53 @@ class ControlledToolAdapter:
                 logger.warning(f"[JIRA] Could not load the Jira connection for {self.channel_id}: {e}")
         return self._jira_conn
 
+    def wordpress_connection(self) -> Optional[Dict[str, Any]]:
+        """The client's active WordPress connection for this channel (loaded once per request), or None."""
+        if not self._wp_loaded:
+            self._wp_loaded = True
+            try:
+                from app.services import wordpress_service
+                from app.services.channel_secrets_service import get_folder_id_for_channel
+
+                conn = wordpress_service.get_connection(get_folder_id_for_channel(self.channel_id)) if self.channel_id else None
+                self._wp_conn = conn if conn and conn.get("status") == "active" else None
+            except Exception as e:
+                logger.warning(f"[WORDPRESS] Could not load the WordPress connection for {self.channel_id}: {e}")
+        return self._wp_conn
+
+    async def _run_wordpress_tool(self, tool_name: str, args: Dict[str, Any]) -> Tuple[str, bool]:
+        from app.services import tool_permissions as tp
+        from app.services import wordpress_service as wp
+
+        if tool_name == "connect_wordpress":
+            base = (get_secret("FRONTEND_BASE_URL", "") or get_secret("PUBLIC_BASE_URL", "https://journeys.pe") or "").rstrip("/")
+            return (
+                "To connect a WordPress site, a Client Admin opens the dashboard"
+                + (f" ({base}/client-keys)" if base else "")
+                + ", goes to Keys & Connections -> WordPress, enters the site address, the WordPress username and an Application Password "
+                "(WordPress admin -> Users -> Profile -> Application Passwords). Tell the user plainly NOT to type or paste that password in Slack.",
+                False,
+            )
+        if not self.wordpress_connection():
+            return ("This client hasn't connected a WordPress site yet. Call connect_wordpress to explain how, and tell the user.", True)
+        if tool_name in WP_READ_TOOLS:
+            return await wp.run_read_tool(self.channel_id, tool_name, args)
+        try:
+            effective = await wp.prepare_write(self.channel_id, tool_name, args)
+        except wp.WordPressError as e:
+            return (f"Error: {e}", True)
+        except Exception as e:
+            logger.error(f"[WORDPRESS] Could not prepare {tool_name}: {type(e).__name__}: {e}")
+            return ("Error: the website didn't answer, so nothing was proposed. Try again in a minute.", True)
+        # Publishing, scheduling or making something private has its own permission.
+        if tool_name == "wp_create_content" and effective.get("status") in wp.PUBLISHING:
+            allowed, message = await tp.check_tool("wp_publish_gate", self.user_id, self.channel_id, self.slack_token)
+            if not allowed:
+                return (f"PERMISSION DENIED: {message} The page can still be created as a draft. Tell the user this plainly.", True)
+        if not self.require_approval_for_writes:
+            return await wp.execute_write(self.channel_id, tool_name, effective)
+        return await self._submit_for_approval(tool_name, effective)
+
     async def _run_jira_tool(self, tool_name: str, args: Dict[str, Any]) -> Tuple[str, bool]:
         from app.services import jira_service as jira
 
@@ -851,6 +963,7 @@ class ControlledToolAdapter:
                             "channel": self.channel_id,
                             "thread_ts": target_thread,
                             "text": (f"🛡️ Jira approval needed: `{tool_name}`" if tool_name in JIRA_WRITE_TOOLS
+                                     else f"🛡️ WordPress approval needed: `{tool_name}`" if tool_name in WP_WRITE_TOOLS
                                      else f"🛡️ GitHub Write Permission Request: `{tool_name}`"),
                             "blocks": blocks,
                         }
@@ -881,6 +994,12 @@ class ControlledToolAdapter:
             return (
                 "The Jira change was sent for human approval; an approval card was posted in this Slack conversation. "
                 "It is applied only after someone approves it. Tell the user that.",
+                False,
+            )
+        if tool_name in WP_WRITE_TOOLS:
+            return (
+                "The WordPress change was sent for human approval; an approval card was posted in this Slack conversation. "
+                "The website is changed only after someone approves it. Tell the user that.",
                 False,
             )
         return (
@@ -1166,6 +1285,9 @@ class ControlledToolAdapter:
         tools.append(copy.deepcopy(JIRA_CONNECT_SCHEMA))
         if self.jira_connection():
             tools.extend(copy.deepcopy(JIRA_TOOL_SCHEMAS))
+        tools.append(copy.deepcopy(WP_CONNECT_SCHEMA))
+        if self.wordpress_connection():
+            tools.extend(copy.deepcopy(WP_TOOL_SCHEMAS))
         logger.info(f"[JIRA] Tools for channel={self.channel_id}: jira_connected={bool(self.jira_connection())}")
         return tools
 
@@ -1181,6 +1303,10 @@ class ControlledToolAdapter:
             return True
         if tool_name in JIRA_TOOLS:
             return bool(self.jira_connection())
+        if tool_name == "connect_wordpress":
+            return True
+        if tool_name in WP_TOOLS:
+            return bool(self.wordpress_connection())
         return (tool_name in ALLOWED_READ_TOOLS) or (tool_name in ALLOWED_WRITE_TOOLS)
 
     def _inject_default_repo(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -1265,6 +1391,9 @@ class ControlledToolAdapter:
 
         if tool_name in JIRA_TOOLS:
             return await self._run_jira_tool(tool_name, arguments or {})
+
+        if tool_name in WP_TOOLS:
+            return await self._run_wordpress_tool(tool_name, arguments or {})
 
         if tool_name in SITE_TOOLS:
             return await self._run_site_tool(tool_name, arguments or {})

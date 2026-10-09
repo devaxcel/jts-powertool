@@ -137,6 +137,39 @@ function describeApproval(a: Approval): Summary {
         ],
       };
     }
+    case "wp_update_content":
+    case "wp_create_content":
+    case "wp_set_status":
+    case "wp_update_elementor_text": {
+      const prev = args.previous || {};
+      const site = args.site_name ? `Site: ${args.site_name}` : "";
+      const label = prev.title || args.title || `#${args.id ?? ""}`;
+      if (a.tool_name === "wp_create_content") {
+        return {
+          icon: Globe,
+          action: `Create a ${args.type === "post" ? "post" : "page"}`,
+          headline: args.title || "(no title)",
+          details: [site, `Status: ${args.status || "draft"}${args.date ? ` (${args.date})` : ""}`, args.status && args.status !== "draft" ? "It will not be a draft." : "It is created as a draft; nothing goes live."].filter(Boolean) as string[],
+        };
+      }
+      if (a.tool_name === "wp_set_status") {
+        const what: Record<string, string> = {
+          publish: "Make it live", future: `Schedule it for ${args.date || ""}`, trash: "Move it to the Trash (it can be restored)",
+          draft: "Take it offline (draft)", private: "Make it private", pending: "Mark it pending review",
+        };
+        return { icon: Globe, action: "Change page status", headline: label, details: [site, `Now: ${prev.status || "?"}`, what[args.status] || `Set to ${args.status}`].filter(Boolean) as string[] };
+      }
+      if (a.tool_name === "wp_update_elementor_text") {
+        const n = (args.changes || []).length;
+        return { icon: Globe, action: "Change text on an Elementor page", headline: label, details: [site, `${n} text${n === 1 ? "" : "s"} changed. Layout and styles are not touched.`].filter(Boolean) as string[] };
+      }
+      return {
+        icon: Globe,
+        action: `Change a ${args.type === "post" ? "post" : "page"}`,
+        headline: label,
+        details: [site, `Now: ${prev.status || "?"} · ${prev.editor === "gutenberg" ? "Gutenberg" : "Classic editor"}`, "WordPress keeps the earlier version under Revisions."].filter(Boolean) as string[],
+      };
+    }
     case "jira_create_issue":
       return {
         icon: CircleDot,
@@ -184,7 +217,7 @@ function describeApproval(a: Approval): Summary {
       return {
         icon: FileCode,
         action: a.tool_name.replace(/_/g, " "),
-        headline: repo || (a.tool_name.startsWith("jira_") ? "Jira" : "GitHub"),
+        headline: repo || (a.tool_name.startsWith("jira_") ? "Jira" : a.tool_name.startsWith("wp_") ? "WordPress" : "GitHub"),
         details: [],
       };
   }
@@ -398,7 +431,7 @@ export default function ApprovalsPage() {
       <PageHeader
         icon={ShieldCheck}
         title="Approvals"
-        description="Before the bot changes anything in GitHub or Jira, an admin must approve it here or in Slack. Requests expire after 24 hours."
+        description="Before the bot changes anything in GitHub, Jira or a website, an admin must approve it here or in Slack. Requests expire after 24 hours."
         badge={
           pendingCount > 0 ? (
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">

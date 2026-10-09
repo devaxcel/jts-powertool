@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Building2, ExternalLink, Loader2, MessagesSquare, ShieldCheck } from "lucide-react";
+import { Building2, Check, Copy, ExternalLink, Loader2, MessagesSquare, Plus, ShieldCheck } from "lucide-react";
 import { SlackWorkspaceLink, fetchWorkspaceClients, setWorkspaceClient } from "@/lib/api";
 import { ChannelFolder } from "@/lib/types";
-import { Alert, Badge, LoadingState, Section, inputClass, tbl } from "@/components/ui";
+import { Alert, Badge, LoadingState, Section, btn, inputClass, tbl } from "@/components/ui";
 
 /** JTS Admin: which client does each connected Slack workspace belong to? */
 export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) {
   const [rows, setRows] = useState<SlackWorkspaceLink[] | null>(null);
   const [deleteLink, setDeleteLink] = useState("");
+  const [installLink, setInstallLink] = useState("");
+  const [copied, setCopied] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -18,6 +20,7 @@ export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) 
       const res = await fetchWorkspaceClients();
       setRows(res.workspaces);
       setDeleteLink(res.deleteLink);
+      setInstallLink(res.installLink);
     } catch (e: any) {
       setFeedback({ type: "error", message: e?.message || "We couldn't load the Slack workspaces." });
       setRows([]);
@@ -47,6 +50,31 @@ export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) 
       icon={MessagesSquare}
       title={`Slack workspaces (${rows?.length ?? 0})`}
       description="If a whole workspace belongs to one client, link it here. Personal chats with the bot, and any channel that isn't in another client's folder, are then billed to and handled as that client. Leave a shared workspace unlinked."
+      actions={
+        installLink ? (
+          <>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(installLink);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                } catch {}
+              }}
+              className={btn.secondary}
+              title="Copy the install link to send to the Slack Owner or Admin of the client's workspace"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? "Copied" : "Copy install link"}
+            </button>
+            <a href={installLink} target="_blank" rel="noopener noreferrer" className={btn.primary} title="Opens Slack: choose the workspace in the top-right and click Allow">
+              <Plus className="h-3.5 w-3.5" />
+              Add Slack workspace
+            </a>
+          </>
+        ) : undefined
+      }
       bodyClassName="p-5 space-y-4"
     >
       {feedback && (
@@ -127,6 +155,10 @@ export function WorkspaceClientsCard({ folders }: { folders: ChannelFolder[] }) 
           </table>
         </div>
       )}
+      <p className="text-[11px] text-gray-500">
+        To connect a new workspace, a Slack <strong>Owner or Admin</strong> of that workspace signs in to it in the browser and opens the install link
+        (<strong>Add Slack workspace</strong>, or send them <strong>Copy install link</strong>), picks the workspace in the top-right of the Slack page and clicks <strong>Allow</strong>. Then invite the bot to a channel with <span className="font-mono">/invite @jpt</span>.
+      </p>
       <p className="text-[11px] text-gray-500">
         &ldquo;Turn on&rdquo; must be opened by an Owner or Admin of that Slack workspace, signed in to it. It lets the bot delete a message that contains a key.
       </p>
